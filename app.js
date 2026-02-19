@@ -10,6 +10,39 @@ const app = express();
 /* ================= TRUST PROXY (RENDER) ================= */
 app.set("trust proxy", 1);
 
+/* ================= DIAGNOSTIC ENDPOINT - AT THE VERY TOP ================= */
+app.get('/api/diagnose', async (req, res) => {
+  console.log("🔧 Diagnostic endpoint hit!"); // Add this log
+  
+  const results = {
+    timestamp: new Date().toISOString(),
+    message: "Diagnostic endpoint is working",
+    environment: {
+      node_env: process.env.NODE_ENV,
+      render_url: process.env.RENDER_EXTERNAL_URL || 'Not set',
+      all_env_keys: Object.keys(process.env).filter(key => !key.includes('PASSWORD') && !key.includes('SECRET'))
+    },
+    mysql: {
+      host: process.env.MYSQLHOST || 'Not set',
+      port: process.env.MYSQLPORT || 'Not set',
+      user: process.env.MYSQLUSER || 'Not set',
+      database: process.env.MYSQLDATABASE || 'Not set',
+      passwordSet: !!process.env.MYSQLPASSWORD
+    }
+  };
+
+  // Test DNS resolution
+  try {
+    const dns = require('dns').promises;
+    const dnsResult = await dns.lookup(results.mysql.host);
+    results.dns = { success: true, address: dnsResult.address };
+  } catch (err) {
+    results.dns = { success: false, error: err.message };
+  }
+
+  res.json(results);
+});
+
 /* ================= ROUTES ================= */
 const authRoutes = require("./routes/authRoutes");
 const agreementRoutes = require("./routes/agreementRoutes");
@@ -55,12 +88,10 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // Postman / mobile apps
-
+      if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-
       return callback(new Error("CORS not allowed"), false);
     },
     credentials: true,
@@ -85,137 +116,6 @@ app.get("/api/health", (req, res) => {
     time: new Date().toISOString(),
     env: process.env.NODE_ENV || "development",
   });
-});
-
-/* ================= DIAGNOSTIC ENDPOINT ================= */
-app.get('/api/diagnose', async (req, res) => {
-  const results = {
-    timestamp: new Date().toISOString(),
-    environment: {
-      node_env: process.env.NODE_ENV,
-      render_url: process.env.RENDER_EXTERNAL_URL || 'Not set'
-    },
-    mysql: {
-      host: process.env.MYSQLHOST || 'Not set',
-      port: process.env.MYSQLPORT || 'Not set',
-      user: process.env.MYSQLUSER || 'Not set',
-      database: process.env.MYSQLDATABASE || 'Not set',
-      passwordSet: !!process.env.MYSQLPASSWORD
-    },
-    diagnostics: {
-      dns: null,
-      network: null,
-      connection: null
-    }
-  };
-
-  const net = require('net');
-  const dns = require('dns').promises;
-  const mysql = require('mysql2/promise');
-
-  // Test DNS resolution
-  try {
-    const dnsResult = await dns.lookup(results.mysql.host);
-    results.diagnostics.dns = { 
-      success: true, 
-      address: dnsResult.address,
-      family: dnsResult.family 
-    };
-  } catch (err) {
-    results.diagnostics.dns = { 
-      success: false, 
-      error: err.message 
-    };
-  }
-
-  // Test TCP connection if DNS succeeded
-  if (results.diagnostics.dns?.success) {
-    try {
-      const socket = new net.Socket();
-      const tcpResult = await new Promise((resolve) => {
-        socket.setTimeout(5000);
-        socket.on('connect', () => {
-          socket.destroy();
-          resolve({ success: true, message: '✅ TCP connection successful' });
-        });
-        socket.on('timeout', () => {
-          socket.destroy();
-          resolve({ success: false, message: '❌ TCP connection timeout' });
-        });
-        socket.on('error', (error) => {
-          resolve({ success: false, message: `❌ TCP error: ${error.message}` });
-        });
-        socket.connect(Number(results.mysql.port), results.mysql.host);
-      });
-      results.diagnostics.network = tcpResult;
-    } catch (err) {
-      results.diagnostics.network = { 
-        success: false, 
-        error: err.message 
-      };
-    }
-  }
-
-  // Test MySQL connection if TCP succeeded
-  if (results.diagnostics.network?.success) {
-    try {
-      const connection = await mysql.createConnection({
-        host: results.mysql.host,
-        port: Number(results.mysql.port),
-        user: results.mysql.user,
-        password: process.env.MYSQLPASSWORD,
-        database: results.mysql.database,
-        ssl: { rejectUnauthorized: false },
-        connectTimeout: 5000
-      });
-      
-      const [rows] = await connection.query('SELECT 1 + 1 as solution, VERSION() as version, DATABASE() as db, USER() as user');
-      await connection.end();
-      
-      results.diagnostics.connection = { 
-        success: true, 
-        message: '✅ MySQL connection successful',
-        details: {
-          solution: rows[0].solution,
-          version: rows[0].version,
-          database: rows[0].db,
-          user: rows[0].user
-        }
-      };
-    } catch (err) {
-      results.diagnostics.connection = { 
-        success: false, 
-        error: err.code,
-        message: err.message,
-        sqlState: err.sqlState,
-        errno: err.errno
-      };
-    }
-  }
-
-  // Add helpful troubleshooting tips
-  results.troubleshooting = [];
-  
-  if (!results.diagnostics.dns?.success) {
-    results.troubleshooting.push('🔧 DNS lookup failed - Check if MYSQLHOST is correct');
-  }
-  
-  if (!results.diagnostics.network?.success && results.diagnostics.dns?.success) {
-    results.troubleshooting.push('🔧 TCP connection failed - Check if:');
-    results.troubleshooting.push('   - Port is correct (should be 24425)');
-    results.troubleshooting.push('   - Aiven service is running');
-    results.troubleshooting.push('   - No firewall blocking Render IPs');
-  }
-  
-  if (!results.diagnostics.connection?.success && results.diagnostics.network?.success) {
-    results.troubleshooting.push('🔧 MySQL authentication failed - Check if:');
-    results.troubleshooting.push('   - Username is correct (avnadmin)');
-    results.troubleshooting.push('   - Password is correct');
-    results.troubleshooting.push('   - Database name is correct (defaultdb)');
-    results.troubleshooting.push('   - SSL configuration is correct');
-  }
-
-  res.json(results);
 });
 
 /* ================= API ROUTES ================= */
@@ -266,7 +166,6 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
-
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
