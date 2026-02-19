@@ -2,32 +2,38 @@ const mysql = require("mysql2/promise");
 
 console.log("🔧 Initializing database connection...");
 
-// Use environment variables with fallbacks for local development
+// Use the exact same configuration that worked in diagnostic
 const dbConfig = {
-  host: process.env.MYSQLHOST || "localhost",
-  user: process.env.MYSQLUSER || "root",
-  password: process.env.MYSQLPASSWORD || "Huli@123",
-  database: process.env.MYSQLDATABASE || "rent_system",
+  host: process.env.MYSQLHOST,
+  port: Number(process.env.MYSQLPORT),
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  connectTimeout: 10000, // Add timeout
+  ssl: {
+    rejectUnauthorized: false // Critical for Aiven
+  }
 };
 
-// Only log in development mode
-if (process.env.NODE_ENV !== 'production') {
-  console.log("📊 DB Config:", {
-    host: dbConfig.host,
-    user: dbConfig.user,
-    database: dbConfig.database,
-    password: dbConfig.password ? "****" : "not set"
-  });
-}
+// Log config (without password)
+console.log("📊 DB Config:", {
+  host: dbConfig.host,
+  port: dbConfig.port,
+  user: dbConfig.user,
+  database: dbConfig.database,
+  ssl: !!dbConfig.ssl,
+  passwordSet: !!dbConfig.password
+});
 
-const db = mysql.createPool(dbConfig);
+const pool = mysql.createPool(dbConfig);
 
+// Test connection immediately
 (async () => {
   try {
-    const conn = await db.getConnection();
+    const conn = await pool.getConnection();
     console.log("✅ MySQL Pool Connected Successfully");
     
     // Test query
@@ -39,11 +45,15 @@ const db = mysql.createPool(dbConfig);
     console.error("❌ MySQL connection failed:");
     console.error("Error Code:", err.code);
     console.error("Error Message:", err.message);
+    console.error("Error Errno:", err.errno);
     
-    if (err.code === 'ECONNREFUSED') {
-      console.error("🔧 Make sure MySQL server is running locally");
+    if (err.code === 'ETIMEDOUT') {
+      console.error("🔧 TIMEOUT ISSUE - Check:");
+      console.error("   1. SSL configuration (must be { rejectUnauthorized: false })");
+      console.error("   2. Connect timeout setting");
+      console.error("   3. Network latency");
     }
   }
 })();
 
-module.exports = db;
+module.exports = pool;
