@@ -7,6 +7,9 @@ const fs = require("fs");
 
 const app = express();
 
+/* ================= TRUST PROXY (RENDER) ================= */
+app.set("trust proxy", 1);
+
 /* ================= ROUTES ================= */
 const authRoutes = require("./routes/authRoutes");
 const agreementRoutes = require("./routes/agreementRoutes");
@@ -26,8 +29,6 @@ const adminOwnerVerificationRoutes = require("./routes/adminOwnerVerificationRou
 const privateChatRoutes = require("./routes/privateChatRoutes");
 const announcementRoutes = require("./routes/announcementRoutes");
 const pgChatRoutes = require("./routes/pgChatRoutes");
-
-/* 🆕 KYC ROUTE */
 const aadhaarKycRoutes = require("./routes/adhar_routes");
 
 /* ================= CREATE UPLOAD DIRS ================= */
@@ -38,20 +39,35 @@ const aadhaarKycRoutes = require("./routes/adhar_routes");
   "uploads/verification",
   "uploads/agreements",
   "uploads/agreement-signatures",
-  "uploads/hotel-photos"
+  "uploads/hotel-photos",
 ].forEach((dir) => {
   const fullPath = path.join(__dirname, dir);
   if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true });
 });
 
-/* ================= MIDDLEWARE ================= */
+/* ================= CORS ================= */
+
+const allowedOrigins = [
+  "http://localhost:3000",
+  process.env.CLIENT_URL,
+];
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // Postman / mobile apps
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS not allowed"), false);
+    },
     credentials: true,
   })
 );
+
+/* ================= BODY PARSER ================= */
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -103,10 +119,11 @@ app.use("/api/admin", adminOwnerVerificationRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/notifications", notificationRoutes);
 
-/* 🆕 🔐 AADHAAR KYC */
+// 🆕 🔐 AADHAAR KYC
 app.use("/api/kyc/aadhaar", aadhaarKycRoutes);
 
 /* ================= 404 ================= */
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -115,6 +132,7 @@ app.use((req, res) => {
 });
 
 /* ================= GLOBAL ERROR ================= */
+
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
 

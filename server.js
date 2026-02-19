@@ -4,12 +4,27 @@ const { initSocket } = require("./socket");
 
 const PORT = process.env.PORT || 5000;
 
+/* 🌍 CREATE HTTP SERVER */
 const server = http.createServer(app);
 
-/* 🔥 INIT SOCKET */
+/* 🔥 INIT SOCKET.IO */
 initSocket(server);
 
+/* 🚀 START SERVER */
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Health: http://localhost:${PORT}/api/health`);
+  console.log("=================================");
+  console.log(`🚀 Server running in ${process.env.NODE_ENV || "development"} mode`);
+  console.log(`📡 Port: ${PORT}`);
+
+  /* 🌍 SHOW LIVE URL IF ON RENDER */
+  if (process.env.RENDER_EXTERNAL_URL) {
+    console.log(`🌍 Live URL: ${process.env.RENDER_EXTERNAL_URL}`);
+    console.log(`❤️ Health Check: ${process.env.RENDER_EXTERNAL_URL}/api/health`);
+  } else {
+    /* 💻 LOCAL URL */
+    console.log(`🌐 Local: http://localhost:${PORT}`);
+    console.log(`❤️ Health Check: http://localhost:${PORT}/api/health`);
+  }
+
+  console.log("=================================");
 });
