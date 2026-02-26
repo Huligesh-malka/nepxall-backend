@@ -1,119 +1,150 @@
-// controllers/ownerVerificationController.js
 const db = require("../db");
+const axios = require("axios");
+const { getAccessToken } = require("../services/sandboxAuth");
 
-exports.uploadOwnerDocs = async (req, res) => {
+/**
+ * Helper to format headers. 
+ * Ensure SANDBOX_API_VERSION is "1.0.0" for O-KYC unless your dashboard says otherwise.
+ */
+const getHeaders = (token) => ({
+  "Authorization": `Bearer ${token}`,
+  "x-api-key": process.env.SANDBOX_API_KEY,
+  "x-api-version": process.env.SANDBOX_API_VERSION || "1.0.0",
+  "Content-Type": "application/json",
+});
+
+//////////////////////////////////////////////////
+// SEND OTP
+//////////////////////////////////////////////////
+exports.sendAadhaarOtp = async (req, res) => {
   try {
-    const ownerFirebaseUid = req.user.uid;
+    const userId = req.user.mysqlId;
+    const { aadhaar_number } = req.body;
 
-    const [[user]] = await db.query(
-      "SELECT id, owner_verification_status FROM users WHERE firebase_uid = ?",
-      [ownerFirebaseUid]
+    // Validation
+    if (!/^\d{12}$/.test(aadhaar_number)) {
+      return res.status(400).json({ message: "Enter a valid 12-digit Aadhaar number" });
+    }
+
+    const token = await getAccessToken();
+
+    const response = await axios.post(
+      `${process.env.SANDBOX_BASE_URL}/kyc/aadhaar/okyc/otp`,
+      {
+        "@entity": "in.co.sandbox.kyc.aadhaar.okyc.otp.request",
+        aadhaar_number,
+        consent: "Y",
+        reason: "Owner KYC Verification",
+      },
+      { headers: getHeaders(token) }
     );
 
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    if (user.owner_verification_status === "approved") {
-      return res.status(400).json({
-        success: false,
-        message: "Documents already verified"
-      });
-    }
-
-    const {
-      id_proof_type
-    } = req.body;
-
-    const idProof = req.files.id_proof?.[0];
-    const propertyProof = req.files.property_proof?.[0];
-    const signature = req.files.digital_signature?.[0];
-
-    if (!idProof || !propertyProof || !signature) {
-      return res.status(400).json({
-        success: false,
-        message: "All documents required"
-      });
-    }
+    const refId = response.data?.data?.reference_id;
+    if (!refId) throw new Error("Reference ID not received from Sandbox");
 
     await db.query(
-      `INSERT INTO owner_verifications 
-       (owner_id, id_proof_type, id_proof_file, property_proof_file, digital_signature_file)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         id_proof_type = VALUES(id_proof_type),
-         id_proof_file = VALUES(id_proof_file),
-         property_proof_file = VALUES(property_proof_file),
-         digital_signature_file = VALUES(digital_signature_file),
-         status = 'pending',
-         rejection_reason = NULL`,
-      [
-        user.id,
-        id_proof_type,
-        `/uploads/owner-docs/${idProof.filename}`,
-        `/uploads/owner-docs/${propertyProof.filename}`,
-        `/uploads/owner-docs/${signature.filename}`
-      ]
+      "UPDATE users SET aadhaar_ref_id=? WHERE id=?",
+      [refId, userId]
     );
 
-    await db.query(
-      "UPDATE users SET owner_verification_status = 'pending' WHERE id = ?",
-      [user.id]
-    );
-
-    res.json({ success: true, message: "Documents uploaded for verification" });
+    return res.json({ success: true, message: "OTP sent successfully" });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    // Specific debugging for the 403 Insufficient Privilege error
+    if (err.response?.status === 403) {
+      console.error("CRITICAL: Sandbox Account lacks permissions for Aadhaar O-KYC.");
+      return res.status(403).json({ 
+        message: "Service access denied. Please check Sandbox API permissions." 
+      });
+    }
+
+    console.error("SEND OTP ERROR:", err.response?.data || err.message);
+    return res.status(err.response?.status || 500).json({ 
+      message: err.response?.data?.message || "Failed to initiate Aadhaar verification" 
+    });
   }
 };
 
-
-// GET /api/owner/verification/status
-exports.getOwnerVerificationStatus = async (req, res) => {
-  const firebaseUid = req.user.uid;
-
-  const [[user]] = await db.query(
-    "SELECT owner_verification_status FROM users WHERE firebase_uid = ?",
-    [firebaseUid]
-  );
-
-  res.json({ status: user.owner_verification_status });
-};
-
-
-
-// GET verification status for owner
-exports.getVerificationStatus = async (req, res) => {
+//////////////////////////////////////////////////
+// VERIFY OTP
+//////////////////////////////////////////////////
+exports.verifyAadhaarOtp = async (req, res) => {
   try {
-    const firebaseUid = req.user.uid;
+    const userId = req.user.mysqlId;
+    const { otp } = req.body;
 
-    const [[user]] = await db.query(
-      "SELECT id, owner_verification_status FROM users WHERE firebase_uid = ?",
-      [firebaseUid]
+    if (!otp) return res.status(400).json({ message: "OTP is required" });
+
+    // Fetch reference ID
+    const [rows] = await db.query(
+      "SELECT aadhaar_ref_id FROM users WHERE id=?",
+      [userId]
+    );
+    const ref = rows[0];
+
+    if (!ref?.aadhaar_ref_id) {
+      return res.status(400).json({ message: "Session expired. Please request a new OTP." });
+    }
+
+    const token = await getAccessToken();
+
+    const response = await axios.post(
+      `${process.env.SANDBOX_BASE_URL}/kyc/aadhaar/okyc/verify`,
+      {
+        "@entity": "in.co.sandbox.kyc.aadhaar.okyc.verify.request",
+        reference_id: ref.aadhaar_ref_id,
+        otp,
+      },
+      { headers: getHeaders(token) }
     );
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    // Extracting user name from verified Aadhaar data
+    const nameFromAadhaar = response.data?.data?.name;
 
-    let rejection_reason = null;
+    await db.query(
+      `UPDATE users 
+       SET aadhaar_verified=1, 
+           name=?, 
+           owner_verification_status='verified' 
+       WHERE id=?`,
+      [nameFromAadhaar, userId]
+    );
 
-    if (user.owner_verification_status === "rejected") {
-      const [[row]] = await db.query(
-        "SELECT rejection_reason FROM owner_verifications WHERE owner_id = ?",
-        [user.id]
-      );
-      rejection_reason = row?.rejection_reason || null;
-    }
-
-    res.json({
-      status: user.owner_verification_status, // pending | verified | rejected
-      rejection_reason
+    return res.json({ 
+      success: true, 
+      message: "Aadhaar verified successfully", 
+      name: nameFromAadhaar 
     });
 
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("VERIFY OTP ERROR:", err.response?.data || err.message);
+    
+    // Handle specific Sandbox errors (e.g., Wrong OTP)
+    const errorMsg = err.response?.data?.message || "OTP verification failed";
+    return res.status(err.response?.status || 500).json({ message: errorMsg });
   }
 };
+
+//////////////////////////////////////////////////
+// STATUS
+//////////////////////////////////////////////////
+exports.getVerificationStatus = async (req, res) => {
+  try {
+    const userId = req.user.mysqlId;
+    const [rows] = await db.query(
+      "SELECT aadhaar_verified, owner_verification_status FROM users WHERE id=?",
+      [userId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ message: "User not found" });
+
+    return res.json({
+      success: true,
+      status: rows[0].owner_verification_status,
+      aadhaar_verified: rows[0].aadhaar_verified === 1,
+    });
+  } catch (err) {
+    console.error("STATUS ERROR:", err.message);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};  

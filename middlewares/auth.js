@@ -1,11 +1,10 @@
 const admin = require("firebase-admin");
+const jwt = require("jsonwebtoken");
 const db = require("../db");
 
 module.exports = async (req, res, next) => {
   try {
-    /* ===============================
-       ✅ CHECK TOKEN
-    =============================== */
+    /* ================= TOKEN CHECK ================= */
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -14,42 +13,71 @@ module.exports = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    /* ===============================
-       ✅ VERIFY FIREBASE TOKEN
-    =============================== */
-    const decoded = await admin.auth().verifyIdToken(token);
+    let firebaseUid = null;
+    let decoded = null;
 
-    const firebaseUid = decoded.uid;
-    const email = decoded.email || null;
-    const name =
-      decoded.name ||
-      decoded.email ||
-      decoded.phone_number ||
+    /* =====================================================
+       1️⃣ TRY FIREBASE TOKEN
+    ===================================================== */
+    try {
+      decoded = await admin.auth().verifyIdToken(token);
+
+      firebaseUid = decoded.uid;
+
+      console.log("🔥 FIREBASE UID:", firebaseUid);
+
+    } catch (fbError) {
+      console.log("⚠️ Not Firebase token → trying JWT");
+    }
+
+    /* =====================================================
+       2️⃣ TRY CUSTOM JWT
+    ===================================================== */
+    if (!firebaseUid) {
+      try {
+        const jwtDecoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        firebaseUid = jwtDecoded.firebase_uid;
+
+        console.log("🔑 JWT USER:", jwtDecoded.id);
+
+      } catch (jwtError) {
+        console.error("❌ AUTH ERROR:", jwtError.message);
+        return res.status(401).json({ message: "Invalid token" });
+      }
+    }
+
+    /* =====================================================
+       3️⃣ GET FIREBASE USER DATA (IF AVAILABLE)
+    ===================================================== */
+    let email = decoded?.email || null;
+    let phone = decoded?.phone_number || null;
+    let name =
+      decoded?.name ||
+      decoded?.email ||
+      decoded?.phone_number ||
       "User";
 
-    const phone = decoded.phone_number || null;
-
-    console.log("🔥 TOKEN UID:", firebaseUid);
-
-    /* ===============================
-       ✅ GET USER FROM MYSQL
-    =============================== */
+    /* =====================================================
+       4️⃣ FIND USER IN DB
+    ===================================================== */
     const [rows] = await db.query(
-      "SELECT * FROM users WHERE firebase_uid = ? LIMIT 1",
+      `SELECT * FROM users WHERE firebase_uid = ? LIMIT 1`,
       [firebaseUid]
     );
 
     let user;
 
-    /* ===============================
-       🆕 CREATE USER (FIRST LOGIN)
-    =============================== */
+    /* ================= FIRST LOGIN ================= */
     if (rows.length === 0) {
+
+      const requestedRole = req.body?.role || "tenant";
+
       const [result] = await db.query(
-        `INSERT INTO users 
+        `INSERT INTO users
         (firebase_uid, name, email, phone, role, created_at)
-        VALUES (?, ?, ?, ?, 'tenant', NOW())`,
-        [firebaseUid, name, email, phone]
+        VALUES (?, ?, ?, ?, ?, NOW())`,
+        [firebaseUid, name, email, phone, requestedRole]
       );
 
       user = {
@@ -58,55 +86,66 @@ module.exports = async (req, res, next) => {
         name,
         email,
         phone,
-        role: "tenant"
+        role: requestedRole
       };
 
       console.log("🆕 NEW USER CREATED:", user);
+
     } else {
       user = rows[0];
-      console.log("✅ EXISTING USER:", user);
+
+      /* 🔄 UPDATE EMAIL / PHONE IF EMPTY */
+      if (!user.phone && phone) {
+        await db.query(`UPDATE users SET phone=? WHERE id=?`, [phone, user.id]);
+        user.phone = phone;
+      }
+
+      if (!user.email && email) {
+        await db.query(`UPDATE users SET email=? WHERE id=?`, [email, user.id]);
+        user.email = email;
+      }
+
+      console.log("✅ EXISTING USER:", user.id);
     }
 
-    /* ===============================
-       🔥 AUTO OWNER UPGRADE LOGIC
-       if user has at least 1 PG → owner
-    =============================== */
-    const [pgRows] = await db.query(
-      "SELECT id FROM pgs WHERE owner_id = ? LIMIT 1",
-      [user.id]
-    );
+    /* =====================================================
+       👑 AUTO OWNER UPGRADE
+    ===================================================== */
+    if (user.role !== "owner" && user.role !== "admin") {
 
-    if (pgRows.length && user.role !== "owner") {
-      await db.query(
-        "UPDATE users SET role = 'owner' WHERE id = ?",
+      const [pgRows] = await db.query(
+        `SELECT id FROM pgs WHERE owner_id=? LIMIT 1`,
         [user.id]
       );
 
-      user.role = "owner";
+      if (pgRows.length > 0) {
+        await db.query(
+          `UPDATE users SET role='owner' WHERE id=?`,
+          [user.id]
+        );
 
-      console.log("🎉 AUTO UPGRADED TO OWNER");
+        user.role = "owner";
+
+        console.log("🎉 AUTO UPGRADED TO OWNER");
+      }
     }
 
-    /* ===============================
+    /* =====================================================
        ✅ ATTACH USER TO REQUEST
-    =============================== */
+    ===================================================== */
     req.user = {
-      uid: firebaseUid,
+      firebaseUid,
       mysqlId: user.id,
       role: user.role,
       email: user.email,
-      name: user.name,
-      phone: user.phone
+      phone: user.phone,
+      name: user.name
     };
-
-    console.log("🎯 REQ.USER:", req.user);
 
     next();
 
   } catch (err) {
-    console.error("❌ AUTH ERROR:", err);
-    return res.status(401).json({
-      message: "Invalid or expired token"
-    });
+    console.error("❌ AUTH ERROR:", err.message);
+    res.status(401).json({ message: "Invalid or expired token" });
   }
 };

@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 
 exports.generateAgreementPDF = async ({
@@ -8,66 +7,103 @@ exports.generateAgreementPDF = async ({
   owner,
   user,
   pg,
-  ownerSignaturePath
+  ownerSignaturePath = null,
 }) => {
-  const dir = path.join(__dirname, "..", "uploads", "agreements");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    //////////////////////////////////////////////////////
+    // 📁 ENSURE AGREEMENT FOLDER EXISTS
+    //////////////////////////////////////////////////////
+    const uploadDir = path.join(__dirname, "..", "uploads", "agreements");
 
-  const fileName = `agreement-booking-${booking.id}.pdf`;
-  const filePath = path.join(dir, fileName);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
 
-  const doc = new PDFDocument({ size: "A4", margin: 50 });
-  doc.pipe(fs.createWriteStream(filePath));
+    //////////////////////////////////////////////////////
+    // 📄 FILE NAME
+    //////////////////////////////////////////////////////
+    const fileName = `agreement_${booking.id}.pdf`;
+    const filePath = path.join(uploadDir, fileName);
 
-  doc.fontSize(18).text("RENT AGREEMENT", { align: "center" });
-  doc.moveDown(2);
+    //////////////////////////////////////////////////////
+    // 🛡 SAFE OWNER SIGNATURE PATH
+    //////////////////////////////////////////////////////
+    let signatureFullPath = null;
+    let signatureForDB = null;
 
-  doc.fontSize(12).text(`Agreement ID: AG-${booking.id}`);
-  doc.text(`Date: ${new Date().toDateString()}`);
-  doc.moveDown();
+    if (ownerSignaturePath && typeof ownerSignaturePath === "string") {
+      const tempPath = path.join(
+        __dirname,
+        "..",
+        "uploads",
+        ownerSignaturePath
+      );
 
-  doc.text(`OWNER DETAILS`);
-  doc.text(`Name: ${owner.name}`);
-  doc.text(`Phone: ${owner.phone}`);
-  doc.moveDown();
+      if (fs.existsSync(tempPath)) {
+        signatureFullPath = tempPath;
+        signatureForDB = ownerSignaturePath;
+      }
+    }
 
-  doc.text(`TENANT DETAILS`);
-  doc.text(`Name: ${user.name}`);
-  doc.text(`Phone: ${user.phone}`);
-  doc.moveDown();
+    //////////////////////////////////////////////////////
+    // 🧠 PROPERTY TYPE BASED TEXT (PG / CO-LIVING / TO-LET)
+    //////////////////////////////////////////////////////
+    let propertyLabel = "PG Stay";
 
-  doc.text(`PROPERTY DETAILS`);
-  doc.text(`PG Name: ${pg.pg_name}`);
-  doc.text(`Address: ${pg.address}`);
-  doc.moveDown();
+    if (pg.property_type === "coliving") propertyLabel = "Co-Living Stay";
+    if (pg.property_type === "tolet") propertyLabel = "Rental House";
 
-  doc.text(`RENT DETAILS`);
-  doc.text(`Monthly Rent: ₹${booking.rent_amount}`);
-  doc.text(`Security Deposit: ₹${booking.deposit_amount}`);
-  doc.moveDown(2);
+    //////////////////////////////////////////////////////
+    // 📄 AGREEMENT CONTENT (DEMO TEXT → replace with real PDF later)
+    //////////////////////////////////////////////////////
+    const content = `
+==============================
+        RENT AGREEMENT
+==============================
 
-  doc.text(
-    "This agreement is digitally generated and legally binding. The owner has provided consent and digital signature during verification.",
-    { align: "justify" }
-  );
+Property Type : ${propertyLabel}
 
-  doc.moveDown(3);
-  doc.text("Owner Signature:");
+Tenant Name   : ${user?.name || "N/A"}
+Tenant Phone  : ${user?.phone || "N/A"}
 
-  doc.image(
-    path.join(__dirname, "..", ownerSignaturePath),
-    { width: 120 }
-  );
+Property Name : ${pg?.pg_name || "N/A"}
+Address       : ${pg?.address || "N/A"}
 
-  doc.end();
+Owner Name    : ${owner?.name || "N/A"}
 
-  const hash = crypto
-    .createHash("sha256")
-    .update(fs.readFileSync(filePath))
-    .digest("hex");
+Check-in Date : ${booking?.check_in_date || "N/A"}
+Room Type     : ${booking?.room_type || "N/A"}
 
-  return {
-    agreement_file: `/uploads/agreements/${fileName}`,
-    agreement_hash: hash
-  };
+Agreement ID  : ${booking?.id}
+
+==============================
+NepXall – Smart Living
+==============================
+`;
+
+    //////////////////////////////////////////////////////
+    // 💾 WRITE FILE
+    //////////////////////////////////////////////////////
+    fs.writeFileSync(filePath, content);
+
+    //////////////////////////////////////////////////////
+    // 🔐 GENERATE HASH
+    //////////////////////////////////////////////////////
+    const hash = crypto
+      .createHash("sha256")
+      .update(content)
+      .digest("hex");
+
+    //////////////////////////////////////////////////////
+    // ✅ RETURN FOR DB SAVE
+    //////////////////////////////////////////////////////
+    return {
+      agreement_file: `/uploads/agreements/${fileName}`,
+      agreement_hash: hash,
+      owner_signature_file: signatureForDB, // only relative path
+    };
+  } catch (err) {
+    console.error("❌ AGREEMENT GENERATION ERROR:", err);
+    throw err;
+  }
 };

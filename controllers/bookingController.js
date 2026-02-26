@@ -1,285 +1,252 @@
 const db = require("../db");
 
-/* ======================================================
-   🔧 GET OR CREATE MYSQL USER
-====================================================== */
-async function getOrCreateUser(firebaseUser) {
-  const { uid, name, email, phone_number } = firebaseUser;
-
-  const [rows] = await db.query(
-    "SELECT id, name FROM users WHERE firebase_uid=?",
-    [uid]
-  );
-
-  if (rows.length) return rows[0];
-
-  const [result] = await db.query(
-    `INSERT INTO users (firebase_uid, name, email, phone, role)
-     VALUES (?, ?, ?, ?, 'tenant')`,
-    [uid, name || "User", email || null, phone_number || null]
-  );
-
-  return { id: result.insertId, name: name || "User" };
-}
-
-/* ======================================================
-   👑 CHECK OWNER
-====================================================== */
-async function isOwner(userId) {
-  const [rows] = await db.query(
-    "SELECT id FROM pgs WHERE owner_id=? LIMIT 1",
-    [userId]
-  );
-  return rows.length > 0;
-}
-
-/* ======================================================
-   USER → CREATE BOOKING
-====================================================== */
+//////////////////////////////////////////////////////
+// 🧑 CREATE BOOKING → pending
+//////////////////////////////////////////////////////
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const { name, phone, check_in_date, room_type } = req.body;
+    const { check_in_date, room_type, phone } = req.body;
+    const userId = req.user.mysqlId;
 
-    if (!pgId || !name || !phone || !check_in_date || !room_type) {
-      return res.status(400).json({ message: "Missing fields" });
-    }
-
-    const user = await getOrCreateUser(req.user);
-
-    await db.query("UPDATE users SET name=? WHERE id=?", [
-      name.trim(),
-      user.id,
-    ]);
+    const [[user]] = await db.query(
+      "SELECT name, email, phone FROM users WHERE id=?",
+      [userId]
+    );
 
     const [[pg]] = await db.query(
-      "SELECT owner_id FROM pgs WHERE id=? AND is_deleted=0",
+      "SELECT * FROM pgs WHERE id=?",
       [pgId]
     );
 
     if (!pg) return res.status(404).json({ message: "PG not found" });
 
-    const [result] = await db.query(
+    let rent = 0;
+
+    // 🏠 RENT
+    if (pg.pg_category === "pg") {
+      if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
+      if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
+      if (room_type === "Triple Sharing") rent = pg.triple_sharing || 0;
+      if (room_type === "Four Sharing") rent = pg.four_sharing || 0;
+      if (room_type === "Single Room") rent = pg.single_room || 0;
+      if (room_type === "Double Room") rent = pg.double_room || 0;
+    }
+
+    if (pg.pg_category === "coliving") {
+      if (room_type === "Single Room")
+        rent = pg.co_living_single_room || 0;
+
+      if (
+        room_type === "Double Room" ||
+        room_type === "Co-Living Double Room"
+      )
+        rent = pg.co_living_double_room || 0;
+    }
+
+    if (pg.pg_category === "to_let") {
+      if (room_type === "1BHK") rent = pg.price_1bhk || 0;
+      if (room_type === "2BHK") rent = pg.price_2bhk || 0;
+      if (room_type === "3BHK") rent = pg.price_3bhk || 0;
+      if (room_type === "4BHK") rent = pg.price_4bhk || 0;
+    }
+
+    // 💰 EXTRA
+    const deposit = pg.deposit_amount || pg.security_deposit || 0;
+    const maintenance = pg.maintenance_amount || 0;
+
+    await db.query(
       `INSERT INTO bookings
-       (pg_id, user_id, owner_id, name, phone, check_in_date, room_type, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      [pgId, user.id, pg.owner_id, name, phone, check_in_date, room_type]
+      (pg_id,user_id,owner_id,name,email,phone,
+       check_in_date,room_type,
+       rent_amount,security_deposit,maintenance_amount,status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`,
+      [
+        pgId,
+        userId,
+        pg.owner_id,
+        user.name,
+        user.email,
+        phone || user.phone,
+        check_in_date,
+        room_type,
+        rent,
+        deposit,
+        maintenance,
+      ]
     );
 
-    res.status(201).json({ success: true, bookingId: result.insertId });
+    res.json({ success: true });
 
   } catch (err) {
-    console.error("❌ createBooking:", err);
-    res.status(500).json({ message: "Server error" });
+    console.log(err);
+    res.status(500).json({ message: err.message });
   }
 };
 
-/* ======================================================
-   USER → BOOKING HISTORY
-====================================================== */
+//////////////////////////////////////////////////////
+// 📜 USER BOOKING HISTORY (FULL DATA)
+//////////////////////////////////////////////////////
 exports.getUserBookings = async (req, res) => {
   try {
-    const user = await getOrCreateUser(req.user);
-
     const [rows] = await db.query(
-      `
-      SELECT b.*, p.pg_name
+      `SELECT 
+        b.id,
+        b.pg_id,
+        b.room_id,
+        b.room_type,
+        b.check_in_date,
+        b.status,
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+
+        b.kyc_verified,
+        b.agreement_signed,
+        b.move_in_completed,
+
+        b.created_at,
+
+        p.pg_name,
+        p.city,
+        p.area,
+        p.contact_phone AS owner_phone,
+
+        pr.room_no
+
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
+      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+
       WHERE b.user_id=?
-      ORDER BY b.created_at DESC
-      `,
-      [user.id]
+      ORDER BY b.created_at DESC`,
+      [req.user.mysqlId]
     );
 
     res.json(rows);
 
   } catch (err) {
-    console.error("❌ getUserBookings:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: err.message });
   }
 };
 
-/* ======================================================
-   OWNER → GET BOOKINGS
-====================================================== */
+//////////////////////////////////////////////////////
+// 👑 OWNER BOOKINGS
+//////////////////////////////////////////////////////
 exports.getOwnerBookings = async (req, res) => {
   try {
-    const owner = await getOrCreateUser(req.user);
-
-    if (!(await isOwner(owner.id))) return res.json([]);
-
     const [rows] = await db.query(
-      `
-      SELECT
-        b.id,
+      `SELECT 
+        b.*,
         p.pg_name,
         u.name AS tenant_name,
-        b.phone,
-        b.check_in_date,
-        b.room_type,
-        b.status,
-        b.created_at
+        u.phone AS tenant_phone
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       JOIN users u ON u.id = b.user_id
       WHERE b.owner_id=?
-      ORDER BY b.created_at DESC
-      `,
-      [owner.id]
+      ORDER BY b.created_at DESC`,
+      [req.user.mysqlId]
     );
 
     res.json(rows);
 
   } catch (err) {
-    console.error("❌ getOwnerBookings:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: err.message });
   }
 };
 
-/* ======================================================
-   OWNER → UPDATE BOOKING STATUS
-====================================================== */
+//////////////////////////////////////////////////////
+// 👑 OWNER APPROVE / REJECT
+//////////////////////////////////////////////////////
 exports.updateBookingStatus = async (req, res) => {
-  const connection = await db.getConnection();
-
   try {
-    await connection.beginTransaction();
-
     const { bookingId } = req.params;
-    const { status, reject_reason, room_no, exit_date } = req.body;
+    const { status } = req.body;
 
-    const owner = await getOrCreateUser(req.user);
-
-    if (!(await isOwner(owner.id))) {
-      return res.status(403).json({ message: "Not an owner" });
-    }
-
-    const [[booking]] = await connection.query(
-      `SELECT * FROM bookings WHERE id=? AND owner_id=?`,
-      [bookingId, owner.id]
+    await db.query(
+      "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
+      [status, bookingId, req.user.mysqlId]
     );
 
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    await connection.query(
-      `UPDATE bookings SET status=?, reject_reason=? WHERE id=?`,
-      [status, reject_reason || null, bookingId]
-    );
-
-    /* 🎉 MOVE TENANT TO pg_users */
-    if (status === "approved") {
-      const [[existing]] = await connection.query(
-        `SELECT id FROM pg_users
-         WHERE user_id=? AND pg_id=? AND status='ACTIVE'`,
-        [booking.user_id, booking.pg_id]
-      );
-
-      if (!existing) {
-        await connection.query(
-          `INSERT INTO pg_users
-           (owner_id, pg_id, user_id, room_no, join_date, exit_date, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            owner.id,
-            booking.pg_id,
-            booking.user_id,
-            room_no || null,
-            booking.check_in_date,
-            exit_date || null,
-            "ACTIVE",
-          ]
-        );
-      }
-    }
-
-    await connection.commit();
     res.json({ success: true });
 
   } catch (err) {
-    await connection.rollback();
-    console.error("❌ updateBookingStatus:", err);
-    res.status(500).json({ message: "Server error" });
-  } finally {
-    connection.release();
+    res.status(500).json({ message: err.message });
   }
 };
 
-/* ======================================================
-   👥 OWNER → ACTIVE TENANTS
-====================================================== */
-exports.getActiveTenantsByOwner = async (req, res) => {
+//////////////////////////////////////////////////////
+// 💳 PAYMENT SUCCESS
+//////////////////////////////////////////////////////
+exports.markPaymentDone = async (req, res) => {
   try {
-    const owner = await getOrCreateUser(req.user);
+    const { bookingId } = req.params;
+    const { room_id } = req.body;
+    const userId = req.user.mysqlId;
 
-    if (!(await isOwner(owner.id))) {
-      return res.status(403).json({ message: "Access denied" });
+    const [[booking]] = await db.query(
+      "SELECT * FROM bookings WHERE id=? AND user_id=?",
+      [bookingId, userId]
+    );
+
+    if (!booking)
+      return res.status(404).json({ message: "Booking not found" });
+
+    await db.query(
+      "UPDATE bookings SET status='confirmed', room_id=? WHERE id=?",
+      [room_id || null, bookingId]
+    );
+
+    if (room_id) {
+      await db.query(
+        "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
+        [room_id]
+      );
     }
 
+    await db.query(
+      `INSERT INTO pg_users
+      (pg_id,room_id,user_id,owner_id,status)
+      VALUES (?,?,?,?, 'ACTIVE')`,
+      [
+        booking.pg_id,
+        room_id || null,
+        booking.user_id,
+        booking.owner_id,
+      ]
+    );
+
+    res.json({ success: true });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//////////////////////////////////////////////////////
+// 👑 ACTIVE TENANTS
+//////////////////////////////////////////////////////
+exports.getActiveTenantsByOwner = async (req, res) => {
+  try {
     const [rows] = await db.query(
-      `
-      SELECT
-        pu.id,
+      `SELECT 
+        pu.*,
         u.name,
         u.phone,
-        pu.room_no,
-        pu.join_date,
-        pu.status,
         p.pg_name
       FROM pg_users pu
       JOIN users u ON u.id = pu.user_id
       JOIN pgs p ON p.id = pu.pg_id
-      WHERE pu.owner_id = ?
-      AND pu.status = 'ACTIVE'
-      ORDER BY pu.join_date DESC
-      `,
-      [owner.id]
+      WHERE pu.owner_id=? AND pu.status='ACTIVE'`,
+      [req.user.mysqlId]
     );
 
     res.json(rows);
 
   } catch (err) {
-    console.error("ACTIVE TENANTS ERROR:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/* ======================================================
-   👤 USER → ACTIVE STAY
-====================================================== */
-exports.getMyActiveStay = async (req, res) => {
-  try {
-    const user = await getOrCreateUser(req.user);
-
-    const [[row]] = await db.query(
-      `
-      SELECT
-        pu.room_no,
-        pu.join_date,
-        pu.status,
-
-        p.pg_name,
-        p.rent_amount,
-        p.maintenance_amount,
-        p.deposit_amount,
-
-        (p.rent_amount + p.maintenance_amount) AS monthly_total
-
-      FROM pg_users pu
-      JOIN pgs p ON p.id = pu.pg_id
-      WHERE pu.user_id = ?
-      AND pu.status = 'ACTIVE'
-      LIMIT 1
-      `,
-      [user.id]
-    );
-
-    res.json(row || null);
-
-  } catch (err) {
-    console.error("ACTIVE STAY ERROR:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: err.message });
   }
 };

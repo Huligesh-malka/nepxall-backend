@@ -1,3 +1,8 @@
+/* ✅ LOAD ENV ONLY IN DEVELOPMENT */
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
+
 const http = require("http");
 const app = require("./app");
 const { initSocket } = require("./socket");
@@ -16,15 +21,11 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running in ${process.env.NODE_ENV || "development"} mode`);
   console.log(`📡 Port: ${PORT}`);
 
-  if (process.env.RENDER_EXTERNAL_URL) {
-    console.log(`🌍 Live URL: ${process.env.RENDER_EXTERNAL_URL}`);
-    console.log(`❤️ Health Check: ${process.env.RENDER_EXTERNAL_URL}/api/health`);
-    console.log(`🔧 Diagnostic: ${process.env.RENDER_EXTERNAL_URL}/api/diagnose`);
-  } else {
-    console.log(`🌐 Local: http://localhost:${PORT}`);
-    console.log(`❤️ Health Check: http://localhost:${PORT}/api/health`);
-    console.log(`🔧 Diagnostic: http://localhost:${PORT}/api/diagnose`);
-  }
+  const baseUrl =
+    process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
+  console.log(`🌐 Base URL: ${baseUrl}`);
+  console.log(`❤️ Health: ${baseUrl}/api/health`);
+  console.log(`🔧 Diagnostic: ${baseUrl}/api/diagnose`);
   console.log("=================================");
 });

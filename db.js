@@ -2,57 +2,55 @@ const mysql = require("mysql2/promise");
 
 console.log("🔧 Initializing database connection...");
 
-// Use the exact same configuration that worked in diagnostic
-const dbConfig = {
-  host: process.env.MYSQLHOST,
-  port: Number(process.env.MYSQLPORT),
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
+const isProduction = process.env.NODE_ENV === "production";
+
+const dbConfig = isProduction
+  ? {
+      host: process.env.MYSQLHOST,
+      port: Number(process.env.MYSQLPORT),
+      user: process.env.MYSQLUSER,
+      password: process.env.MYSQLPASSWORD,
+      database: process.env.MYSQLDATABASE,
+      ssl: { rejectUnauthorized: false },
+    }
+  : {
+      host: process.env.LOCAL_DB_HOST || "localhost",
+      port: Number(process.env.LOCAL_DB_PORT) || 3306,
+      user: process.env.LOCAL_DB_USER || "root",
+      password: process.env.LOCAL_DB_PASSWORD || "",
+      database: process.env.LOCAL_DB_NAME,
+    };
+
+const pool = mysql.createPool({
+  ...dbConfig,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000, // Add timeout
-  ssl: {
-    rejectUnauthorized: false // Critical for Aiven
-  }
-};
+  connectTimeout: 10000,
+});
 
-// Log config (without password)
+// Debug (safe)
 console.log("📊 DB Config:", {
   host: dbConfig.host,
   port: dbConfig.port,
   user: dbConfig.user,
   database: dbConfig.database,
   ssl: !!dbConfig.ssl,
-  passwordSet: !!dbConfig.password
+  env: process.env.NODE_ENV,
 });
 
-const pool = mysql.createPool(dbConfig);
-
-// Test connection immediately
 (async () => {
   try {
     const conn = await pool.getConnection();
-    console.log("✅ MySQL Pool Connected Successfully");
-    
-    // Test query
-    const [rows] = await conn.query('SELECT 1 + 1 AS solution');
-    console.log("📊 Test query:", rows[0].solution === 2 ? "Passed" : "Failed");
-    
+    console.log("✅ MySQL Connected");
+
+    const [rows] = await conn.query("SELECT 1+1 AS result");
+    console.log("📊 Test Query:", rows[0].result);
+
     conn.release();
   } catch (err) {
-    console.error("❌ MySQL connection failed:");
-    console.error("Error Code:", err.code);
-    console.error("Error Message:", err.message);
-    console.error("Error Errno:", err.errno);
-    
-    if (err.code === 'ETIMEDOUT') {
-      console.error("🔧 TIMEOUT ISSUE - Check:");
-      console.error("   1. SSL configuration (must be { rejectUnauthorized: false })");
-      console.error("   2. Connect timeout setting");
-      console.error("   3. Network latency");
-    }
+    console.error("❌ MySQL connection failed");
+    console.error(err);
   }
 })();
 

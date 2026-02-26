@@ -1,145 +1,141 @@
-require("dotenv").config(); // ✅ LOAD ENV FIRST
-
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
 
 const app = express();
 
-/* ================= TRUST PROXY (RENDER) ================= */
+/* ================= TRUST PROXY ================= */
 app.set("trust proxy", 1);
 
-/* ================= DIAGNOSTIC ENDPOINT ================= */
-app.get("/api/diagnose", async (req, res) => {
-  console.log("🔧 Diagnostic endpoint hit!");
-
-  res.json({
-    timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV,
-    mysql: {
-      host: process.env.MYSQLHOST,
-      db: process.env.MYSQLDATABASE,
-    },
-  });
+/* ================= LOGGER ================= */
+app.use((req, res, next) => {
+  console.log(`➡️ ${req.method} ${req.originalUrl}`);
+  next();
 });
 
-/* ================= CORS ================= */
+/* ================= CASHFREE WEBHOOK ================= */
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const webhookController = require("./controllers/paymentWebhookController");
+      webhookController.cashfreeWebhook(req, res);
+    } catch (err) {
+      console.error("❌ Webhook Error:", err.message);
+      res.status(500).send("Webhook handler error");
+    }
+  }
+);
 
+/* ================= BODY PARSER ================= */
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+/* ================= CORS ================= */
 const allowedOrigins = [
   "http://localhost:3000",
-  process.env.CLIENT_URL, // your Vercel production URL
-];
+  process.env.CLIENT_URL,
+].filter(Boolean);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-
-      // allow Vercel preview deployments
-      if (origin.includes("vercel.app")) {
+    origin: (origin, callback) => {
+      if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
       console.log("❌ Blocked by CORS:", origin);
-      return callback(new Error("CORS not allowed"));
+      callback(new Error("CORS not allowed"));
     },
     credentials: true,
   })
 );
 
-/* ================= BODY PARSER ================= */
-
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-
 /* ================= STATIC ================= */
-
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 /* ================= HEALTH ================= */
-
 app.get("/api/health", (req, res) => {
   res.json({
+    success: true,
     status: "healthy",
     uptime: process.uptime(),
-    time: new Date().toISOString(),
-    env: process.env.NODE_ENV || "development",
   });
 });
 
-/* ================= ROUTES ================= */
+/* ====================================================== */
+/* SAFE ROUTE LOADER */
+/* ====================================================== */
+const safeLoad = (routePath) => {
+  try {
+    const route = require(routePath);
+    console.log(`✅ Loaded: ${routePath}`);
+    return route;
+  } catch (err) {
+    console.error(`❌ Failed to load: ${routePath}`);
+    console.error("👉", err.message);
+    return express.Router();
+  }
+};
 
-const authRoutes = require("./routes/authRoutes");
-const agreementRoutes = require("./routes/agreementRoutes");
-const depositRoutes = require("./routes/depositRoutes");
-const vacateRoutes = require("./routes/vacateRoutes");
-const pgRoutes = require("./routes/pgRoutes");
-const uploadRoutes = require("./routes/uploadRoutes");
-const roomRoutes = require("./routes/roomRoutes");
-const bookingRoutes = require("./routes/bookingRoutes");
-const ownerBookingRoutes = require("./routes/ownerBookingRoutes");
-const paymentRoutes = require("./routes/paymentRoutes");
-const reviewRoutes = require("./routes/reviewRoutes");
-const adminRoutes = require("./routes/adminRoutes");
-const notificationRoutes = require("./routes/notificationRoutes");
-const ownerVerificationRoutes = require("./routes/ownerVerificationRoutes");
-const adminOwnerVerificationRoutes = require("./routes/adminOwnerVerificationRoutes");
-const privateChatRoutes = require("./routes/privateChatRoutes");
-const announcementRoutes = require("./routes/announcementRoutes");
-const pgChatRoutes = require("./routes/pgChatRoutes");
-const aadhaarKycRoutes = require("./routes/adhar_routes");
+/* ================= CORE ROUTES ================= */
 
-// 🔐 AUTH
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", safeLoad("./routes/authRoutes"));
+app.use("/api/kyc/aadhaar", safeLoad("./routes/adhar_routes"));
+app.use("/api/pg", safeLoad("./routes/pgRoutes"));
+app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
+app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
+app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
+app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
+app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
+app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
+app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
+app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
-// 👤 PG
-app.use("/api/pg", pgRoutes);
-app.use("/api/rooms", roomRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/bookings", bookingRoutes);
-app.use("/api/agreement", agreementRoutes);
-app.use("/api/deposit", depositRoutes);
-app.use("/api/vacate", vacateRoutes);
-app.use("/api/payments", paymentRoutes);
+/* ================= SOCIAL ================= */
 
-// 💬 CHAT
-app.use("/api/pg-chat", pgChatRoutes);
-app.use("/api/private-chat", privateChatRoutes);
-app.use("/api/announcements", announcementRoutes);
+app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
+app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
+app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
+app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
+app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
-// 🏠 OWNER
-app.use("/api/owner", ownerBookingRoutes);
-app.use("/api/owner", ownerVerificationRoutes);
+/* ====================================================== */
+/* 👑 OWNER ROUTES */
+/* ====================================================== */
 
-// 🛠 ADMIN
-app.use("/api/admin", adminRoutes);
-app.use("/api/admin", adminOwnerVerificationRoutes);
+app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
+app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 
-// ⭐ REVIEWS & NOTIFICATIONS
-app.use("/api/reviews", reviewRoutes);
-app.use("/api/notifications", notificationRoutes);
+/* ✅ ✅ ADD THIS LINE */
+app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 
-// 🔐 AADHAAR
-app.use("/api/kyc/aadhaar", aadhaarKycRoutes);
+/* ====================================================== */
+/* 🛡 ADMIN ROUTES */
+/* ====================================================== */
+
+app.use("/api/admin", safeLoad("./routes/adminRoutes"));
+app.use("/api/admin", safeLoad("./routes/adminOwnerVerificationRoutes"));
+app.use("/api/admin/settlements", require("./routes/adminSettlementRoutes"));
+
+app.get("/api/admin/health", (req, res) => {
+  res.json({ success: true, message: "Admin API working ✅" });
+});
 
 /* ================= 404 ================= */
 
 app.use((req, res) => {
+  console.log(`🚫 404 - Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
-    message: "API route not found",
+    message: `Route ${req.originalUrl} not found`,
   });
 });
 
 /* ================= GLOBAL ERROR ================= */
 
 app.use((err, req, res, next) => {
-  console.error("🔥 GLOBAL ERROR:", err.message);
+  console.error("🔥 GLOBAL ERROR:", err.stack);
 
   res.status(err.status || 500).json({
     success: false,
