@@ -1,5 +1,4 @@
 const db = require("../db");
-const { generateAgreementPDF } = require("../services/agreementService");
 
 /* ======================================================
    🧠 GET OWNER FROM FIREBASE UID
@@ -87,7 +86,7 @@ exports.updateBookingStatus = async (req, res) => {
 
     if (!booking) throw new Error("Not your booking");
 
-    /* ✅ UPDATE BOOKING */
+    /* ✅ UPDATE BOOKING STATUS */
     await connection.query(
       `UPDATE bookings
        SET status = ?, reject_reason = ?
@@ -121,8 +120,21 @@ exports.updateBookingStatus = async (req, res) => {
           ]
         );
       }
+    }
 
-      
+    await connection.commit();
+
+    res.json({ success: true });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("❌ UPDATE BOOKING:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    connection.release();
+  }
+};
+
 /* ======================================================
    👥 OWNER → ACTIVE TENANTS
 ====================================================== */
