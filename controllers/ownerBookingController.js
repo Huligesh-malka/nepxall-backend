@@ -6,7 +6,7 @@ const { generateAgreementPDF } = require("../services/agreementService");
 ====================================================== */
 const getOwner = async (firebaseUid) => {
   const [rows] = await db.query(
-    `SELECT id, name, owner_onboarding_completed
+    `SELECT id, name, owner_verification_status
      FROM users 
      WHERE firebase_uid = ? AND role = 'owner'
      LIMIT 1`,
@@ -17,7 +17,7 @@ const getOwner = async (firebaseUid) => {
 };
 
 /* ======================================================
-   📥 OWNER → GET BOOKINGS  ✅ PRODUCTION SAFE
+   📥 OWNER → GET BOOKINGS
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
@@ -37,7 +37,7 @@ exports.getOwnerBookings = async (req, res) => {
           u.name AS tenant_name
        FROM bookings b
        JOIN (
-          SELECT MAX(id) AS id
+          SELECT MAX(id) id
           FROM bookings
           WHERE owner_id = ?
           GROUP BY pg_id, user_id, check_in_date, room_type
@@ -49,6 +49,7 @@ exports.getOwnerBookings = async (req, res) => {
     );
 
     res.json(rows);
+
   } catch (err) {
     console.error("❌ GET OWNER BOOKINGS:", err);
     res.status(500).json({ message: "Server error" });
@@ -59,6 +60,7 @@ exports.getOwnerBookings = async (req, res) => {
    ✅ OWNER → APPROVE / REJECT BOOKING
 ====================================================== */
 exports.updateBookingStatus = async (req, res) => {
+
   const connection = await db.getConnection();
 
   try {
@@ -70,18 +72,19 @@ exports.updateBookingStatus = async (req, res) => {
     const owner = await getOwner(req.user.firebaseUid);
     if (!owner) throw new Error("Not an owner");
 
-    /* 🚨 BLOCK IF ONBOARDING NOT COMPLETE */
-    if (status === "approved" && owner.owner_onboarding_completed !== 1) {
+    /* 🚨 BLOCK IF NOT VERIFIED */
+    if (status === "approved" && owner.owner_verification_status !== "verified") {
       await connection.rollback();
       return res.status(403).json({
         code: "ONBOARDING_PENDING",
-        message: "Complete verification before approving booking",
+        message: "Complete verification before approving booking"
       });
     }
 
     /* 🔒 VALIDATE BOOKING */
     const [[booking]] = await connection.query(
-      `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
+      `SELECT * FROM bookings
+       WHERE id = ? AND owner_id = ?`,
       [bookingId, owner.id]
     );
 
@@ -99,6 +102,7 @@ exports.updateBookingStatus = async (req, res) => {
        🟢 IF APPROVED → ADD TO pg_users
     ====================================================== */
     if (status === "approved") {
+
       const [[existing]] = await connection.query(
         `SELECT id FROM pg_users
          WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
@@ -116,7 +120,7 @@ exports.updateBookingStatus = async (req, res) => {
             booking.user_id,
             room_id || null,
             booking.check_in_date,
-            exit_date || null,
+            exit_date || null
           ]
         );
       }
@@ -131,6 +135,7 @@ exports.updateBookingStatus = async (req, res) => {
       );
 
       if (!agreementExists) {
+
         const [[fullBooking]] = await connection.query(
           `SELECT 
              b.*,
@@ -161,7 +166,8 @@ exports.updateBookingStatus = async (req, res) => {
 
         await connection.query(
           `INSERT INTO rent_agreements
-           (booking_id, pg_id, owner_id, user_id, agreement_file, agreement_hash)
+           (booking_id, pg_id, owner_id, user_id,
+            agreement_file, agreement_hash)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             bookingId,
@@ -169,7 +175,7 @@ exports.updateBookingStatus = async (req, res) => {
             owner.id,
             fullBooking.user_id,
             pdf.agreement_file,
-            pdf.agreement_hash,
+            pdf.agreement_hash
           ]
         );
       }
@@ -178,6 +184,7 @@ exports.updateBookingStatus = async (req, res) => {
     await connection.commit();
 
     res.json({ success: true });
+
   } catch (err) {
     await connection.rollback();
     console.error("❌ UPDATE BOOKING:", err);
@@ -206,11 +213,12 @@ exports.getActiveTenantsByOwner = async (req, res) => {
        FROM pg_users pu
        JOIN users u ON u.id = pu.user_id
        JOIN pgs p ON p.id = pu.pg_id
-       WHERE pu.owner_id = ? AND pu.status = 'ACTIVE'`,
+       WHERE pu.owner_id = ?	 OWNER ID = ? AND pu.status = 'ACTIVE'`,
       [owner.id]
     );
 
     res.json(rows);
+
   } catch (err) {
     console.error("❌ ACTIVE TENANTS:", err);
     res.status(500).json({ message: "Server error" });
