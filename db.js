@@ -139,26 +139,38 @@ async function testConnection(retries = 3, delay = 5000) {
       const [rows] = await conn.query("SELECT 1+1 AS result");
       console.log("📊 Test Query Result:", rows[0].result);
 
-      // Get database info - COMPLETELY FIXED VERSION
-      // Using individual queries instead of a combined one to avoid syntax issues
+      // Get database info - FIXED VERSION with USER() instead of CURRENT_USER()
       try {
         // Get current database
         const [dbResult] = await conn.query("SELECT DATABASE() AS current_db");
         console.log("📊 Current Database:", dbResult[0].current_db);
         
-        // Get current user
-        const [userResult] = await conn.query("SELECT CURRENT_USER() AS current_user");
-        console.log("📊 Current User:", userResult[0].current_user);
+        // Get current user - using USER() which is more compatible
+        try {
+          const [userResult] = await conn.query("SELECT USER() AS current_user");
+          console.log("📊 Current User:", userResult[0].current_user);
+        } catch (userError) {
+          // Fallback to CURRENT_USER if USER fails
+          try {
+            const [userResult] = await conn.query("SELECT CURRENT_USER() AS current_user");
+            console.log("📊 Current User:", userResult[0].current_user);
+          } catch (currentUserError) {
+            console.log("📊 Could not retrieve current user");
+          }
+        }
         
         // Get version
         const [versionResult] = await conn.query("SELECT VERSION() AS version");
         console.log("📊 MySQL Version:", versionResult[0].version);
         
-        console.log("📊 Database Info Summary:", {
-          current_database: dbResult[0].current_db,
-          current_user: userResult[0].current_user,
-          version: versionResult[0].version
-        });
+        // Try to get connection ID for additional info
+        try {
+          const [connIdResult] = await conn.query("SELECT CONNECTION_ID() AS connection_id");
+          console.log("📊 Connection ID:", connIdResult[0].connection_id);
+        } catch (connIdError) {
+          // Ignore connection ID error
+        }
+        
       } catch (queryError) {
         console.error("❌ Error getting database info:", queryError.message);
         // Ultra simple fallback - just try to get version
@@ -176,6 +188,7 @@ async function testConnection(retries = 3, delay = 5000) {
         if (tables.length > 0) {
           const tableNames = tables.map(t => Object.values(t)[0]);
           console.log("📊 Tables in database:", tableNames.join(', '));
+          console.log(`📊 Total tables: ${tableNames.length}`);
         } else {
           console.log("📊 No tables found in database");
           console.log("💡 Database is empty. You may need to run migrations or import your schema.");
