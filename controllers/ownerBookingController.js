@@ -17,7 +17,7 @@ const getOwner = async (firebaseUid) => {
 };
 
 /* ======================================================
-   📥 OWNER → GET BOOKINGS
+   📥 OWNER → GET BOOKINGS  ✅ PRODUCTION SAFE
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
@@ -25,36 +25,32 @@ exports.getOwnerBookings = async (req, res) => {
     if (!owner) return res.status(403).json({ message: "Not an owner" });
 
     const [rows] = await db.query(
-      `SELECT *
-       FROM (
-         SELECT
-           b.id,
-           b.pg_id,
-           b.check_in_date,
-           b.room_type,
-           b.status,
-           b.phone,
-           b.created_at,
-           p.pg_name,
-           u.name AS tenant_name,
-           ROW_NUMBER() OVER (
-             PARTITION BY b.pg_id, b.user_id, b.check_in_date, b.room_type
-             ORDER BY b.id DESC
-           ) AS rn
-         FROM bookings b
-         JOIN pgs p ON p.id = b.pg_id
-         JOIN users u ON u.id = b.user_id
-         WHERE b.owner_id = ?
-       ) x
-       WHERE rn = 1
-       ORDER BY created_at DESC`,
+      `SELECT 
+          b.id,
+          b.pg_id,
+          b.check_in_date,
+          b.room_type,
+          b.status,
+          b.phone,
+          b.created_at,
+          p.pg_name,
+          u.name AS tenant_name
+       FROM bookings b
+       JOIN (
+          SELECT MAX(id) AS id
+          FROM bookings
+          WHERE owner_id = ?
+          GROUP BY pg_id, user_id, check_in_date, room_type
+       ) latest ON latest.id = b.id
+       JOIN pgs p ON p.id = b.pg_id
+       JOIN users u ON u.id = b.user_id
+       ORDER BY b.created_at DESC`,
       [owner.id]
     );
 
     res.json(rows);
-
   } catch (err) {
-    console.error(err);
+    console.error("❌ GET OWNER BOOKINGS:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -63,7 +59,6 @@ exports.getOwnerBookings = async (req, res) => {
    ✅ OWNER → APPROVE / REJECT BOOKING
 ====================================================== */
 exports.updateBookingStatus = async (req, res) => {
-
   const connection = await db.getConnection();
 
   try {
@@ -80,14 +75,13 @@ exports.updateBookingStatus = async (req, res) => {
       await connection.rollback();
       return res.status(403).json({
         code: "ONBOARDING_PENDING",
-        message: "Complete verification before approving booking"
+        message: "Complete verification before approving booking",
       });
     }
 
     /* 🔒 VALIDATE BOOKING */
     const [[booking]] = await connection.query(
-      `SELECT * FROM bookings
-       WHERE id = ? AND owner_id = ?`,
+      `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
       [bookingId, owner.id]
     );
 
@@ -105,7 +99,6 @@ exports.updateBookingStatus = async (req, res) => {
        🟢 IF APPROVED → ADD TO pg_users
     ====================================================== */
     if (status === "approved") {
-
       const [[existing]] = await connection.query(
         `SELECT id FROM pg_users
          WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
@@ -123,7 +116,7 @@ exports.updateBookingStatus = async (req, res) => {
             booking.user_id,
             room_id || null,
             booking.check_in_date,
-            exit_date || null
+            exit_date || null,
           ]
         );
       }
@@ -138,7 +131,6 @@ exports.updateBookingStatus = async (req, res) => {
       );
 
       if (!agreementExists) {
-
         const [[fullBooking]] = await connection.query(
           `SELECT 
              b.*,
@@ -164,13 +156,12 @@ exports.updateBookingStatus = async (req, res) => {
             pg_name: fullBooking.pg_name,
             address: fullBooking.address,
           },
-          ownerSignaturePath: null, // 🔥 no Aadhaar verification dependency
+          ownerSignaturePath: null,
         });
 
         await connection.query(
           `INSERT INTO rent_agreements
-           (booking_id, pg_id, owner_id, user_id,
-            agreement_file, agreement_hash)
+           (booking_id, pg_id, owner_id, user_id, agreement_file, agreement_hash)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             bookingId,
@@ -178,7 +169,7 @@ exports.updateBookingStatus = async (req, res) => {
             owner.id,
             fullBooking.user_id,
             pdf.agreement_file,
-            pdf.agreement_hash
+            pdf.agreement_hash,
           ]
         );
       }
@@ -187,7 +178,6 @@ exports.updateBookingStatus = async (req, res) => {
     await connection.commit();
 
     res.json({ success: true });
-
   } catch (err) {
     await connection.rollback();
     console.error("❌ UPDATE BOOKING:", err);
@@ -221,8 +211,8 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     );
 
     res.json(rows);
-
   } catch (err) {
+    console.error("❌ ACTIVE TENANTS:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
