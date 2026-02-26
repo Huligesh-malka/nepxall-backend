@@ -8,29 +8,18 @@ exports.createOrder = async (req, res) => {
   try {
     const { bookingId, amount } = req.body;
 
-    if (!bookingId || !amount) {
-      return res.status(400).json({
-        success: false,
-        message: "bookingId and amount required",
-      });
-    }
-
     const orderId = `order_${bookingId}_${Date.now()}`;
-
-    const customerEmail =
-      req.user.email || `user${req.user.mysqlId}@nepxall.com`;
-
-    const customerPhone = req.user.phone || "9999999999";
 
     const response = await Cashfree.PGCreateOrder({
       order_id: orderId,
-      order_amount: Number(amount),
+      order_amount: amount,
       order_currency: "INR",
 
       customer_details: {
-        customer_id: String(req.user.mysqlId),
-        customer_email: customerEmail,
-        customer_phone: customerPhone,
+        customer_id: String(req.user.id),
+        customer_email:
+          req.user.email || `user${req.user.id}@nepxall.com`,
+        customer_phone: req.user.phone,
       },
 
       order_meta: {
@@ -49,12 +38,12 @@ exports.createOrder = async (req, res) => {
       payment_session_id: response.data.payment_session_id,
       order_id: orderId,
     });
-  } catch (err) {
-    console.error("❌ CREATE ORDER ERROR:", err.response?.data || err.message);
 
+  } catch (err) {
+    console.error("CREATE ORDER ERROR:", err.response?.data || err);
     res.status(500).json({
       success: false,
-      message: "Cashfree order failed",
+      message: err.response?.data?.message || "Cashfree order failed",
     });
   }
 };
