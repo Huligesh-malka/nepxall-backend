@@ -49,7 +49,6 @@ exports.getOwnerBookings = async (req, res) => {
     );
 
     res.json(rows);
-
   } catch (err) {
     console.error("❌ GET OWNER BOOKINGS:", err);
     res.status(500).json({ message: "Server error" });
@@ -60,7 +59,6 @@ exports.getOwnerBookings = async (req, res) => {
    ✅ OWNER → APPROVE / REJECT BOOKING
 ====================================================== */
 exports.updateBookingStatus = async (req, res) => {
-
   const connection = await db.getConnection();
 
   try {
@@ -83,8 +81,7 @@ exports.updateBookingStatus = async (req, res) => {
 
     /* 🔒 VALIDATE BOOKING */
     const [[booking]] = await connection.query(
-      `SELECT * FROM bookings
-       WHERE id = ? AND owner_id = ?`,
+      `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
       [bookingId, owner.id]
     );
 
@@ -130,7 +127,10 @@ exports.updateBookingStatus = async (req, res) => {
       ====================================================== */
 
       const [[agreementExists]] = await connection.query(
-        `SELECT id FROM rent_agreements WHERE booking_id = ?`,
+        `SELECT id 
+         FROM agreements 
+         WHERE booking_id = ? AND status = 'ACTIVE'
+         LIMIT 1`,
         [bookingId]
       );
 
@@ -165,10 +165,10 @@ exports.updateBookingStatus = async (req, res) => {
         });
 
         await connection.query(
-          `INSERT INTO rent_agreements
+          `INSERT INTO agreements
            (booking_id, pg_id, owner_id, user_id,
-            agreement_file, agreement_hash)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+            agreement_file, agreement_hash, status)
+           VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
           [
             bookingId,
             fullBooking.pg_id,
@@ -213,7 +213,7 @@ exports.getActiveTenantsByOwner = async (req, res) => {
        FROM pg_users pu
        JOIN users u ON u.id = pu.user_id
        JOIN pgs p ON p.id = pu.pg_id
-       WHERE pu.owner_id = ?	 OWNER ID = ? AND pu.status = 'ACTIVE'`,
+       WHERE pu.owner_id = ? AND pu.status = 'ACTIVE'`,
       [owner.id]
     );
 
