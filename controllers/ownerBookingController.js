@@ -122,78 +122,7 @@ exports.updateBookingStatus = async (req, res) => {
         );
       }
 
-      /* ======================================================
-         📄 AUTO CREATE AGREEMENT
-      ====================================================== */
-
-      const [[agreementExists]] = await connection.query(
-        `SELECT id 
-         FROM agreements 
-         WHERE booking_id = ? AND status = 'ACTIVE'
-         LIMIT 1`,
-        [bookingId]
-      );
-
-      if (!agreementExists) {
-
-        const [[fullBooking]] = await connection.query(
-          `SELECT 
-             b.*,
-             u.name AS user_name,
-             u.phone AS user_phone,
-             p.pg_name,
-             p.address
-           FROM bookings b
-           JOIN users u ON u.id = b.user_id
-           JOIN pgs p ON p.id = b.pg_id
-           WHERE b.id = ?`,
-          [bookingId]
-        );
-
-        const pdf = await generateAgreementPDF({
-          booking: fullBooking,
-          owner,
-          user: {
-            name: fullBooking.user_name,
-            phone: fullBooking.user_phone,
-          },
-          pg: {
-            pg_name: fullBooking.pg_name,
-            address: fullBooking.address,
-          },
-          ownerSignaturePath: null,
-        });
-
-        await connection.query(
-          `INSERT INTO agreements
-           (booking_id, pg_id, owner_id, user_id,
-            agreement_file, agreement_hash, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
-          [
-            bookingId,
-            fullBooking.pg_id,
-            owner.id,
-            fullBooking.user_id,
-            pdf.agreement_file,
-            pdf.agreement_hash
-          ]
-        );
-      }
-    }
-
-    await connection.commit();
-
-    res.json({ success: true });
-
-  } catch (err) {
-    await connection.rollback();
-    console.error("❌ UPDATE BOOKING:", err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    connection.release();
-  }
-};
-
+      
 /* ======================================================
    👥 OWNER → ACTIVE TENANTS
 ====================================================== */
