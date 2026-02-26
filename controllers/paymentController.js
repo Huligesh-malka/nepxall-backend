@@ -8,17 +8,29 @@ exports.createOrder = async (req, res) => {
   try {
     const { bookingId, amount } = req.body;
 
+    if (!bookingId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId and amount required",
+      });
+    }
+
     const orderId = `order_${bookingId}_${Date.now()}`;
+
+    const customerEmail =
+      req.user.email || `user${req.user.mysqlId}@nepxall.com`;
+
+    const customerPhone = req.user.phone || "9999999999";
 
     const response = await Cashfree.PGCreateOrder({
       order_id: orderId,
-      order_amount: amount,
+      order_amount: Number(amount),
       order_currency: "INR",
 
       customer_details: {
         customer_id: String(req.user.mysqlId),
-        customer_email: req.user.email,
-        customer_phone: req.user.phone,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
       },
 
       order_meta: {
@@ -37,10 +49,13 @@ exports.createOrder = async (req, res) => {
       payment_session_id: response.data.payment_session_id,
       order_id: orderId,
     });
-
   } catch (err) {
-    console.error("CREATE ORDER ERROR:", err.response?.data || err);
-    res.status(500).json({ success: false, message: "Cashfree order failed" });
+    console.error("❌ CREATE ORDER ERROR:", err.response?.data || err.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Cashfree order failed",
+    });
   }
 };
 
@@ -54,23 +69,24 @@ exports.verifyPayment = async (req, res) => {
     const response = await Cashfree.PGFetchOrder(orderId);
 
     if (response.data.order_status === "PAID") {
-
-      // ✅ Mark payment as paid
       await db.query(
         `UPDATE payments SET status='paid' WHERE order_id=?`,
         [orderId]
       );
 
-      // 🔹 Get booking ID
       const [[payment]] = await db.query(
         `SELECT booking_id FROM payments WHERE order_id=?`,
         [orderId]
       );
 
+      if (!payment) {
+        return res.json({ success: true });
+      }
+
       const bookingId = payment.booking_id;
 
-      // 🔹 Calculate FULL owner amount (NO COMMISSION)
-      await db.query(`
+      await db.query(
+        `
         UPDATE bookings
         SET 
           status = 'confirmed',
@@ -81,13 +97,14 @@ exports.verifyPayment = async (req, res) => {
           ),
           owner_settlement = 'PENDING'
         WHERE id = ?
-      `, [bookingId]);
+        `,
+        [bookingId]
+      );
     }
 
     res.json({ success: true, data: response.data });
-
   } catch (err) {
-    console.error("VERIFY ERROR:", err);
+    console.error("❌ VERIFY ERROR:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -97,8 +114,6 @@ exports.verifyPayment = async (req, res) => {
 //////////////////////////////////////////////////////
 exports.getPendingSettlements = async (req, res) => {
   try {
-
-    // 🔐 Admin protection (recommended)
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
@@ -122,9 +137,8 @@ exports.getPendingSettlements = async (req, res) => {
     `);
 
     res.json({ success: true, data: rows });
-
   } catch (err) {
-    console.error("SETTLEMENT LIST ERROR:", err);
+    console.error("❌ SETTLEMENT LIST ERROR:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -134,7 +148,6 @@ exports.getPendingSettlements = async (req, res) => {
 //////////////////////////////////////////////////////
 exports.markAsSettled = async (req, res) => {
   try {
-
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
@@ -150,16 +163,11 @@ exports.markAsSettled = async (req, res) => {
     );
 
     res.json({ success: true, message: "Settlement completed" });
-
   } catch (err) {
-    console.error("SETTLEMENT UPDATE ERROR:", err);
+    console.error("❌ SETTLEMENT UPDATE ERROR:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
-
-
 
 //////////////////////////////////////////////////////
 // ADMIN – FINANCE SUMMARY
@@ -172,25 +180,20 @@ exports.getFinanceSummary = async (req, res) => {
 
     const [[summary]] = await db.query(`
       SELECT
-
-        -- 💰 Total money received from tenants
         (SELECT COALESCE(SUM(amount),0)
          FROM payments
          WHERE status='paid') AS total_received,
 
-        -- 🟡 Pending settlements
         (SELECT COALESCE(SUM(owner_amount),0)
          FROM bookings
          WHERE owner_settlement='PENDING'
          AND status='confirmed') AS pending_settlements,
 
-        -- ✅ Settled amount
         (SELECT COALESCE(SUM(owner_amount),0)
          FROM bookings
          WHERE owner_settlement='DONE'
          AND status='confirmed') AS total_settled,
 
-        -- 📅 Today collection
         (SELECT COALESCE(SUM(amount),0)
          FROM payments
          WHERE status='paid'
@@ -198,23 +201,17 @@ exports.getFinanceSummary = async (req, res) => {
     `);
 
     res.json({ success: true, data: summary });
-
   } catch (err) {
-    console.error("FINANCE SUMMARY ERROR:", err);
+    console.error("❌ FINANCE SUMMARY ERROR:", err.message);
     res.status(500).json({ success: false });
   }
 };
-
-
-
-
 
 //////////////////////////////////////////////////////
 // ADMIN – SETTLEMENT HISTORY
 //////////////////////////////////////////////////////
 exports.getSettlementHistory = async (req, res) => {
   try {
-
     const [rows] = await db.query(`
       SELECT
         b.id AS booking_id,
@@ -228,9 +225,8 @@ exports.getSettlementHistory = async (req, res) => {
     `);
 
     res.json({ success: true, data: rows });
-
   } catch (err) {
-    console.error("SETTLEMENT HISTORY ERROR:", err);
+    console.error("❌ SETTLEMENT HISTORY ERROR:", err.message);
     res.status(500).json({ success: false });
   }
 };
