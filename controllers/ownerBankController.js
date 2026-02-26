@@ -5,7 +5,7 @@ const db = require("../db");
 ====================================================== */
 const getOwner = async (firebaseUid) => {
   const [rows] = await db.query(
-    `SELECT id, name, email 
+    `SELECT id, name, email, owner_verification_status
      FROM users 
      WHERE firebase_uid = ? AND role = 'owner'
      LIMIT 1`,
@@ -41,6 +41,7 @@ exports.saveOwnerBank = async (req, res) => {
       });
     }
 
+    /* ================= SAVE BANK ================= */
     await db.query(
       `INSERT INTO owner_bank_details
        (owner_id, account_holder_name, account_number, ifsc, bank_name, branch)
@@ -61,9 +62,10 @@ exports.saveOwnerBank = async (req, res) => {
       ]
     );
 
+    /* ================= MARK OWNER AS VERIFIED ================= */
     await db.query(
       `UPDATE users 
-       SET owner_onboarding_completed = 1
+       SET owner_verification_status = 'verified'
        WHERE id = ?`,
       [owner.id]
     );
