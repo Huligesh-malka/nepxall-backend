@@ -140,7 +140,12 @@ async function testConnection(retries = 3, delay = 5000) {
       console.log("📊 Test Query Result:", rows[0].result);
 
       // Get database info
-      const [dbInfo] = await conn.query("SELECT DATABASE() as current_db, USER() as current_user, VERSION() as version");
+     const [dbInfo] = await conn.query(`
+  SELECT 
+    DATABASE() AS current_db,
+    CURRENT_USER() AS current_user,
+    VERSION() AS version
+`);
       console.log("📊 Database Info:", {
         current_database: dbInfo[0].current_db,
         current_user: dbInfo[0].current_user,
