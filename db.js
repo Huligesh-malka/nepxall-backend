@@ -139,32 +139,53 @@ async function testConnection(retries = 3, delay = 5000) {
       const [rows] = await conn.query("SELECT 1+1 AS result");
       console.log("📊 Test Query Result:", rows[0].result);
 
-      // Get database info
-     const [dbInfo] = await conn.query(`
-  SELECT 
-    DATABASE() AS current_db,
-    CURRENT_USER() AS current_user,
-    VERSION() AS version
-`);
-      console.log("📊 Database Info:", {
-        current_database: dbInfo[0].current_db,
-        current_user: dbInfo[0].current_user,
-        version: dbInfo[0].version
-      });
+      // Get database info - COMPLETELY FIXED VERSION
+      // Using individual queries instead of a combined one to avoid syntax issues
+      try {
+        // Get current database
+        const [dbResult] = await conn.query("SELECT DATABASE() AS current_db");
+        console.log("📊 Current Database:", dbResult[0].current_db);
+        
+        // Get current user
+        const [userResult] = await conn.query("SELECT CURRENT_USER() AS current_user");
+        console.log("📊 Current User:", userResult[0].current_user);
+        
+        // Get version
+        const [versionResult] = await conn.query("SELECT VERSION() AS version");
+        console.log("📊 MySQL Version:", versionResult[0].version);
+        
+        console.log("📊 Database Info Summary:", {
+          current_database: dbResult[0].current_db,
+          current_user: userResult[0].current_user,
+          version: versionResult[0].version
+        });
+      } catch (queryError) {
+        console.error("❌ Error getting database info:", queryError.message);
+        // Ultra simple fallback - just try to get version
+        try {
+          const [simpleResult] = await conn.query("SELECT VERSION() as v");
+          console.log("📊 MySQL Version (simple):", simpleResult[0].v);
+        } catch (fallbackError) {
+          console.log("📊 Could not retrieve any database info");
+        }
+      }
 
       // List tables if any
-      const [tables] = await conn.query("SHOW TABLES");
-      if (tables.length > 0) {
-        const tableNames = tables.map(t => Object.values(t)[0]);
-        console.log("📊 Tables in database:", tableNames.join(', '));
-      } else {
-        console.log("📊 No tables found in database");
-        
-        // If no tables, show table creation suggestion
-        console.log("💡 Database is empty. You may need to run migrations or import your schema.");
+      try {
+        const [tables] = await conn.query("SHOW TABLES");
+        if (tables.length > 0) {
+          const tableNames = tables.map(t => Object.values(t)[0]);
+          console.log("📊 Tables in database:", tableNames.join(', '));
+        } else {
+          console.log("📊 No tables found in database");
+          console.log("💡 Database is empty. You may need to run migrations or import your schema.");
+        }
+      } catch (tableError) {
+        console.log("📊 Could not retrieve table list:", tableError.message);
       }
 
       conn.release();
+      console.log("✅ Database connection test successful!");
       return true;
     } catch (err) {
       console.error(`❌ Connection attempt ${i} failed:`);
@@ -198,6 +219,11 @@ async function testConnection(retries = 3, delay = 5000) {
       } else if (err.code === 'PROTOCOL_CONNECTION_LOST') {
         console.error("💡 Connection lost. This might be due to SSL issues.");
         console.error("   Try using rejectUnauthorized: false if you haven't already.");
+      } else if (err.code === 'ER_PARSE_ERROR') {
+        console.error("💡 SQL Syntax error. This might be due to:");
+        console.error("   - Special characters in the query");
+        console.error("   - Database version compatibility");
+        console.error("   - Using individual queries instead of combined ones");
       }
       
       if (i < retries) {
@@ -261,6 +287,8 @@ async function testConnection(retries = 3, delay = 5000) {
         console.error("\n❌ Exiting due to database connection failure in production");
         process.exit(1);
       }
+    } else {
+      console.log("✅ Database initialization complete!");
     }
   } catch (error) {
     console.error("❌ Fatal error during database initialization:", error);
