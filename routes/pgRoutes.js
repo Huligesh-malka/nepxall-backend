@@ -35,8 +35,15 @@ const videoStorage = multer.diskStorage({
   },
 });
 
-const uploadPhotos = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
-const uploadVideos = multer({ storage: videoStorage, limits: { fileSize: 50 * 1024 * 1024 } });
+const uploadPhotos = multer({ 
+  storage: photoStorage, 
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+});
+
+const uploadVideos = multer({ 
+  storage: videoStorage, 
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+});
 
 /* =================================================
    OWNER ROUTES
@@ -52,10 +59,15 @@ router.post("/add", auth, uploadPhotos.array("photos", 10), controller.addPG);
 router.put("/:id", auth, uploadPhotos.array("photos", 10), controller.updatePG);
 
 /* =================================================
-   PHOTOS
+   PHOTOS - FIXED: Added both endpoints for compatibility
 ================================================= */
 
+// ✅ Primary endpoint that matches frontend
+router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), controller.uploadPhotosOnly);
+
+// ✅ Backup endpoint for backward compatibility
 router.put("/:id/photos", auth, uploadPhotos.array("photos", 10), controller.uploadPhotosOnly);
+
 router.delete("/:id/photo", auth, controller.deleteSinglePhoto);
 router.put("/:id/photos/order", auth, controller.updatePhotoOrder);
 
