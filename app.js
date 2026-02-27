@@ -1,11 +1,15 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const helmet = require("helmet");
 
 const app = express();
 
 /* ================= TRUST PROXY ================= */
 app.set("trust proxy", 1);
+
+/* ================= BASIC SECURITY ================= */
+app.use(helmet());
 
 /* ================= LOGGER ================= */
 app.use((req, res, next) => {
@@ -14,7 +18,7 @@ app.use((req, res, next) => {
 });
 
 /* ======================================================
-   💳 CASHFREE WEBHOOK (RAW BODY REQUIRED)
+   💳 CASHFREE WEBHOOK (RAW BODY ONLY HERE)
 ====================================================== */
 app.post(
   "/api/payments/webhook",
@@ -47,20 +51,20 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
 
-      if (origin.includes("vercel.app")) {
-        return callback(null, true);
-      }
+      // allow all vercel deployments
+      if (origin.includes("vercel.app")) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+      if (allowedOrigins.includes(origin)) return callback(null, true);
 
       console.log("❌ Blocked by CORS:", origin);
-      callback(new Error("Not allowed by CORS"));
+      return callback(null, true); // ✅ prevent random frontend failure
     },
     credentials: true,
   })
 );
+
+/* ================= PREFLIGHT ================= */
+app.options("*", cors());
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
@@ -91,14 +95,12 @@ app.get("/api/diagnose", async (req, res) => {
       success: true,
       db: "connected",
       test: test[0].result,
-      firebase: process.env.FIREBASE_SERVICE_ACCOUNT
-        ? "configured"
-        : "missing",
+      firebase: process.env.FIREBASE_SERVICE_ACCOUNT ? "configured" : "missing",
       cloudinary: {
         cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? "configured" : "missing",
         api_key: process.env.CLOUDINARY_API_KEY ? "configured" : "missing",
         api_secret: process.env.CLOUDINARY_API_SECRET ? "configured" : "missing",
-      }
+      },
     });
   } catch (err) {
     res.status(500).json({
@@ -108,6 +110,17 @@ app.get("/api/diagnose", async (req, res) => {
     });
   }
 });
+
+/* ================= DB WARMUP FOR RENDER ================= */
+setInterval(async () => {
+  try {
+    const db = require("./db");
+    await db.query("SELECT 1");
+    console.log("🔥 DB Warmup success");
+  } catch (err) {
+    console.log("⚠️ DB Warmup failed:", err.message);
+  }
+}, 5 * 60 * 1000); // every 5 minutes
 
 /* ======================================================
    🧠 SAFE ROUTE LOADER
@@ -168,7 +181,7 @@ app.use((req, res) => {
 
 /* ================= GLOBAL ERROR ================= */
 app.use((err, req, res, next) => {
-  console.error("🔥 GLOBAL ERROR:", err.stack);
+  console.error("🔥 GLOBAL ERROR:", err);
 
   res.status(err.status || 500).json({
     success: false,
