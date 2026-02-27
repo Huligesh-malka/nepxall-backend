@@ -13,7 +13,9 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ================= CASHFREE WEBHOOK ================= */
+/* ======================================================
+   💳 CASHFREE WEBHOOK (RAW BODY REQUIRED)
+====================================================== */
 app.post(
   "/api/payments/webhook",
   express.raw({ type: "application/json" }),
@@ -36,7 +38,6 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5000",
-  "https://nepxall-backend.onrender.com",
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
 ].filter(Boolean);
@@ -44,49 +45,41 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, etc)
       if (!origin) return callback(null, true);
-      
-      // Allow all vercel.app subdomains
+
       if (origin.includes("vercel.app")) {
         return callback(null, true);
       }
-      
-      // Check against allowed origins
+
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      
+
       console.log("❌ Blocked by CORS:", origin);
-      callback(new Error("CORS not allowed"));
+      callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   })
 );
 
-/* ================= STATIC ================= */
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+/* ======================================================
+   📁 LOCAL STATIC (ONLY FOR DEVELOPMENT)
+   ⚠️ Render filesystem is temporary
+====================================================== */
+if (process.env.NODE_ENV !== "production") {
+  app.use(
+    "/uploads",
+    express.static(path.join(__dirname, "uploads"))
+  );
+}
 
-/* ================= ROOT ROUTE ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "Nepxall Backend API",
-    version: "1.0.0",
-    environment: process.env.NODE_ENV || "development",
-    endpoints: {
-      health: "/api/health",
-      diagnose: "/api/diagnose",
-      auth: "/api/auth",
-      pg: "/api/pg",
-      rooms: "/api/rooms",
-      bookings: "/api/bookings",
-      payments: "/api/payments",
-      owner: "/api/owner",
-      admin: "/api/admin",
-    },
-    documentation: "https://github.com/Huligesh-malka/nepxall-backend",
-    timestamp: new Date().toISOString(),
+    message: "Nepxall Backend API 🚀",
+    environment: process.env.NODE_ENV,
+    timestamp: new Date(),
   });
 });
 
@@ -96,52 +89,44 @@ app.get("/api/health", (req, res) => {
     success: true,
     status: "healthy",
     uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
   });
 });
 
-/* ================= DIAGNOSTIC ================= */
+/* ================= DIAGNOSE ================= */
 app.get("/api/diagnose", async (req, res) => {
   try {
-    const pool = require("./db");
-    const [result] = await pool.query("SELECT 1+1 as test");
-    
+    const db = require("./db");
+    const [test] = await db.query("SELECT 1+1 as result");
+
     res.json({
       success: true,
-      environment: process.env.NODE_ENV,
-      database: {
-        connected: true,
-        test_query: result[0].test,
-      },
-      firebase: process.env.FIREBASE_SERVICE_ACCOUNT ? "configured" : "missing",
-      timestamp: new Date().toISOString(),
+      db: "connected",
+      test: test[0].result,
+      firebase: process.env.FIREBASE_SERVICE_ACCOUNT
+        ? "configured"
+        : "missing",
     });
-  } catch (error) {
+  } catch (err) {
     res.status(500).json({
       success: false,
-      environment: process.env.NODE_ENV,
-      database: {
-        connected: false,
-        error: error.message,
-      },
-      firebase: process.env.FIREBASE_SERVICE_ACCOUNT ? "configured" : "missing",
-      timestamp: new Date().toISOString(),
+      db: "failed",
+      error: err.message,
     });
   }
 });
 
-/* ====================================================== */
-/* SAFE ROUTE LOADER */
-/* ====================================================== */
+/* ======================================================
+   🧠 SAFE ROUTE LOADER
+====================================================== */
 const safeLoad = (routePath) => {
   try {
     const route = require(routePath);
     console.log(`✅ Loaded: ${routePath}`);
     return route;
   } catch (err) {
-    console.error(`❌ Failed to load: ${routePath}`);
-    console.error("👉", err.message);
-    return express.Router(); // Return empty router instead of crashing
+    console.error(`❌ Failed: ${routePath}`);
+    console.error(err.message);
+    return express.Router();
   }
 };
 
@@ -158,60 +143,42 @@ app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
-/* ================= SOCIAL ROUTES ================= */
+/* ================= SOCIAL ================= */
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
 app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
-/* ====================================================== */
-/* 👑 OWNER ROUTES */
-/* ====================================================== */
+/* ================= OWNER ================= */
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 
-/* ====================================================== */
-/* 🛡 ADMIN ROUTES */
-/* ====================================================== */
+/* ================= ADMIN ================= */
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin", safeLoad("./routes/adminOwnerVerificationRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 
 app.get("/api/admin/health", (req, res) => {
-  res.json({ success: true, message: "Admin API working ✅" });
+  res.json({ success: true, message: "Admin working ✅" });
 });
 
-/* ================= 404 HANDLER ================= */
+/* ================= 404 ================= */
 app.use((req, res) => {
-  console.log(`🚫 404 - Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     message: `Route ${req.originalUrl} not found`,
-    availableEndpoints: [
-      "/",
-      "/api/health",
-      "/api/diagnose",
-      "/api/auth",
-      "/api/pg",
-      "/api/rooms",
-      "/api/bookings",
-      "/api/payments",
-      "/api/owner",
-      "/api/admin",
-    ],
   });
 });
 
-/* ================= GLOBAL ERROR HANDLER ================= */
+/* ================= GLOBAL ERROR ================= */
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err.stack);
 
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
-    error: process.env.NODE_ENV === "development" ? err : {},
   });
 });
 

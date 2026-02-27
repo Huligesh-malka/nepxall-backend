@@ -5,4 +5,7 @@ node_modules/
 .env
 uploads/
 serviceAccountKey.json
-firebase.js
+
+
+
+rent-frontend/src/firebase.js
