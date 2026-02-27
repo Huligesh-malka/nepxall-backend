@@ -9,45 +9,69 @@ const db = require("../db");
 
 const router = express.Router();
 
+// Verify Cloudinary configuration
+console.log("📸 Cloudinary Config:", {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? "✓ Set" : "✗ Missing",
+  api_key: process.env.CLOUDINARY_API_KEY ? "✓ Set" : "✗ Missing",
+  api_secret: process.env.CLOUDINARY_API_SECRET ? "✓ Set" : "✗ Missing",
+});
+
 /* =================================================
-   CLOUDINARY STORAGE CONFIG
+   CLOUDINARY STORAGE CONFIG - FIXED VERSION
 ================================================= */
 
-// Configure Cloudinary storage for photos
+// Configure Cloudinary storage for photos - Using async params function
 const photoStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: "pg-photos",
-    allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
-    transformation: [{ width: 1200, height: 800, crop: "limit" }],
-    public_id: (req, file) => {
-      return `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    },
+  params: async (req, file) => {
+    // Generate a unique public_id
+    const publicId = `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    
+    return {
+      folder: "pg-photos",
+      public_id: publicId,
+      allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
+      transformation: [{ width: 1200, height: 800, crop: "limit" }],
+    };
   },
 });
 
 // Configure Cloudinary storage for videos
 const videoStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: "pg-videos",
-    allowed_formats: ["mp4", "mov", "avi", "webm"],
-    resource_type: "video",
-    transformation: [{ width: 1280, crop: "limit" }],
-    public_id: (req, file) => {
-      return `pg-video-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    },
+  params: async (req, file) => {
+    const publicId = `pg-video-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    
+    return {
+      folder: "pg-videos",
+      public_id: publicId,
+      allowed_formats: ["mp4", "mov", "avi", "webm"],
+      resource_type: "video",
+      transformation: [{ width: 1280, crop: "limit" }],
+    };
   },
 });
 
 const uploadPhotos = multer({ 
   storage: photoStorage, 
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed!'), false);
+    }
+    cb(null, true);
+  }
 });
 
 const uploadVideos = multer({ 
   storage: videoStorage, 
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('video/')) {
+      return cb(new Error('Only video files are allowed!'), false);
+    }
+    cb(null, true);
+  }
 });
 
 /* =================================================
@@ -77,6 +101,8 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
       });
     }
 
+    console.log(`📸 Uploaded ${req.files.length} photos for PG ID: ${req.params.id}`);
+
     // Get Cloudinary URLs from uploaded files
     const photoUrls = req.files.map(file => file.path);
 
@@ -105,13 +131,14 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
       success: true,
       message: "Photos uploaded successfully",
       photos: photoUrls,
-      allPhotos: updatedPhotos
+      allPhotos: updatedPhotos,
+      count: photoUrls.length
     });
   } catch (error) {
-    console.error("Error uploading photos:", error);
+    console.error("❌ Error uploading photos:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to upload photos"
+      message: error.message || "Failed to upload photos"
     });
   }
 });
@@ -139,7 +166,7 @@ router.put("/:id/photos", auth, uploadPhotos.array("photos", 10), async (req, re
       photos: photoUrls
     });
   } catch (error) {
-    console.error("Error updating photos:", error);
+    console.error("❌ Error updating photos:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update photos"
@@ -159,18 +186,39 @@ router.delete("/:id/photo", auth, async (req, res) => {
       });
     }
 
+    console.log("🗑️ Deleting photo:", photoUrl);
+
     // Extract public_id from Cloudinary URL
     // URL format: https://res.cloudinary.com/cloud_name/image/upload/v123456/folder/public_id.jpg
-    const urlParts = photoUrl.split('/');
-    const publicIdWithExtension = urlParts[urlParts.length - 1];
-    const publicId = `pg-photos/${publicIdWithExtension.split('.')[0]}`;
+    let publicId;
+    try {
+      const urlParts = photoUrl.split('/');
+      const uploadIndex = urlParts.indexOf('upload');
+      if (uploadIndex !== -1 && urlParts.length > uploadIndex + 2) {
+        // Get the part after version (if exists) or after upload
+        const pathParts = urlParts.slice(uploadIndex + 2);
+        const fullPath = pathParts.join('/');
+        // Remove file extension
+        publicId = fullPath.replace(/\.[^/.]+$/, "");
+      } else {
+        // Fallback: try to extract from end
+        const filename = urlParts[urlParts.length - 1];
+        publicId = `pg-photos/${filename.replace(/\.[^/.]+$/, "")}`;
+      }
+    } catch (e) {
+      console.error("Error extracting public_id:", e);
+      publicId = null;
+    }
 
     // Delete from Cloudinary
-    try {
-      await cloudinary.uploader.destroy(publicId);
-    } catch (cloudinaryError) {
-      console.error("Error deleting from Cloudinary:", cloudinaryError);
-      // Continue even if Cloudinary delete fails
+    if (publicId) {
+      try {
+        const result = await cloudinary.uploader.destroy(publicId);
+        console.log("Cloudinary delete result:", result);
+      } catch (cloudinaryError) {
+        console.error("Error deleting from Cloudinary:", cloudinaryError);
+        // Continue even if Cloudinary delete fails
+      }
     }
 
     // Get current photos from database
@@ -200,7 +248,7 @@ router.delete("/:id/photo", auth, async (req, res) => {
       photos: updatedPhotos
     });
   } catch (error) {
-    console.error("Error deleting photo:", error);
+    console.error("❌ Error deleting photo:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete photo"
@@ -230,7 +278,7 @@ router.put("/:id/photos/order", auth, async (req, res) => {
       message: "Photo order updated successfully"
     });
   } catch (error) {
-    console.error("Error updating photo order:", error);
+    console.error("❌ Error updating photo order:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update photo order"
@@ -279,7 +327,7 @@ router.post("/:id/videos", auth, uploadVideos.array("videos", 5), async (req, re
       videos: videoUrls
     });
   } catch (error) {
-    console.error("Error uploading videos:", error);
+    console.error("❌ Error uploading videos:", error);
     res.status(500).json({
       success: false,
       message: "Failed to upload videos"
@@ -300,15 +348,30 @@ router.delete("/:id/video", auth, async (req, res) => {
     }
 
     // Extract public_id from Cloudinary URL for videos
-    const urlParts = videoUrl.split('/');
-    const publicIdWithExtension = urlParts[urlParts.length - 1];
-    const publicId = `pg-videos/${publicIdWithExtension.split('.')[0]}`;
+    let publicId;
+    try {
+      const urlParts = videoUrl.split('/');
+      const uploadIndex = urlParts.indexOf('upload');
+      if (uploadIndex !== -1 && urlParts.length > uploadIndex + 2) {
+        const pathParts = urlParts.slice(uploadIndex + 2);
+        const fullPath = pathParts.join('/');
+        publicId = fullPath.replace(/\.[^/.]+$/, "");
+      } else {
+        const filename = urlParts[urlParts.length - 1];
+        publicId = `pg-videos/${filename.replace(/\.[^/.]+$/, "")}`;
+      }
+    } catch (e) {
+      console.error("Error extracting public_id:", e);
+      publicId = null;
+    }
 
     // Delete from Cloudinary
-    try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
-    } catch (cloudinaryError) {
-      console.error("Error deleting from Cloudinary:", cloudinaryError);
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+      } catch (cloudinaryError) {
+        console.error("Error deleting from Cloudinary:", cloudinaryError);
+      }
     }
 
     // Get current videos from database
@@ -335,7 +398,7 @@ router.delete("/:id/video", auth, async (req, res) => {
       message: "Video deleted successfully"
     });
   } catch (error) {
-    console.error("Error deleting video:", error);
+    console.error("❌ Error deleting video:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete video"
@@ -361,10 +424,16 @@ router.delete("/:id", auth, async (req, res) => {
         try {
           const photos = JSON.parse(pg[0].photos);
           for (const photoUrl of photos) {
-            const urlParts = photoUrl.split('/');
-            const publicIdWithExtension = urlParts[urlParts.length - 1];
-            const publicId = `pg-photos/${publicIdWithExtension.split('.')[0]}`;
-            await cloudinary.uploader.destroy(publicId).catch(() => {});
+            try {
+              const urlParts = photoUrl.split('/');
+              const uploadIndex = urlParts.indexOf('upload');
+              if (uploadIndex !== -1) {
+                const pathParts = urlParts.slice(uploadIndex + 2);
+                const fullPath = pathParts.join('/');
+                const publicId = fullPath.replace(/\.[^/.]+$/, "");
+                await cloudinary.uploader.destroy(publicId).catch(() => {});
+              }
+            } catch (e) {}
           }
         } catch (e) {}
       }
@@ -374,10 +443,16 @@ router.delete("/:id", auth, async (req, res) => {
         try {
           const videos = JSON.parse(pg[0].videos);
           for (const videoUrl of videos) {
-            const urlParts = videoUrl.split('/');
-            const publicIdWithExtension = urlParts[urlParts.length - 1];
-            const publicId = `pg-videos/${publicIdWithExtension.split('.')[0]}`;
-            await cloudinary.uploader.destroy(publicId, { resource_type: "video" }).catch(() => {});
+            try {
+              const urlParts = videoUrl.split('/');
+              const uploadIndex = urlParts.indexOf('upload');
+              if (uploadIndex !== -1) {
+                const pathParts = urlParts.slice(uploadIndex + 2);
+                const fullPath = pathParts.join('/');
+                const publicId = fullPath.replace(/\.[^/.]+$/, "");
+                await cloudinary.uploader.destroy(publicId, { resource_type: "video" }).catch(() => {});
+              }
+            } catch (e) {}
           }
         } catch (e) {}
       }
@@ -391,7 +466,7 @@ router.delete("/:id", auth, async (req, res) => {
       message: "PG deleted successfully"
     });
   } catch (error) {
-    console.error("Error deleting PG:", error);
+    console.error("❌ Error deleting PG:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete PG"
@@ -441,9 +516,10 @@ router.get("/:id", controller.getPGById);
 
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
+    console.error("📸 Multer Error:", err);
     return res.status(400).json({
       success: false,
-      message: err.code === "LIMIT_FILE_SIZE" ? "File too large" : "File upload error",
+      message: err.code === "LIMIT_FILE_SIZE" ? "File too large (max 5MB)" : "File upload error",
     });
   }
   next(err);
