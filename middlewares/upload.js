@@ -16,27 +16,13 @@ const storage = new CloudinaryStorage({
     folder: "pg-photos",
     allowed_formats: ["jpg", "jpeg", "png", "webp"],
     transformation: [{ width: 1200, crop: "limit" }],
-    public_id: (req, file) =>
-      "pg-photo-" + Date.now(),
+    public_id: (req, file) => "pg-photo-" + Date.now(),
   },
 });
-
-/* ================= FILE FILTER ================= */
-const fileFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|webp/;
-
-  const isValid =
-    allowed.test(file.mimetype) &&
-    allowed.test(file.originalname.toLowerCase());
-
-  if (isValid) cb(null, true);
-  else cb(new Error("Only image files are allowed"), false);
-};
 
 /* ================= MULTER ================= */
 const upload = multer({
   storage,
-  fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 

@@ -193,7 +193,8 @@ exports.uploadPhotosOnly = async (req, res) => {
       });
     }
 
-    const newPhotos = files.map(f => `/uploads/pg-photos/${f.filename}`);
+    // ✅ FIXED: Use Cloudinary path, not local path
+    const newPhotos = files.map(f => f.path);
 
     // 🔥 FIXED: Added owner_id check for security
     const [rows] = await db.query(
@@ -202,15 +203,6 @@ exports.uploadPhotosOnly = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      // Clean up uploaded files
-      for (const f of files) {
-        const filePath = path.join(__dirname, '..', 'uploads', 'pg-photos', f.filename);
-        try {
-          await fs.unlink(filePath);
-        } catch (unlinkErr) {
-          console.error('Failed to delete file:', unlinkErr);
-        }
-      }
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
@@ -231,19 +223,6 @@ exports.uploadPhotosOnly = async (req, res) => {
 
   } catch (err) {
     console.error("Photo upload error:", err);
-    
-    // Clean up uploaded files on error
-    if (req.files) {
-      for (const f of req.files) {
-        const filePath = path.join(__dirname, '..', 'uploads', 'pg-photos', f.filename);
-        try {
-          await fs.unlink(filePath);
-        } catch (unlinkErr) {
-          console.error('Failed to delete file:', unlinkErr);
-        }
-      }
-    }
-    
     res.status(500).json({ 
       success: false, 
       message: "Failed to save photos: " + err.message 
@@ -278,7 +257,8 @@ exports.addPG = async (req, res) => {
       });
     }
 
-    const photos = (req.files || []).map(f => `/uploads/pg-photos/${f.filename}`);
+    // ✅ FIXED: Use Cloudinary path, not local path
+    const photos = (req.files || []).map(f => f.path);
 
     let rent_amount = 0;
     if (b.pg_category === "to_let") {
@@ -774,7 +754,8 @@ exports.updatePG = async (req, res) => {
 
     // Handle photo updates if new files are uploaded
     if (files.length > 0) {
-      const newPhotos = files.map(f => `/uploads/pg-photos/${f.filename}`);
+      // ✅ FIXED: Use Cloudinary path
+      const newPhotos = files.map(f => f.path);
 
       const [rows] = await db.query(
         "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?",
@@ -959,13 +940,8 @@ exports.deleteSinglePhoto = async (req, res) => {
       [JSON.stringify(photos), id, req.user.mysqlId]
     );
 
-    // Try to delete the physical file
-    try {
-      const filePath = path.join(__dirname, "..", photo);
-      await fs.unlink(filePath);
-    } catch (fileErr) {
-      console.error("Failed to delete photo file:", fileErr);
-    }
+    // ✅ REMOVED: Don't try to delete from local filesystem with Cloudinary
+    // Files are on Cloudinary, not local server
 
     res.json({ success: true, photos });
 
@@ -1011,7 +987,8 @@ exports.uploadPGVideos = async (req, res) => {
       });
     }
 
-    const newVideos = req.files.map(file => `/uploads/pg-videos/${file.filename}`);
+    // ✅ FIXED: Use Cloudinary path
+    const newVideos = req.files.map(file => file.path);
 
     // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
@@ -1155,13 +1132,7 @@ exports.deleteSingleVideo = async (req, res) => {
 
     const updatedVideos = videos.filter(v => v !== video);
 
-    // Delete physical file
-    try {
-      const filePath = path.join(__dirname, "..", video);
-      await fs.unlink(filePath);
-    } catch (fileErr) {
-      console.error("Failed to delete video file:", fileErr);
-    }
+    // ✅ REMOVED: Don't try to delete from local filesystem with Cloudinary
 
     await db.query(
       "UPDATE pgs SET videos = ? WHERE id = ? AND owner_id = ?",
@@ -1260,7 +1231,6 @@ exports.cleanInvalidNotifications = async (req, res) => {
     });
   }
 };
-
 
 exports.becomeOwner = async (req, res) => {
   try {
