@@ -13,11 +13,18 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
+    // Generate a unique public_id
+    const publicId = `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    
     return {
       folder: "pg-photos",
-      public_id: `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      public_id: publicId,
+      format: file.mimetype.split('/')[1] || 'jpg',
       allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
-      transformation: [{ width: 1200, height: 800, crop: "limit" }],
+      transformation: [
+        { width: 1200, height: 800, crop: "limit" }
+      ],
+      // Don't include timestamp here - it will be added automatically
     };
   },
 });
@@ -25,8 +32,9 @@ const storage = new CloudinaryStorage({
 /* ================= MULTER ================= */
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
+    // Check file type
     if (!file.mimetype.startsWith('image/')) {
       return cb(new Error('Only image files are allowed!'), false);
     }
