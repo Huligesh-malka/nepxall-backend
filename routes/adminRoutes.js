@@ -3,17 +3,35 @@ const router = express.Router();
 
 const auth = require("../middlewares/auth");
 const adminOnly = require("../middlewares/admin");
-const adminController = require("../controllers/adminController");
 
-/* ✅ ADMIN HEALTH */
+const adminController = require("../controllers/adminController");
+const adminAuthController = require("../controllers/adminAuthController");
+
+/* ================= ADMIN AUTH ================= */
+
+// ✅ REGISTER ADMIN
+router.post("/register", adminAuthController.registerAdmin);
+
+// ✅ LOGIN ADMIN
+router.post("/login", adminAuthController.loginAdmin);
+
+
+/* ================= ADMIN HEALTH ================= */
+
 router.get("/health", (req, res) => {
   res.json({ success: true, message: "Admin API working" });
 });
 
-/* ✅ PG APPROVAL */
+
+/* ================= PG APPROVAL ================= */
+
 router.get("/pgs/pending", auth, adminOnly, adminController.getPendingPGs);
+
 router.get("/pg/:id", auth, adminOnly, adminController.getPGById);
+
 router.patch("/pg/:id/approve", auth, adminOnly, adminController.approvePG);
+
 router.patch("/pg/:id/reject", auth, adminOnly, adminController.rejectPG);
+
 
 module.exports = router;
