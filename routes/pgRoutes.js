@@ -1,100 +1,138 @@
 const express = require("express");
+const multer = require("multer");
 const router = express.Router();
-const db = require("../db");
-const auth = require("../middlewares/auth");
+
 const controller = require("../controllers/pgController");
+const auth = require("../middlewares/auth");
+const db = require("../db");
 
-const {
-  cloudinary,
-  uploadPhotos,
-  uploadVideos,
-} = require("../middlewares/upload");
+const { uploadPhotos, uploadVideos } = require("../middlewares/upload");
 
-/* ================= OWNER DASHBOARD ================= */
+/* =================================================
+   OWNER ROUTES
+================================================= */
 router.get("/owner/dashboard", auth, controller.getOwnerDashboardPGs);
 
-/* ================= ADD / UPDATE ================= */
+/* =================================================
+   ADD / UPDATE
+================================================= */
 router.post("/add", auth, uploadPhotos.array("photos", 10), controller.addPG);
 router.put("/:id", auth, uploadPhotos.array("photos", 10), controller.updatePG);
 
-/* ================= UPLOAD PHOTOS ================= */
-router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async (req, res) => {
+/* =================================================
+   PHOTOS (CLOUDINARY)
+================================================= */
+
+router.put("/:id/photos", auth, uploadPhotos.array("photos", 10), async (req, res) => {
   try {
-    const photoUrls = req.files.map((file) => file.path);
+    const newPhotos = req.files.map((file) => file.path);
 
-    const [pg] = await db.query("SELECT photos FROM pg WHERE id=?", [req.params.id]);
+    const [rows] = await db.query("SELECT photos FROM pgs WHERE id = ?", [req.params.id]);
 
-    let existing = pg[0]?.photos ? JSON.parse(pg[0].photos) : [];
+    let existing = rows[0]?.photos ? JSON.parse(rows[0].photos) : [];
 
-    const updated = [...existing, ...photoUrls];
+    const updatedPhotos = [...existing, ...newPhotos];
 
-    await db.query("UPDATE pg SET photos=? WHERE id=?", [
-      JSON.stringify(updated),
+    await db.query("UPDATE pgs SET photos = ? WHERE id = ?", [
+      JSON.stringify(updatedPhotos),
       req.params.id,
     ]);
 
-    res.json({ success: true, photos: updated });
+    res.json({ success: true, photos: updatedPhotos });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= DELETE PHOTO ================= */
-router.delete("/:id/photo", auth, async (req, res) => {
-  try {
-    const { photoUrl } = req.body;
+router.delete("/:id/photo", auth, controller.deleteSinglePhoto);
 
-    const publicId = photoUrl
-      .split("/upload/")[1]
-      .split(".")[0];
+router.put("/:id/photos/order", auth, controller.updatePhotoOrder);
 
-    await cloudinary.uploader.destroy(publicId);
+/* =================================================
+   VIDEOS (CLOUDINARY)
+================================================= */
 
-    const [pg] = await db.query("SELECT photos FROM pg WHERE id=?", [req.params.id]);
-
-    const updated = JSON.parse(pg[0].photos).filter((p) => p !== photoUrl);
-
-    await db.query("UPDATE pg SET photos=? WHERE id=?", [
-      JSON.stringify(updated),
-      req.params.id,
-    ]);
-
-    res.json({ success: true, photos: updated });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/* ================= PHOTO ORDER ================= */
-router.put("/:id/photos/order", auth, async (req, res) => {
-  await db.query("UPDATE pg SET photos=? WHERE id=?", [
-    JSON.stringify(req.body.photos),
-    req.params.id,
-  ]);
-
-  res.json({ success: true });
-});
-
-/* ================= VIDEOS ================= */
 router.post("/:id/videos", auth, uploadVideos.array("videos", 5), async (req, res) => {
-  const videoUrls = req.files.map((file) => file.path);
-  await db.query("UPDATE pg SET videos=? WHERE id=?", [
-    JSON.stringify(videoUrls),
-    req.params.id,
-  ]);
-  res.json({ success: true, videos: videoUrls });
+  try {
+    const newVideos = req.files.map((file) => file.path);
+
+    const [rows] = await db.query("SELECT videos FROM pgs WHERE id = ?", [req.params.id]);
+
+    let existing = rows[0]?.videos ? JSON.parse(rows[0].videos) : [];
+
+    const updatedVideos = [...existing, ...newVideos];
+
+    await db.query("UPDATE pgs SET videos = ? WHERE id = ?", [
+      JSON.stringify(updatedVideos),
+      req.params.id,
+    ]);
+
+    res.json({ success: true, videos: updatedVideos });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
-/* ================= STATUS ================= */
+router.delete("/:id/video", auth, controller.deleteSingleVideo);
+
+/* =================================================
+   STATUS & DELETE
+================================================= */
+
 router.patch("/:id/status", auth, controller.updatePGStatus);
+router.delete("/:id", auth, controller.deletePG);
 
-/* ================= DELETE PG ================= */
-router.delete("/:id", auth, async (req, res) => {
-  await db.query("DELETE FROM pg WHERE id=?", [req.params.id]);
-  res.json({ success: true });
+/* =================================================
+   PUBLIC ROUTES
+================================================= */
+
+router.get("/nearby/:lat/:lng", controller.getNearbyPGs);
+router.get("/search/advanced", controller.advancedSearchPG);
+
+/* =================================================
+   USER HELPERS
+================================================= */
+
+router.get("/user/:firebaseUid", auth, controller.getUserByFirebaseUid);
+
+router.get("/user-by-id/:id", auth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT id, name FROM users WHERE id = ?",
+      [req.params.id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
-/* ================= PUBLIC ================= */
+/* =================================================
+   🔥 ALWAYS KEEP LAST
+================================================= */
+
 router.get("/:id", controller.getPGById);
+
+/* =================================================
+   MULTER ERROR HANDLER
+================================================= */
+
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({
+      success: false,
+      message:
+        err.code === "LIMIT_FILE_SIZE"
+          ? "File too large (max 5MB)"
+          : "File upload error",
+    });
+  }
+  next(err);
+});
 
 module.exports = router;
