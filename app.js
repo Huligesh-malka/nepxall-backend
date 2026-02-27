@@ -62,17 +62,6 @@ app.use(
   })
 );
 
-/* ======================================================
-   📁 LOCAL STATIC (ONLY FOR DEVELOPMENT)
-   ⚠️ Render filesystem is temporary
-====================================================== */
-if (process.env.NODE_ENV !== "production") {
-  app.use(
-    "/uploads",
-    express.static(path.join(__dirname, "uploads"))
-  );
-}
-
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
@@ -105,6 +94,11 @@ app.get("/api/diagnose", async (req, res) => {
       firebase: process.env.FIREBASE_SERVICE_ACCOUNT
         ? "configured"
         : "missing",
+      cloudinary: {
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? "configured" : "missing",
+        api_key: process.env.CLOUDINARY_API_KEY ? "configured" : "missing",
+        api_secret: process.env.CLOUDINARY_API_SECRET ? "configured" : "missing",
+      }
     });
   } catch (err) {
     res.status(500).json({
