@@ -9,37 +9,67 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= STORAGE ================= */
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+/* ================= PHOTO STORAGE ================= */
+const photoStorage = new CloudinaryStorage({
+  cloudinary,
   params: async (req, file) => {
-    // Generate a unique public_id
-    const publicId = `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    
+    const ext = file.mimetype.split("/")[1];
+
     return {
       folder: "pg-photos",
-      public_id: publicId,
-      format: file.mimetype.split('/')[1] || 'jpg',
-      allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
+      public_id: `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "image",
+      format: ext,
       transformation: [
-        { width: 1200, height: 800, crop: "limit" }
+        {
+          width: 1200,
+          height: 800,
+          crop: "limit",
+          quality: "auto",
+          fetch_format: "auto",
+        },
       ],
-      // Don't include timestamp here - it will be added automatically
     };
   },
 });
 
-/* ================= MULTER ================= */
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (req, file, cb) => {
-    // Check file type
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Only image files are allowed!'), false);
-    }
-    cb(null, true);
-  }
+/* ================= VIDEO STORAGE ================= */
+const videoStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async () => ({
+    folder: "pg-videos",
+    resource_type: "video",
+    public_id: `pg-video-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+    transformation: [{ width: 1280, crop: "limit" }],
+  }),
 });
 
-module.exports = upload;
+/* ================= MULTER ================= */
+
+const uploadPhotos = multer({
+  storage: photoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"), false);
+    }
+    cb(null, true);
+  },
+});
+
+const uploadVideos = multer({
+  storage: videoStorage,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("video/")) {
+      return cb(new Error("Only video files are allowed"), false);
+    }
+    cb(null, true);
+  },
+});
+
+module.exports = {
+  cloudinary,
+  uploadPhotos,
+  uploadVideos,
+};
