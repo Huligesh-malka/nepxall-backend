@@ -17,10 +17,10 @@ console.log("📸 Cloudinary Config:", {
 });
 
 /* =================================================
-   CLOUDINARY STORAGE CONFIG - FIXED VERSION
+   CLOUDINARY STORAGE CONFIG
 ================================================= */
 
-// Configure Cloudinary storage for photos - Using async params function
+// Configure Cloudinary storage for photos
 const photoStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
@@ -94,6 +94,9 @@ router.put("/:id", auth, uploadPhotos.array("photos", 10), controller.updatePG);
 // Upload photos only (returns Cloudinary URLs)
 router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async (req, res) => {
   try {
+    console.log("📸 Upload request received for PG:", req.params.id);
+    console.log("Files received:", req.files?.length || 0);
+
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -101,10 +104,11 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
       });
     }
 
-    console.log(`📸 Uploaded ${req.files.length} photos for PG ID: ${req.params.id}`);
-
     // Get Cloudinary URLs from uploaded files
-    const photoUrls = req.files.map(file => file.path);
+    const photoUrls = req.files.map(file => {
+      console.log(`✅ Uploaded: ${file.originalname} -> ${file.path}`);
+      return file.path;
+    });
 
     // Get current photos from database
     const [pg] = await db.query("SELECT photos FROM pg WHERE id = ?", [req.params.id]);
@@ -113,6 +117,8 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
     if (pg[0]?.photos) {
       try {
         existingPhotos = JSON.parse(pg[0].photos);
+        // Filter out any non-Cloudinary URLs (local paths)
+        existingPhotos = existingPhotos.filter(url => url.includes('cloudinary.com') || url.startsWith('http'));
       } catch (e) {
         existingPhotos = [];
       }
@@ -136,6 +142,7 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
     });
   } catch (error) {
     console.error("❌ Error uploading photos:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({
       success: false,
       message: error.message || "Failed to upload photos"
@@ -189,35 +196,23 @@ router.delete("/:id/photo", auth, async (req, res) => {
     console.log("🗑️ Deleting photo:", photoUrl);
 
     // Extract public_id from Cloudinary URL
-    // URL format: https://res.cloudinary.com/cloud_name/image/upload/v123456/folder/public_id.jpg
-    let publicId;
-    try {
-      const urlParts = photoUrl.split('/');
-      const uploadIndex = urlParts.indexOf('upload');
-      if (uploadIndex !== -1 && urlParts.length > uploadIndex + 2) {
-        // Get the part after version (if exists) or after upload
-        const pathParts = urlParts.slice(uploadIndex + 2);
-        const fullPath = pathParts.join('/');
-        // Remove file extension
-        publicId = fullPath.replace(/\.[^/.]+$/, "");
-      } else {
-        // Fallback: try to extract from end
-        const filename = urlParts[urlParts.length - 1];
-        publicId = `pg-photos/${filename.replace(/\.[^/.]+$/, "")}`;
-      }
-    } catch (e) {
-      console.error("Error extracting public_id:", e);
-      publicId = null;
-    }
-
-    // Delete from Cloudinary
-    if (publicId) {
+    if (photoUrl.includes('cloudinary.com')) {
       try {
-        const result = await cloudinary.uploader.destroy(publicId);
-        console.log("Cloudinary delete result:", result);
+        // URL format: https://res.cloudinary.com/cloud_name/image/upload/v123456/folder/public_id.jpg
+        const urlParts = photoUrl.split('/');
+        const uploadIndex = urlParts.indexOf('upload');
+        if (uploadIndex !== -1 && urlParts.length > uploadIndex + 2) {
+          // Get the part after version (if exists) or after upload
+          const pathParts = urlParts.slice(uploadIndex + 2);
+          const fullPath = pathParts.join('/');
+          // Remove file extension
+          const publicId = fullPath.replace(/\.[^/.]+$/, "");
+          
+          await cloudinary.uploader.destroy(publicId);
+          console.log("✅ Deleted from Cloudinary");
+        }
       } catch (cloudinaryError) {
         console.error("Error deleting from Cloudinary:", cloudinaryError);
-        // Continue even if Cloudinary delete fails
       }
     }
 
@@ -228,6 +223,8 @@ router.delete("/:id/photo", auth, async (req, res) => {
     if (pg[0]?.photos) {
       try {
         existingPhotos = JSON.parse(pg[0].photos);
+        // Filter out local paths
+        existingPhotos = existingPhotos.filter(url => url.includes('cloudinary.com') || url.startsWith('http'));
       } catch (e) {
         existingPhotos = [];
       }
@@ -348,27 +345,16 @@ router.delete("/:id/video", auth, async (req, res) => {
     }
 
     // Extract public_id from Cloudinary URL for videos
-    let publicId;
-    try {
-      const urlParts = videoUrl.split('/');
-      const uploadIndex = urlParts.indexOf('upload');
-      if (uploadIndex !== -1 && urlParts.length > uploadIndex + 2) {
-        const pathParts = urlParts.slice(uploadIndex + 2);
-        const fullPath = pathParts.join('/');
-        publicId = fullPath.replace(/\.[^/.]+$/, "");
-      } else {
-        const filename = urlParts[urlParts.length - 1];
-        publicId = `pg-videos/${filename.replace(/\.[^/.]+$/, "")}`;
-      }
-    } catch (e) {
-      console.error("Error extracting public_id:", e);
-      publicId = null;
-    }
-
-    // Delete from Cloudinary
-    if (publicId) {
+    if (videoUrl.includes('cloudinary.com')) {
       try {
-        await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+        const urlParts = videoUrl.split('/');
+        const uploadIndex = urlParts.indexOf('upload');
+        if (uploadIndex !== -1) {
+          const pathParts = urlParts.slice(uploadIndex + 2);
+          const fullPath = pathParts.join('/');
+          const publicId = fullPath.replace(/\.[^/.]+$/, "");
+          await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+        }
       } catch (cloudinaryError) {
         console.error("Error deleting from Cloudinary:", cloudinaryError);
       }
@@ -424,16 +410,18 @@ router.delete("/:id", auth, async (req, res) => {
         try {
           const photos = JSON.parse(pg[0].photos);
           for (const photoUrl of photos) {
-            try {
-              const urlParts = photoUrl.split('/');
-              const uploadIndex = urlParts.indexOf('upload');
-              if (uploadIndex !== -1) {
-                const pathParts = urlParts.slice(uploadIndex + 2);
-                const fullPath = pathParts.join('/');
-                const publicId = fullPath.replace(/\.[^/.]+$/, "");
-                await cloudinary.uploader.destroy(publicId).catch(() => {});
-              }
-            } catch (e) {}
+            if (photoUrl.includes('cloudinary.com')) {
+              try {
+                const urlParts = photoUrl.split('/');
+                const uploadIndex = urlParts.indexOf('upload');
+                if (uploadIndex !== -1) {
+                  const pathParts = urlParts.slice(uploadIndex + 2);
+                  const fullPath = pathParts.join('/');
+                  const publicId = fullPath.replace(/\.[^/.]+$/, "");
+                  await cloudinary.uploader.destroy(publicId).catch(() => {});
+                }
+              } catch (e) {}
+            }
           }
         } catch (e) {}
       }
@@ -443,16 +431,18 @@ router.delete("/:id", auth, async (req, res) => {
         try {
           const videos = JSON.parse(pg[0].videos);
           for (const videoUrl of videos) {
-            try {
-              const urlParts = videoUrl.split('/');
-              const uploadIndex = urlParts.indexOf('upload');
-              if (uploadIndex !== -1) {
-                const pathParts = urlParts.slice(uploadIndex + 2);
-                const fullPath = pathParts.join('/');
-                const publicId = fullPath.replace(/\.[^/.]+$/, "");
-                await cloudinary.uploader.destroy(publicId, { resource_type: "video" }).catch(() => {});
-              }
-            } catch (e) {}
+            if (videoUrl.includes('cloudinary.com')) {
+              try {
+                const urlParts = videoUrl.split('/');
+                const uploadIndex = urlParts.indexOf('upload');
+                if (uploadIndex !== -1) {
+                  const pathParts = urlParts.slice(uploadIndex + 2);
+                  const fullPath = pathParts.join('/');
+                  const publicId = fullPath.replace(/\.[^/.]+$/, "");
+                  await cloudinary.uploader.destroy(publicId, { resource_type: "video" }).catch(() => {});
+                }
+              } catch (e) {}
+            }
           }
         } catch (e) {}
       }
