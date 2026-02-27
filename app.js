@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
 const helmet = require("helmet");
 
 const app = express();
@@ -8,7 +7,7 @@ const app = express();
 /* ================= TRUST PROXY ================= */
 app.set("trust proxy", 1);
 
-/* ================= BASIC SECURITY ================= */
+/* ================= SECURITY ================= */
 app.use(helmet());
 
 /* ================= LOGGER ================= */
@@ -18,7 +17,7 @@ app.use((req, res, next) => {
 });
 
 /* ======================================================
-   💳 CASHFREE WEBHOOK (RAW BODY ONLY HERE)
+   💳 CASHFREE WEBHOOK (RAW BODY ONLY)
 ====================================================== */
 app.post(
   "/api/payments/webhook",
@@ -39,6 +38,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ================= CORS ================= */
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5000",
@@ -46,25 +46,26 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
 
-      // allow all vercel deployments
-      if (origin.includes("vercel.app")) return callback(null, true);
+    if (origin.includes("vercel.app")) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
 
-      console.log("❌ Blocked by CORS:", origin);
-      return callback(null, true); // ✅ prevent random frontend failure
-    },
-    credentials: true,
-  })
-);
+    console.log("❌ Blocked by CORS:", origin);
 
-/* ================= PREFLIGHT ================= */
-app.options("*", cors());
+    // allow instead of crash (production friendly)
+    return callback(null, true);
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
+/* ✅ EXPRESS 5 SAFE PREFLIGHT */
+app.options(/.*/, cors(corsOptions));
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
@@ -120,7 +121,7 @@ setInterval(async () => {
   } catch (err) {
     console.log("⚠️ DB Warmup failed:", err.message);
   }
-}, 5 * 60 * 1000); // every 5 minutes
+}, 5 * 60 * 1000);
 
 /* ======================================================
    🧠 SAFE ROUTE LOADER
