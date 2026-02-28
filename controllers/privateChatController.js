@@ -1,34 +1,51 @@
+// controllers/privateChatController.js
 const db = require("../db");
 
 /* =========================================================
    🧠 GET OR CREATE MYSQL USER FROM FIREBASE
 ========================================================= */
 async function getMe(firebaseUser) {
-  const { uid, name, email, phone_number } = firebaseUser;
+  try {
+    const { uid, name, email, phone_number } = firebaseUser;
 
-  let [rows] = await db.query(
-    "SELECT id, name, email, role, firebase_uid FROM users WHERE firebase_uid=?",
-    [uid]
-  );
+    console.log("🔍 Looking up user with firebase_uid:", uid);
 
-  if (rows.length === 0) {
-    const [result] = await db.query(
-      `INSERT INTO users (firebase_uid, name, email, phone, role)
-       VALUES (?, ?, ?, ?, 'tenant')`,
-      [uid, name || null, email || null, phone_number || null]
+    let [rows] = await db.query(
+      "SELECT id, name, email, role, firebase_uid FROM users WHERE firebase_uid=?",
+      [uid]
     );
 
-    return {
-      id: result.insertId,
-      name: name || (email ? email.split("@")[0] : "User"),
-      firebase_uid: uid,
-      role: "tenant",
-    };
-  }
+    if (rows.length === 0) {
+      console.log("👤 Creating new user for firebase_uid:", uid);
+      
+      // Determine role - you might want to check if this is an owner signup
+      const role = 'tenant'; // Default to tenant
+      
+      const [result] = await db.query(
+        `INSERT INTO users (firebase_uid, name, email, phone, role)
+         VALUES (?, ?, ?, ?, ?)`,
+        [uid, name || null, email || null, phone_number || null, role]
+      );
 
-  const user = rows[0];
-  user.name = user.name || (user.email ? user.email.split("@")[0] : "User");
-  return user;
+      const newUser = {
+        id: result.insertId,
+        name: name || (email ? email.split("@")[0] : "User"),
+        firebase_uid: uid,
+        role: role,
+      };
+      
+      console.log("✅ Created new user:", newUser);
+      return newUser;
+    }
+
+    const user = rows[0];
+    user.name = user.name || (user.email ? user.email.split("@")[0] : "User");
+    console.log("✅ Found existing user:", user);
+    return user;
+  } catch (err) {
+    console.error("❌ Error in getMe:", err);
+    throw err;
+  }
 }
 
 /* =========================================================
@@ -36,10 +53,16 @@ async function getMe(firebaseUser) {
 ========================================================= */
 const getMeHandler = async (req, res) => {
   try {
+    console.log("📡 getMeHandler called with user:", req.user?.uid);
+    
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
     const me = await getMe(req.user);
     res.json(me);
   } catch (err) {
-    console.error("getMe error:", err);
+    console.error("❌ getMe error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -49,6 +72,8 @@ const getMeHandler = async (req, res) => {
 ========================================================= */
 const getMyChatList = async (req, res) => {
   try {
+    console.log("📡 getMyChatList called");
+    
     const me = await getMe(req.user);
 
     const [rows] = await db.query(
@@ -85,9 +110,10 @@ const getMyChatList = async (req, res) => {
       [me.id, me.id, me.id, me.id, me.id]
     );
 
+    console.log(`📋 Found ${rows.length} conversations`);
     res.json(rows);
   } catch (err) {
-    console.error("getMyChatList error:", err);
+    console.error("❌ getMyChatList error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -97,15 +123,18 @@ const getMyChatList = async (req, res) => {
 ========================================================= */
 const getUserById = async (req, res) => {
   try {
+    console.log("📡 getUserById called for id:", req.params.id);
+    
     const [rows] = await db.query(
       `SELECT id, name, firebase_uid, email, role 
        FROM users WHERE id = ?`,
       [req.params.id]
     );
 
+    console.log("👤 Found user:", rows[0]);
     res.json(rows[0] || null);
   } catch (err) {
-    console.error("getUserById error:", err);
+    console.error("❌ getUserById error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -115,6 +144,8 @@ const getUserById = async (req, res) => {
 ========================================================= */
 const getPrivateMessages = async (req, res) => {
   try {
+    console.log("📡 getPrivateMessages called for userId:", req.params.userId);
+    
     const me = await getMe(req.user);
     const otherId = Number(req.params.userId);
 
@@ -139,9 +170,10 @@ const getPrivateMessages = async (req, res) => {
       [me.id, otherId, otherId, me.id]
     );
 
+    console.log(`💬 Found ${rows.length} messages`);
     res.json(rows);
   } catch (err) {
-    console.error("getPrivateMessages error:", err);
+    console.error("❌ getPrivateMessages error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -149,9 +181,10 @@ const getPrivateMessages = async (req, res) => {
 /* =========================================================
    📤 SEND MESSAGE
 ========================================================= */
-// In your sendPrivateMessage function, make sure to return the complete data
 const sendPrivateMessage = async (req, res) => {
   try {
+    console.log("📡 sendPrivateMessage called with body:", req.body);
+    
     const me = await getMe(req.user);
     const { receiver_id, message } = req.body;
 
@@ -192,7 +225,28 @@ const sendPrivateMessage = async (req, res) => {
     console.log("✅ Message saved:", messageData);
     res.json(messageData);
   } catch (err) {
-    console.error("sendPrivateMessage error:", err);
+    console.error("❌ sendPrivateMessage error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* =========================================================
+   ✏️ UPDATE MESSAGE
+========================================================= */
+const updatePrivateMessage = async (req, res) => {
+  try {
+    console.log("📡 updatePrivateMessage called for id:", req.params.id);
+    
+    const me = await getMe(req.user);
+
+    await db.query(
+      "UPDATE private_messages SET message = ? WHERE id = ? AND sender_id = ?",
+      [req.body.message, req.params.id, me.id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ updatePrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -202,13 +256,15 @@ const sendPrivateMessage = async (req, res) => {
 ========================================================= */
 const deletePrivateMessage = async (req, res) => {
   try {
+    console.log("📡 deletePrivateMessage called for id:", req.params.id);
+    
     await db.query("DELETE FROM private_messages WHERE id = ?", [
       req.params.id,
     ]);
 
     res.json({ success: true });
   } catch (err) {
-    console.error("deletePrivateMessage error:", err);
+    console.error("❌ deletePrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
