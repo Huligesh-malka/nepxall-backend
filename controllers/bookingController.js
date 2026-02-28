@@ -90,9 +90,11 @@ exports.createBooking = async (req, res) => {
 exports.getUserBookings = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT 
+      `
+      SELECT 
         b.id,
         b.pg_id,
+        b.owner_id,
         b.room_id,
         b.room_type,
         b.check_in_date,
@@ -106,7 +108,6 @@ exports.getUserBookings = async (req, res) => {
         b.kyc_verified,
         b.agreement_signed,
         b.move_in_completed,
-
         b.created_at,
 
         p.pg_name,
@@ -121,7 +122,8 @@ exports.getUserBookings = async (req, res) => {
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
       WHERE b.user_id=?
-      ORDER BY b.created_at DESC`,
+      ORDER BY b.created_at DESC
+      `,
       [req.user.mysqlId]
     );
 
@@ -131,7 +133,6 @@ exports.getUserBookings = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 //////////////////////////////////////////////////////
 // 👑 OWNER BOOKINGS
 //////////////////////////////////////////////////////
