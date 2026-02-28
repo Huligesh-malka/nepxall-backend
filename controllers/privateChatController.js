@@ -79,42 +79,75 @@ exports.getMyChatList = async (req, res) => {
 
     const [rows] = await db.query(
       `
-      SELECT 
-        u.id,
-        COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User') AS name,
-        u.firebase_uid,
+SELECT 
+  u.id,
 
-        pm.message AS last_message,
-        pm.created_at AS last_time,
+  /* 👇 NAME LOGIC */
+  CASE 
+    WHEN me.role = 'tenant' THEN p.pg_name
+    ELSE COALESCE(b.name, u.name, 'User')
+  END AS name,
 
-        CASE WHEN pm.sender_id=? THEN 'me' ELSE 'other' END AS last_sender,
+  p.pg_name,
+  p.id AS pg_id,
 
-        (
-          SELECT COUNT(*) FROM private_messages
-          WHERE sender_id = u.id 
-          AND receiver_id = ?
-          AND is_read = 0
-        ) AS unread
+  pm.message AS last_message,
+  pm.created_at AS last_time,
 
-      FROM private_messages pm
+  CASE 
+    WHEN pm.sender_id=? THEN 'me' 
+    ELSE 'other' 
+  END AS last_sender,
 
-      JOIN users u 
-        ON u.id = CASE 
-            WHEN pm.sender_id=? THEN pm.receiver_id 
-            ELSE pm.sender_id 
-          END
+  (
+    SELECT COUNT(*)
+    FROM private_messages
+    WHERE sender_id = u.id
+      AND receiver_id = ?
+      AND is_read = 0
+  ) AS unread
 
-      WHERE pm.id IN (
-        SELECT MAX(id)
-        FROM private_messages
-        WHERE sender_id=? OR receiver_id=?
-        GROUP BY LEAST(sender_id,receiver_id),
-                 GREATEST(sender_id,receiver_id)
-      )
+FROM private_messages pm
 
-      ORDER BY last_time DESC
-      `,
-      [me.id, me.id, me.id, me.id, me.id]
+JOIN users u 
+  ON u.id = CASE 
+      WHEN pm.sender_id=? THEN pm.receiver_id 
+      ELSE pm.sender_id 
+    END
+
+/* 🔥 BOOKING RELATION */
+JOIN bookings b 
+  ON (
+    (b.user_id = u.id AND b.owner_id = ?)
+    OR
+    (b.owner_id = u.id AND b.user_id = ?)
+  )
+
+JOIN pgs p ON p.id = b.pg_id
+
+/* 🧠 REQUIRED TO USE me.role INSIDE SQL */
+JOIN (SELECT ? AS role) me
+
+WHERE pm.id IN (
+  SELECT MAX(id)
+  FROM private_messages
+  WHERE sender_id=? OR receiver_id=?
+  GROUP BY LEAST(sender_id,receiver_id),
+           GREATEST(sender_id,receiver_id)
+)
+
+ORDER BY last_time DESC
+`,
+      [
+        me.id,
+        me.id,
+        me.id,
+        me.id,
+        me.id,
+        me.role,
+        me.id,
+        me.id
+      ]
     );
 
     res.json(rows);
