@@ -54,13 +54,15 @@ const corsOptions = {
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
     console.log("❌ Blocked by CORS:", origin);
-    return callback(null, true); // allow in production
+    return callback(null, true);
   },
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+
+/* ✅ EXPRESS 5 PREFLIGHT FIX */
+app.options(/.*/, cors(corsOptions));
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
@@ -116,7 +118,7 @@ app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
 /* ================= SOCIAL ================= */
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
-app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes")); // ⭐ IMPORTANT
+app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
 app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
