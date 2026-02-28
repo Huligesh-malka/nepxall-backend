@@ -4,11 +4,26 @@ const db = require("../db");
    🧠 GET OR CREATE MYSQL USER FROM FIREBASE (SAFE)
 ========================================================= */
 async function getMe(firebaseUser) {
-  const { uid, name, email, phone_number } = firebaseUser;
+
+  // ✅ SUPPORT BOTH AUTH FORMATS
+  const uid = firebaseUser.uid || firebaseUser.firebaseUid;
+  const name = firebaseUser.name || "User";
+  const email = firebaseUser.email || null;
+  const phone_number = firebaseUser.phone_number || firebaseUser.phone || null;
+
+  // ✅ IF MYSQL ID ALREADY PROVIDED → SKIP DB SEARCH
+  if (firebaseUser.mysqlId) {
+    return {
+      id: firebaseUser.mysqlId,
+      name,
+      email,
+      role: firebaseUser.role
+    };
+  }
 
   if (!uid) throw new Error("Firebase UID missing");
 
-  // 1️⃣ find by firebase_uid
+  /* 1️⃣ FIND BY FIREBASE UID */
   let [rows] = await db.query(
     "SELECT id, name, email, role FROM users WHERE firebase_uid=? LIMIT 1",
     [uid]
@@ -16,7 +31,7 @@ async function getMe(firebaseUser) {
 
   if (rows.length) return rows[0];
 
-  // 2️⃣ find by phone
+  /* 2️⃣ FIND BY PHONE */
   if (phone_number) {
     [rows] = await db.query(
       "SELECT id, name, email, role FROM users WHERE phone=? LIMIT 1",
@@ -32,21 +47,21 @@ async function getMe(firebaseUser) {
     }
   }
 
-  // 3️⃣ create
+  /* 3️⃣ CREATE NEW USER */
   const [result] = await db.query(
     `INSERT INTO users (firebase_uid, name, email, phone, role)
      VALUES (?, ?, ?, ?, 'tenant')`,
     [
       uid,
       name || (email ? email.split("@")[0] : "User"),
-      email || null,
-      phone_number || null,
+      email,
+      phone_number,
     ]
   );
 
   return {
     id: result.insertId,
-    name: name || "User",
+    name,
     role: "tenant",
   };
 }
@@ -121,6 +136,7 @@ exports.getMyChatList = async (req, res) => {
     );
 
     res.json(rows);
+
   } catch (err) {
     console.error("getMyChatList error:", err);
     res.status(500).json({ message: "Server error" });
@@ -141,7 +157,8 @@ exports.getUserById = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
 
     res.json(rows[0]);
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -167,7 +184,6 @@ exports.getPrivateMessages = async (req, res) => {
       [me.id, otherId, otherId, me.id]
     );
 
-    // ✅ mark as read
     await db.query(
       `UPDATE private_messages 
        SET is_read = 1 
@@ -176,7 +192,8 @@ exports.getPrivateMessages = async (req, res) => {
     );
 
     res.json(rows);
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -207,7 +224,8 @@ exports.sendPrivateMessage = async (req, res) => {
       created_at: new Date(),
       status: "sent",
     });
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -225,6 +243,7 @@ exports.updatePrivateMessage = async (req, res) => {
     );
 
     res.json({ success: true });
+
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -243,6 +262,7 @@ exports.deletePrivateMessage = async (req, res) => {
     );
 
     res.json({ success: true });
+
   } catch {
     res.status(500).json({ message: "Server error" });
   }
