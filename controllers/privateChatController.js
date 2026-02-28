@@ -79,75 +79,42 @@ exports.getMyChatList = async (req, res) => {
 
     const [rows] = await db.query(
       `
-SELECT 
-  u.id,
+      SELECT 
+        u.id,
+        COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User') AS name,
+        u.firebase_uid,
 
-  /* 👇 NAME LOGIC */
-  CASE 
-    WHEN me.role = 'tenant' THEN p.pg_name
-    ELSE COALESCE(b.name, u.name, 'User')
-  END AS name,
+        pm.message AS last_message,
+        pm.created_at AS last_time,
 
-  p.pg_name,
-  p.id AS pg_id,
+        CASE WHEN pm.sender_id=? THEN 'me' ELSE 'other' END AS last_sender,
 
-  pm.message AS last_message,
-  pm.created_at AS last_time,
+        (
+          SELECT COUNT(*) FROM private_messages
+          WHERE sender_id = u.id 
+          AND receiver_id = ?
+          AND is_read = 0
+        ) AS unread
 
-  CASE 
-    WHEN pm.sender_id=? THEN 'me' 
-    ELSE 'other' 
-  END AS last_sender,
+      FROM private_messages pm
 
-  (
-    SELECT COUNT(*)
-    FROM private_messages
-    WHERE sender_id = u.id
-      AND receiver_id = ?
-      AND is_read = 0
-  ) AS unread
+      JOIN users u 
+        ON u.id = CASE 
+            WHEN pm.sender_id=? THEN pm.receiver_id 
+            ELSE pm.sender_id 
+          END
 
-FROM private_messages pm
+      WHERE pm.id IN (
+        SELECT MAX(id)
+        FROM private_messages
+        WHERE sender_id=? OR receiver_id=?
+        GROUP BY LEAST(sender_id,receiver_id),
+                 GREATEST(sender_id,receiver_id)
+      )
 
-JOIN users u 
-  ON u.id = CASE 
-      WHEN pm.sender_id=? THEN pm.receiver_id 
-      ELSE pm.sender_id 
-    END
-
-/* 🔥 BOOKING RELATION */
-JOIN bookings b 
-  ON (
-    (b.user_id = u.id AND b.owner_id = ?)
-    OR
-    (b.owner_id = u.id AND b.user_id = ?)
-  )
-
-JOIN pgs p ON p.id = b.pg_id
-
-/* 🧠 REQUIRED TO USE me.role INSIDE SQL */
-JOIN (SELECT ? AS role) me
-
-WHERE pm.id IN (
-  SELECT MAX(id)
-  FROM private_messages
-  WHERE sender_id=? OR receiver_id=?
-  GROUP BY LEAST(sender_id,receiver_id),
-           GREATEST(sender_id,receiver_id)
-)
-
-ORDER BY last_time DESC
-`,
-      [
-        me.id,
-        me.id,
-        me.id,
-        me.id,
-        me.id,
-        me.role,
-        me.id,
-        me.id
-      ]
+      ORDER BY last_time DESC
+      `,
+      [me.id, me.id, me.id, me.id, me.id]
     );
 
     res.json(rows);
@@ -163,25 +130,44 @@ ORDER BY last_time DESC
 ========================================================= */
 exports.getUserById = async (req, res) => {
   try {
-    const userId = Number(req.params.id);
-
-    if (!userId) {
-      return res.status(400).json({ message: "Invalid user id" });
-    }
+    const me = req.me;
+    const otherId = Number(req.params.id);
 
     const [rows] = await db.query(
-      "SELECT id, name, firebase_uid FROM users WHERE id=? LIMIT 1",
-      [userId]
+      `
+SELECT 
+  u.id,
+
+  /* 🎯 ROLE BASED NAME */
+  CASE 
+    WHEN ? = 'tenant' THEN p.pg_name      -- tenant sees PG name
+    ELSE b.name                           -- owner sees tenant name
+  END AS name,
+
+  p.pg_name
+
+FROM bookings b
+JOIN pgs p ON p.id = b.pg_id
+JOIN users u 
+  ON (
+    (u.id = b.owner_id AND b.user_id = ?)
+    OR
+    (u.id = b.user_id AND b.owner_id = ?)
+  )
+
+WHERE u.id = ?
+LIMIT 1
+      `,
+      [me.role, me.id, me.id, otherId]
     );
 
-    if (!rows.length) {
+    if (!rows.length)
       return res.status(404).json({ message: "User not found" });
-    }
 
     res.json(rows[0]);
 
   } catch (err) {
-    console.error("getUserById error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
