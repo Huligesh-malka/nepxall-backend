@@ -110,56 +110,74 @@ exports.getUserById = async (req, res) => {
 exports.sendPrivateMessage = async (req, res) => {
   try {
     const me = await getMe(req.user);
-    const { receiver_id, message } = req.body;
+    const receiverId = Number(req.body.receiver_id);
+    const message = req.body.message?.trim();
+
+    if (!receiverId || !message) {
+      return res.status(400).json({ message: "Missing fields" });
+    }
 
     const [result] = await db.query(
-      `INSERT INTO private_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)`,
-      [me.id, receiver_id, message.trim()]
+      `INSERT INTO private_messages 
+       (sender_id, receiver_id, message) 
+       VALUES (?, ?, ?)`,
+      [me.id, receiverId, message]
     );
 
     res.json({
       id: result.insertId,
       sender_id: me.id,
-      receiver_id,
-      message: message.trim(),
+      receiver_id: receiverId,
+      message,
       created_at: new Date(),
     });
   } catch (err) {
+    console.error("sendPrivateMessage Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
-
 /* =========================================================
    📥 GET CONVERSATION
 ========================================================= */
 exports.getPrivateMessages = async (req, res) => {
   try {
     const me = await getMe(req.user);
-    const otherUserId = req.params.userId;
+    const otherUserId = Number(req.params.userId);
 
-    // Mark messages as read when opening conversation
+    if (!otherUserId) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
     await db.query(
-      "UPDATE private_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ?",
+      `UPDATE private_messages 
+       SET is_read = 1 
+       WHERE sender_id = ? AND receiver_id = ?`,
       [otherUserId, me.id]
     );
 
     const [rows] = await db.query(
       `SELECT pm.*, 
-        CASE WHEN s.role = 'owner' THEN (SELECT pg_name FROM pgs WHERE owner_id = s.id LIMIT 1)
-        ELSE COALESCE(s.name,'User') END AS sender_name
-      FROM private_messages pm
-      JOIN users s ON s.id = pm.sender_id
-      WHERE (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_sender=0)
-      OR (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_receiver=0)
-      ORDER BY pm.created_at ASC`,
+        CASE 
+          WHEN s.role = 'owner' THEN 
+            (SELECT pg_name FROM pgs WHERE owner_id = s.id LIMIT 1)
+          ELSE COALESCE(s.name,'User') 
+        END AS sender_name
+       FROM private_messages pm
+       JOIN users s ON s.id = pm.sender_id
+       WHERE 
+         (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_sender=0)
+       OR
+         (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_receiver=0)
+       ORDER BY pm.created_at ASC`,
       [me.id, otherUserId, otherUserId, me.id]
     );
+
     res.json(rows);
   } catch (err) {
+    console.error("getPrivateMessages Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
-
 /* =========================================================
    📝 UPDATE / DELETE MESSAGE
 ========================================================= */
