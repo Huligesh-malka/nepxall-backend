@@ -1,46 +1,76 @@
 const db = require("../db");
 
 /* =========================================================
-   🧠 GET OR CREATE MYSQL USER FROM FIREBASE
+   🧠 GET OR CREATE MYSQL USER FROM FIREBASE (SAFE)
 ========================================================= */
 async function getMe(firebaseUser) {
   const { uid, name, email, phone_number } = firebaseUser;
 
+  if (!uid) throw new Error("Firebase UID missing");
+
+  // 1️⃣ find by firebase_uid
   let [rows] = await db.query(
     "SELECT id, name, email, role FROM users WHERE firebase_uid=?",
     [uid]
   );
 
-  if (rows.length === 0) {
-    const [result] = await db.query(
-      `INSERT INTO users (firebase_uid, name, email, phone, role)
-       VALUES (?, ?, ?, ?, 'tenant')`,
-      [uid, name || null, email || null, phone_number || null]
+  if (rows.length) return rows[0];
+
+  // 2️⃣ find by phone (EXISTING ACCOUNT)
+  if (phone_number) {
+    [rows] = await db.query(
+      "SELECT id, name, email, role FROM users WHERE phone=? LIMIT 1",
+      [phone_number]
     );
 
-    return {
-      id: result.insertId,
-      name: name || (email ? email.split("@")[0] : "User"),
-      role: "tenant",
-    };
+    if (rows.length) {
+      await db.query(
+        "UPDATE users SET firebase_uid=? WHERE id=?",
+        [uid, rows[0].id]
+      );
+      return rows[0];
+    }
   }
 
-  const user = rows[0];
-  user.name = user.name || (user.email ? user.email.split("@")[0] : "User");
-  return user;
+  // 3️⃣ create new user (ONLY ONCE)
+  const [result] = await db.query(
+    `INSERT INTO users (firebase_uid, name, email, phone, role)
+     VALUES (?, ?, ?, ?, 'tenant')`,
+    [
+      uid,
+      name || (email ? email.split("@")[0] : "User"),
+      email || null,
+      phone_number,
+    ]
+  );
+
+  return {
+    id: result.insertId,
+    name: name || "User",
+    role: "tenant",
+  };
+}
+
+/* =========================================================
+   🔐 MIDDLEWARE TO LOAD USER ONCE
+========================================================= */
+async function loadMe(req, res, next) {
+  try {
+    if (!req.me) {
+      req.me = await getMe(req.user);
+    }
+    next();
+  } catch (err) {
+    console.error("loadMe error:", err);
+    res.status(500).json({ message: "Auth error" });
+  }
 }
 
 /* =========================================================
    👤 GET LOGGED IN USER
 ========================================================= */
 const getMeHandler = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-    res.json(me);
-  } catch (err) {
-    console.error("getMe error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+  res.json(req.me);
 };
 
 /* =========================================================
@@ -48,7 +78,7 @@ const getMeHandler = async (req, res) => {
 ========================================================= */
 const getMyChatList = async (req, res) => {
   try {
-    const me = await getMe(req.user);
+    const me = req.me;
 
     const [rows] = await db.query(
       `
@@ -84,29 +114,11 @@ const getMyChatList = async (req, res) => {
 };
 
 /* =========================================================
-   👤 GET OTHER USER
-========================================================= */
-const getUserById = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT id, name, firebase_uid 
-       FROM users WHERE id=?`,
-      [req.params.id]
-    );
-
-    res.json(rows[0] || null);
-  } catch (err) {
-    console.error("getUserById error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/* =========================================================
    📥 GET MESSAGES
 ========================================================= */
 const getPrivateMessages = async (req, res) => {
   try {
-    const me = await getMe(req.user);
+    const me = req.me;
     const otherId = Number(req.params.userId);
 
     const [rows] = await db.query(
@@ -124,7 +136,6 @@ const getPrivateMessages = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("getPrivateMessages error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -134,12 +145,11 @@ const getPrivateMessages = async (req, res) => {
 ========================================================= */
 const sendPrivateMessage = async (req, res) => {
   try {
-    const me = await getMe(req.user);
+    const me = req.me;
     const { receiver_id, message } = req.body;
 
-    if (!receiver_id || !message) {
+    if (!receiver_id || !message)
       return res.status(400).json({ message: "Missing fields" });
-    }
 
     const [result] = await db.query(
       `INSERT INTO private_messages 
@@ -156,51 +166,15 @@ const sendPrivateMessage = async (req, res) => {
       created_at: new Date(),
     });
   } catch (err) {
-    console.error("sendPrivateMessage error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/* =========================================================
-   ✏️ UPDATE MESSAGE
-========================================================= */
-const updatePrivateMessage = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-
-    await db.query(
-      "UPDATE private_messages SET message=? WHERE id=? AND sender_id=?",
-      [req.body.message, req.params.id, me.id]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/* =========================================================
-   🗑 DELETE MESSAGE
-========================================================= */
-const deletePrivateMessage = async (req, res) => {
-  try {
-    await db.query("DELETE FROM private_messages WHERE id=?", [
-      req.params.id,
-    ]);
-
-    res.json({ success: true });
-  } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
 /* ========================================================= */
 module.exports = {
+  loadMe,
   getMe: getMeHandler,
   getMyChatList,
-  getUserById,
   getPrivateMessages,
   sendPrivateMessage,
-  updatePrivateMessage,
-  deletePrivateMessage,
 };
