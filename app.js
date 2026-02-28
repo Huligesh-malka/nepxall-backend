@@ -60,7 +60,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.options(/.*/, cors(corsOptions))
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
