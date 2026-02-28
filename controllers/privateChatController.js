@@ -130,30 +130,25 @@ exports.getMyChatList = async (req, res) => {
 ========================================================= */
 exports.getUserById = async (req, res) => {
   try {
+    const userId = Number(req.params.id);
+
+    if (!userId) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
 
     const [rows] = await db.query(
-      `
-      SELECT 
-        u.id,
-        u.name,
-        u.firebase_uid,
-        p.name AS pg_name
-      FROM users u
-      LEFT JOIN bookings b 
-        ON (b.user_id = u.id OR b.owner_id = u.id)
-      LEFT JOIN pgs p ON p.id = b.pg_id
-      WHERE u.id = ?
-      LIMIT 1
-      `,
-      [req.params.id]
+      "SELECT id, name, firebase_uid FROM users WHERE id=? LIMIT 1",
+      [userId]
     );
 
-    if (!rows.length)
+    if (!rows.length) {
       return res.status(404).json({ message: "User not found" });
+    }
 
     res.json(rows[0]);
 
-  } catch {
+  } catch (err) {
+    console.error("getUserById error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
