@@ -1,7 +1,9 @@
 const { Server } = require("socket.io");
+const db = require("./db"); // Add this import
 
 let io;
-const onlineUsers = new Map();
+const onlineUsers = new Map(); // Stores socket IDs by Firebase UID
+const dbIdToFirebaseUid = new Map(); // NEW: Maps database ID to Firebase UID
 
 /* =========================================================
    🏠 ROOM HELPER
@@ -35,20 +37,61 @@ const initSocket = (server) => {
     console.log("🟢 Socket connected:", socket.id);
 
     /* ================= REGISTER ================= */
-    socket.on("register", (firebaseUid) => {
-      if (!firebaseUid) return;
+    socket.on("register", async (data) => {
+      try {
+        // Handle both string and object formats
+        let firebaseUid, databaseId;
+        
+        if (typeof data === 'string') {
+          firebaseUid = data;
+          // Look up database ID from Firebase UID
+          const [rows] = await db.query(
+            "SELECT id FROM users WHERE firebase_uid = ?",
+            [firebaseUid]
+          );
+          databaseId = rows[0]?.id;
+        } else {
+          firebaseUid = data.firebaseUid;
+          databaseId = data.databaseId;
+        }
 
-      if (!onlineUsers.has(firebaseUid)) {
-        onlineUsers.set(firebaseUid, new Set());
+        if (!firebaseUid) return;
+
+        // Store by Firebase UID
+        if (!onlineUsers.has(firebaseUid)) {
+          onlineUsers.set(firebaseUid, new Set());
+        }
+        onlineUsers.get(firebaseUid).add(socket.id);
+
+        // Store mapping from database ID to Firebase UID
+        if (databaseId) {
+          dbIdToFirebaseUid.set(String(databaseId), firebaseUid);
+          
+          // Also store by database ID for easy lookup
+          if (!onlineUsers.has(`db_${databaseId}`)) {
+            onlineUsers.set(`db_${databaseId}`, new Set());
+          }
+          onlineUsers.get(`db_${databaseId}`).add(socket.id);
+        }
+
+        socket.firebaseUid = firebaseUid;
+        socket.databaseId = databaseId;
+
+        // Broadcast online status
+        io.emit("user_online", { 
+          userId: firebaseUid, 
+          databaseId: databaseId 
+        });
+
+        console.log("✅ Registered:", { 
+          firebaseUid, 
+          databaseId, 
+          socketId: socket.id 
+        });
+
+      } catch (err) {
+        console.error("❌ Register error:", err);
       }
-
-      onlineUsers.get(firebaseUid).add(socket.id);
-      socket.firebaseUid = firebaseUid;
-
-      // Broadcast to all that this user is online
-      io.emit("user_online", { userId: firebaseUid });
-
-      console.log("✅ Registered:", firebaseUid, "Socket:", socket.id);
     });
 
     /* =========================================================
@@ -69,7 +112,7 @@ const initSocket = (server) => {
       socket.leave(getPrivateRoom(userA, userB));
     });
 
-    socket.on("send_private_message", (data) => {
+    socket.on("send_private_message", async (data) => {
       try {
         if (!data?.sender_id || !data?.receiver_id) return;
 
@@ -89,11 +132,9 @@ const initSocket = (server) => {
         // Send confirmation to sender
         socket.emit("message_sent_confirmation", message);
 
-        // Emit chat list updates to both users
-        // We need to get their firebase UIDs from the database
-        // For now, we'll emit to all their sockets
-        emitChatListUpdateToUser(data.sender_firebase_uid || data.sender_id);
-        emitChatListUpdateToUser(data.receiver_firebase_uid || data.receiver_id);
+        // Emit chat list updates
+        await emitChatListUpdateToUser(data.sender_id, data.sender_firebase_uid);
+        await emitChatListUpdateToUser(data.receiver_id, data.receiver_firebase_uid);
 
       } catch (err) {
         console.error("❌ Private message error", err);
@@ -117,15 +158,23 @@ const initSocket = (server) => {
     /* ================= DISCONNECT ================= */
     socket.on("disconnect", () => {
       const uid = socket.firebaseUid;
+      const dbId = socket.databaseId;
 
       if (uid && onlineUsers.has(uid)) {
         onlineUsers.get(uid).delete(socket.id);
-
         if (onlineUsers.get(uid).size === 0) {
           onlineUsers.delete(uid);
-          io.emit("user_offline", { userId: uid });
         }
       }
+
+      if (dbId && onlineUsers.has(`db_${dbId}`)) {
+        onlineUsers.get(`db_${dbId}`).delete(socket.id);
+        if (onlineUsers.get(`db_${dbId}`).size === 0) {
+          onlineUsers.delete(`db_${dbId}`);
+        }
+      }
+
+      io.emit("user_offline", { userId: uid, databaseId: dbId });
 
       console.log("🔴 Disconnected:", socket.id);
     });
@@ -137,17 +186,67 @@ const initSocket = (server) => {
 /* =========================================================
    🎯 EMIT CHAT LIST UPDATE TO SPECIFIC USER
 ========================================================= */
-const emitChatListUpdateToUser = (userId) => {
+const emitChatListUpdateToUser = async (userId, firebaseUid = null) => {
   if (!userId) return;
 
-  const sockets = onlineUsers.get(String(userId));
-  if (!sockets || sockets.size === 0) return;
+  // If we have Firebase UID directly, use it
+  if (firebaseUid) {
+    const sockets = onlineUsers.get(firebaseUid);
+    if (sockets && sockets.size > 0) {
+      console.log("📋 Emitting chat_list_update to Firebase UID:", firebaseUid);
+      sockets.forEach((socketId) => {
+        io.to(socketId).emit("chat_list_update");
+      });
+      return;
+    }
+  }
 
-  console.log("📋 Emitting chat_list_update to user:", userId, "Sockets:", Array.from(sockets));
+  // Try to find by database ID
+  const dbIdStr = String(userId);
+  
+  // Check if we have a direct mapping
+  const mappedFirebaseUid = dbIdToFirebaseUid.get(dbIdStr);
+  if (mappedFirebaseUid) {
+    const sockets = onlineUsers.get(mappedFirebaseUid);
+    if (sockets && sockets.size > 0) {
+      console.log("📋 Emitting chat_list_update to mapped Firebase UID:", mappedFirebaseUid);
+      sockets.forEach((socketId) => {
+        io.to(socketId).emit("chat_list_update");
+      });
+      return;
+    }
+  }
 
-  sockets.forEach((socketId) => {
-    io.to(socketId).emit("chat_list_update");
-  });
+  // Try the db_ prefix
+  const dbSockets = onlineUsers.get(`db_${dbIdStr}`);
+  if (dbSockets && dbSockets.size > 0) {
+    console.log("📋 Emitting chat_list_update to database ID:", dbIdStr);
+    dbSockets.forEach((socketId) => {
+      io.to(socketId).emit("chat_list_update");
+    });
+    return;
+  }
+
+  // Last resort: try to look up from database
+  try {
+    const [rows] = await db.query(
+      "SELECT firebase_uid FROM users WHERE id = ?",
+      [userId]
+    );
+    
+    if (rows[0]?.firebase_uid) {
+      const fbUid = rows[0].firebase_uid;
+      const sockets = onlineUsers.get(fbUid);
+      if (sockets && sockets.size > 0) {
+        console.log("📋 Emitting chat_list_update to DB-looked-up Firebase UID:", fbUid);
+        sockets.forEach((socketId) => {
+          io.to(socketId).emit("chat_list_update");
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Error looking up user in database:", err);
+  }
 };
 
 /* =========================================================
@@ -157,11 +256,26 @@ const emitChatListUpdateToUser = (userId) => {
 const getIO = () => io;
 
 const isUserOnline = (userId) => {
-  return onlineUsers.has(String(userId)) && onlineUsers.get(String(userId)).size > 0;
+  // Check both Firebase UID and database ID
+  return onlineUsers.has(String(userId)) || 
+         onlineUsers.has(`db_${userId}`) ||
+         (dbIdToFirebaseUid.has(String(userId)) && 
+          onlineUsers.has(dbIdToFirebaseUid.get(String(userId))));
 };
 
 const getUserSockets = (userId) => {
-  return onlineUsers.get(String(userId)) || new Set();
+  // Try to get sockets by various methods
+  if (onlineUsers.has(String(userId))) {
+    return onlineUsers.get(String(userId));
+  }
+  if (onlineUsers.has(`db_${userId}`)) {
+    return onlineUsers.get(`db_${userId}`);
+  }
+  const fbUid = dbIdToFirebaseUid.get(String(userId));
+  if (fbUid && onlineUsers.has(fbUid)) {
+    return onlineUsers.get(fbUid);
+  }
+  return new Set();
 };
 
 module.exports = {
