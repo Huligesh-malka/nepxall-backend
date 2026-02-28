@@ -7,7 +7,7 @@ async function getMe(firebaseUser) {
   const { uid, name, email, phone_number } = firebaseUser;
 
   let [rows] = await db.query(
-    "SELECT id, name, email, role FROM users WHERE firebase_uid=?",
+    "SELECT id, name, email, role, firebase_uid FROM users WHERE firebase_uid=?",
     [uid]
   );
 
@@ -21,6 +21,7 @@ async function getMe(firebaseUser) {
     return {
       id: result.insertId,
       name: name || (email ? email.split("@")[0] : "User"),
+      firebase_uid: uid,
       role: "tenant",
     };
   }
@@ -54,26 +55,34 @@ const getMyChatList = async (req, res) => {
       `
       SELECT 
         u.id,
-        COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User') AS name,
+        u.firebase_uid,
+        COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1), 'User') AS name,
         pm.message AS last_message,
         pm.created_at AS last_time,
-        CASE WHEN pm.sender_id=? THEN 'me' ELSE 'other' END AS last_sender
+        CASE WHEN pm.sender_id = ? THEN 'me' ELSE 'other' END AS last_sender,
+        (
+          SELECT COUNT(*) 
+          FROM private_messages 
+          WHERE sender_id = u.id 
+          AND receiver_id = ? 
+          AND is_read = false
+        ) AS unread_count
       FROM private_messages pm
       JOIN users u 
         ON u.id = CASE 
-            WHEN pm.sender_id=? THEN pm.receiver_id 
+            WHEN pm.sender_id = ? THEN pm.receiver_id 
             ELSE pm.sender_id 
           END
       WHERE pm.id IN (
         SELECT MAX(id)
         FROM private_messages
-        WHERE sender_id=? OR receiver_id=?
-        GROUP BY LEAST(sender_id,receiver_id),
-                 GREATEST(sender_id,receiver_id)
+        WHERE sender_id = ? OR receiver_id = ?
+        GROUP BY LEAST(sender_id, receiver_id),
+                 GREATEST(sender_id, receiver_id)
       )
       ORDER BY last_time DESC
       `,
-      [me.id, me.id, me.id, me.id]
+      [me.id, me.id, me.id, me.id, me.id]
     );
 
     res.json(rows);
@@ -89,8 +98,8 @@ const getMyChatList = async (req, res) => {
 const getUserById = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, name, firebase_uid 
-       FROM users WHERE id=?`,
+      `SELECT id, name, firebase_uid, email, role 
+       FROM users WHERE id = ?`,
       [req.params.id]
     );
 
@@ -109,14 +118,22 @@ const getPrivateMessages = async (req, res) => {
     const me = await getMe(req.user);
     const otherId = Number(req.params.userId);
 
+    // Mark messages as read when fetched
+    await db.query(
+      `UPDATE private_messages 
+       SET is_read = true 
+       WHERE sender_id = ? AND receiver_id = ? AND is_read = false`,
+      [otherId, me.id]
+    );
+
     const [rows] = await db.query(
       `
       SELECT *
       FROM private_messages
       WHERE 
-        (sender_id=? AND receiver_id=?)
+        (sender_id = ? AND receiver_id = ?)
         OR
-        (sender_id=? AND receiver_id=?)
+        (sender_id = ? AND receiver_id = ?)
       ORDER BY created_at ASC
       `,
       [me.id, otherId, otherId, me.id]
@@ -143,18 +160,29 @@ const sendPrivateMessage = async (req, res) => {
 
     const [result] = await db.query(
       `INSERT INTO private_messages 
-       (sender_id, receiver_id, message)
-       VALUES (?, ?, ?)`,
+       (sender_id, receiver_id, message, is_read, created_at)
+       VALUES (?, ?, ?, false, NOW())`,
       [me.id, receiver_id, message]
     );
 
-    res.json({
+    // Get receiver's firebase_uid
+    const [receiverRows] = await db.query(
+      "SELECT firebase_uid FROM users WHERE id = ?",
+      [receiver_id]
+    );
+
+    const messageData = {
       id: result.insertId,
       sender_id: me.id,
       receiver_id,
       message,
       created_at: new Date(),
-    });
+      is_read: false,
+      sender_firebase_uid: me.firebase_uid,
+      receiver_firebase_uid: receiverRows[0]?.firebase_uid
+    };
+
+    res.json(messageData);
   } catch (err) {
     console.error("sendPrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
@@ -169,12 +197,13 @@ const updatePrivateMessage = async (req, res) => {
     const me = await getMe(req.user);
 
     await db.query(
-      "UPDATE private_messages SET message=? WHERE id=? AND sender_id=?",
+      "UPDATE private_messages SET message = ? WHERE id = ? AND sender_id = ?",
       [req.body.message, req.params.id, me.id]
     );
 
     res.json({ success: true });
   } catch (err) {
+    console.error("updatePrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -184,17 +213,17 @@ const updatePrivateMessage = async (req, res) => {
 ========================================================= */
 const deletePrivateMessage = async (req, res) => {
   try {
-    await db.query("DELETE FROM private_messages WHERE id=?", [
+    await db.query("DELETE FROM private_messages WHERE id = ?", [
       req.params.id,
     ]);
 
     res.json({ success: true });
   } catch (err) {
+    console.error("deletePrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-/* ========================================================= */
 module.exports = {
   getMe: getMeHandler,
   getMyChatList,

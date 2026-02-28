@@ -19,17 +19,11 @@ const initSocket = (server) => {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-
         if (origin.includes("localhost")) return callback(null, true);
         if (origin.includes("vercel.app")) return callback(null, true);
-
-        if (
-          process.env.FRONTEND_URL &&
-          origin === process.env.FRONTEND_URL
-        ) {
+        if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
           return callback(null, true);
         }
-
         return callback(null, true);
       },
       credentials: true,
@@ -51,9 +45,10 @@ const initSocket = (server) => {
       onlineUsers.get(firebaseUid).add(socket.id);
       socket.firebaseUid = firebaseUid;
 
-      io.emit("user_online", firebaseUid);
+      // Broadcast to all that this user is online
+      io.emit("user_online", { userId: firebaseUid });
 
-      console.log("✅ Registered:", firebaseUid);
+      console.log("✅ Registered:", firebaseUid, "Socket:", socket.id);
     });
 
     /* =========================================================
@@ -66,7 +61,7 @@ const initSocket = (server) => {
       const room = getPrivateRoom(userA, userB);
       socket.join(room);
 
-      console.log("📩 Joined:", room);
+      console.log("📩 Joined room:", room, "Socket:", socket.id);
     });
 
     socket.on("leave_private_room", ({ userA, userB }) => {
@@ -78,30 +73,28 @@ const initSocket = (server) => {
       try {
         if (!data?.sender_id || !data?.receiver_id) return;
 
-        const room = getPrivateRoom(
-          data.sender_id,
-          data.receiver_id
-        );
-
+        const room = getPrivateRoom(data.sender_id, data.receiver_id);
+        
         const message = {
           ...data,
           created_at: data.created_at || new Date(),
+          status: "delivered"
         };
 
-        /* 🔥 SEND TO ROOM */
+        console.log("💬 Sending message to room:", room, message);
+
+        // Send to room (receiver)
         socket.to(room).emit("receive_private_message", message);
 
-        /* 🔥 CONFIRM TO SENDER */
-        socket.emit("message_sent_confirmation", {
-          ...message,
-          status: "delivered",
-        });
+        // Send confirmation to sender
+        socket.emit("message_sent_confirmation", message);
 
-        /* 🔥 UPDATE CHAT LIST ONLY FOR BOTH USERS */
-        emitChatListUpdate(data.sender_firebase_uid);
-        emitChatListUpdate(data.receiver_firebase_uid);
+        // Emit chat list updates to both users
+        // We need to get their firebase UIDs from the database
+        // For now, we'll emit to all their sockets
+        emitChatListUpdateToUser(data.sender_firebase_uid || data.sender_id);
+        emitChatListUpdateToUser(data.receiver_firebase_uid || data.receiver_id);
 
-        console.log("💬 Message →", room);
       } catch (err) {
         console.error("❌ Private message error", err);
       }
@@ -130,7 +123,7 @@ const initSocket = (server) => {
 
         if (onlineUsers.get(uid).size === 0) {
           onlineUsers.delete(uid);
-          io.emit("user_offline", uid);
+          io.emit("user_offline", { userId: uid });
         }
       }
 
@@ -144,14 +137,16 @@ const initSocket = (server) => {
 /* =========================================================
    🎯 EMIT CHAT LIST UPDATE TO SPECIFIC USER
 ========================================================= */
-const emitChatListUpdate = (firebaseUid) => {
-  if (!firebaseUid) return;
+const emitChatListUpdateToUser = (userId) => {
+  if (!userId) return;
 
-  const sockets = onlineUsers.get(firebaseUid);
-  if (!sockets) return;
+  const sockets = onlineUsers.get(String(userId));
+  if (!sockets || sockets.size === 0) return;
 
-  sockets.forEach((id) => {
-    io.to(id).emit("chat_list_update");
+  console.log("📋 Emitting chat_list_update to user:", userId, "Sockets:", Array.from(sockets));
+
+  sockets.forEach((socketId) => {
+    io.to(socketId).emit("chat_list_update");
   });
 };
 
@@ -161,11 +156,13 @@ const emitChatListUpdate = (firebaseUid) => {
 
 const getIO = () => io;
 
-const isUserOnline = (userId) =>
-  onlineUsers.has(userId) && onlineUsers.get(userId).size > 0;
+const isUserOnline = (userId) => {
+  return onlineUsers.has(String(userId)) && onlineUsers.get(String(userId)).size > 0;
+};
 
-const getUserSockets = (userId) =>
-  onlineUsers.get(userId) || new Set();
+const getUserSockets = (userId) => {
+  return onlineUsers.get(String(userId)) || new Set();
+};
 
 module.exports = {
   initSocket,
@@ -173,4 +170,5 @@ module.exports = {
   isUserOnline,
   getUserSockets,
   getPrivateRoom,
+  emitChatListUpdateToUser
 };
