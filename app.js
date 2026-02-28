@@ -38,9 +38,10 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ================= CORS ================= */
+
 const allowedOrigins = [
   "http://localhost:3000",
-  "http://localhost:5173",
+  "http://localhost:5000",
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
 ].filter(Boolean);
@@ -54,30 +55,64 @@ const corsOptions = {
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
     console.log("❌ Blocked by CORS:", origin);
-    return callback(null, true); // allow in production
+
+    // allow instead of crash (production friendly)
+    return callback(null, true);
   },
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions))
+
+/* ✅ EXPRESS 5 SAFE PREFLIGHT */
+app.options(/.*/, cors(corsOptions));
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 Nepxall Backend API",
+    message: "Nepxall Backend API 🚀",
     environment: process.env.NODE_ENV,
-    time: new Date(),
+    timestamp: new Date(),
   });
 });
 
 /* ================= HEALTH ================= */
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, status: "healthy" });
+  res.json({
+    success: true,
+    status: "healthy",
+    uptime: process.uptime(),
+  });
 });
 
-/* ================= DB WARMUP ================= */
+/* ================= DIAGNOSE ================= */
+app.get("/api/diagnose", async (req, res) => {
+  try {
+    const db = require("./db");
+    const [test] = await db.query("SELECT 1+1 as result");
+
+    res.json({
+      success: true,
+      db: "connected",
+      test: test[0].result,
+      firebase: process.env.FIREBASE_SERVICE_ACCOUNT ? "configured" : "missing",
+      cloudinary: {
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? "configured" : "missing",
+        api_key: process.env.CLOUDINARY_API_KEY ? "configured" : "missing",
+        api_secret: process.env.CLOUDINARY_API_SECRET ? "configured" : "missing",
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      db: "failed",
+      error: err.message,
+    });
+  }
+});
+
+/* ================= DB WARMUP FOR RENDER ================= */
 setInterval(async () => {
   try {
     const db = require("./db");
@@ -91,19 +126,21 @@ setInterval(async () => {
 /* ======================================================
    🧠 SAFE ROUTE LOADER
 ====================================================== */
-const safeLoad = (path) => {
+const safeLoad = (routePath) => {
   try {
-    const route = require(path);
-    console.log("✅ Loaded:", path);
+    const route = require(routePath);
+    console.log(`✅ Loaded: ${routePath}`);
     return route;
   } catch (err) {
-    console.error("❌ Failed:", path, err.message);
+    console.error(`❌ Failed: ${routePath}`);
+    console.error(err.message);
     return express.Router();
   }
 };
 
 /* ================= CORE ROUTES ================= */
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
+app.use("/api/kyc/aadhaar", safeLoad("./routes/adhar_routes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
 app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
 app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
@@ -116,7 +153,7 @@ app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
 /* ================= SOCIAL ================= */
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
-app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes")); // ⭐ IMPORTANT
+app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
 app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
@@ -131,17 +168,22 @@ app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin", safeLoad("./routes/adminOwnerVerificationRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 
+app.get("/api/admin/health", (req, res) => {
+  res.json({ success: true, message: "Admin working ✅" });
+});
+
 /* ================= 404 ================= */
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `❌ Route ${req.originalUrl} not found`,
+    message: `Route ${req.originalUrl} not found`,
   });
 });
 
 /* ================= GLOBAL ERROR ================= */
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
+
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
