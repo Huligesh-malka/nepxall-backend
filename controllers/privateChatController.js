@@ -149,6 +149,7 @@ const getPrivateMessages = async (req, res) => {
 /* =========================================================
    📤 SEND MESSAGE
 ========================================================= */
+// In your sendPrivateMessage function, make sure to return the complete data
 const sendPrivateMessage = async (req, res) => {
   try {
     const me = await getMe(req.user);
@@ -171,39 +172,27 @@ const sendPrivateMessage = async (req, res) => {
       [receiver_id]
     );
 
+    // Get sender's firebase_uid
+    const [senderRows] = await db.query(
+      "SELECT firebase_uid FROM users WHERE id = ?",
+      [me.id]
+    );
+
     const messageData = {
       id: result.insertId,
       sender_id: me.id,
-      receiver_id,
+      receiver_id: parseInt(receiver_id),
       message,
       created_at: new Date(),
       is_read: false,
-      sender_firebase_uid: me.firebase_uid,
+      sender_firebase_uid: senderRows[0]?.firebase_uid,
       receiver_firebase_uid: receiverRows[0]?.firebase_uid
     };
 
+    console.log("✅ Message saved:", messageData);
     res.json(messageData);
   } catch (err) {
     console.error("sendPrivateMessage error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/* =========================================================
-   ✏️ UPDATE MESSAGE
-========================================================= */
-const updatePrivateMessage = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-
-    await db.query(
-      "UPDATE private_messages SET message = ? WHERE id = ? AND sender_id = ?",
-      [req.body.message, req.params.id, me.id]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("updatePrivateMessage error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

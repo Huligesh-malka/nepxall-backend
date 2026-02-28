@@ -1,9 +1,10 @@
 const { Server } = require("socket.io");
-const db = require("./db"); // Add this import
+const db = require("./db"); // Make sure this path is correct
 
 let io;
 const onlineUsers = new Map(); // Stores socket IDs by Firebase UID
-const dbIdToFirebaseUid = new Map(); // NEW: Maps database ID to Firebase UID
+const dbIdToSocketIds = new Map(); // Maps database ID to socket IDs
+const firebaseUidToDbId = new Map(); // Maps Firebase UID to database ID
 
 /* =========================================================
    🏠 ROOM HELPER
@@ -23,9 +24,7 @@ const initSocket = (server) => {
         if (!origin) return callback(null, true);
         if (origin.includes("localhost")) return callback(null, true);
         if (origin.includes("vercel.app")) return callback(null, true);
-        if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
-          return callback(null, true);
-        }
+        if (origin.includes("nepxall")) return callback(null, true);
         return callback(null, true);
       },
       credentials: true,
@@ -39,7 +38,8 @@ const initSocket = (server) => {
     /* ================= REGISTER ================= */
     socket.on("register", async (data) => {
       try {
-        // Handle both string and object formats
+        console.log("📝 Register data received:", data);
+        
         let firebaseUid, databaseId;
         
         if (typeof data === 'string') {
@@ -55,7 +55,12 @@ const initSocket = (server) => {
           databaseId = data.databaseId;
         }
 
-        if (!firebaseUid) return;
+        if (!firebaseUid) {
+          console.log("❌ No Firebase UID provided");
+          return;
+        }
+
+        console.log("✅ Registering user:", { firebaseUid, databaseId, socketId: socket.id });
 
         // Store by Firebase UID
         if (!onlineUsers.has(firebaseUid)) {
@@ -63,15 +68,15 @@ const initSocket = (server) => {
         }
         onlineUsers.get(firebaseUid).add(socket.id);
 
-        // Store mapping from database ID to Firebase UID
+        // Store mapping from Firebase UID to database ID
         if (databaseId) {
-          dbIdToFirebaseUid.set(String(databaseId), firebaseUid);
+          firebaseUidToDbId.set(firebaseUid, databaseId);
           
-          // Also store by database ID for easy lookup
-          if (!onlineUsers.has(`db_${databaseId}`)) {
-            onlineUsers.set(`db_${databaseId}`, new Set());
+          // Store by database ID
+          if (!dbIdToSocketIds.has(databaseId)) {
+            dbIdToSocketIds.set(databaseId, new Set());
           }
-          onlineUsers.get(`db_${databaseId}`).add(socket.id);
+          dbIdToSocketIds.get(databaseId).add(socket.id);
         }
 
         socket.firebaseUid = firebaseUid;
@@ -83,10 +88,9 @@ const initSocket = (server) => {
           databaseId: databaseId 
         });
 
-        console.log("✅ Registered:", { 
-          firebaseUid, 
-          databaseId, 
-          socketId: socket.id 
+        console.log("✅ Current online users:", {
+          onlineUsers: Array.from(onlineUsers.keys()),
+          dbIdToSocketIds: Array.from(dbIdToSocketIds.keys())
         });
 
       } catch (err) {
@@ -114,7 +118,12 @@ const initSocket = (server) => {
 
     socket.on("send_private_message", async (data) => {
       try {
-        if (!data?.sender_id || !data?.receiver_id) return;
+        if (!data?.sender_id || !data?.receiver_id) {
+          console.log("❌ Invalid message data:", data);
+          return;
+        }
+
+        console.log("💬 Received message to send:", data);
 
         const room = getPrivateRoom(data.sender_id, data.receiver_id);
         
@@ -124,7 +133,7 @@ const initSocket = (server) => {
           status: "delivered"
         };
 
-        console.log("💬 Sending message to room:", room, message);
+        console.log("💬 Sending to room:", room, message);
 
         // Send to room (receiver)
         socket.to(room).emit("receive_private_message", message);
@@ -133,8 +142,8 @@ const initSocket = (server) => {
         socket.emit("message_sent_confirmation", message);
 
         // Emit chat list updates
-        await emitChatListUpdateToUser(data.sender_id, data.sender_firebase_uid);
-        await emitChatListUpdateToUser(data.receiver_id, data.receiver_firebase_uid);
+        await emitChatListUpdateToUser(data.sender_id);
+        await emitChatListUpdateToUser(data.receiver_id);
 
       } catch (err) {
         console.error("❌ Private message error", err);
@@ -142,10 +151,9 @@ const initSocket = (server) => {
     });
 
     /* ================= TYPING ================= */
-    socket.on("typing", ({ userA, userB, isTyping }) => {
-      socket
-        .to(getPrivateRoom(userA, userB))
-        .emit("user_typing", { userId: userA, isTyping });
+    socket.on("typing", ({ userA, userB, userId, isTyping }) => {
+      const room = getPrivateRoom(userA, userB);
+      socket.to(room).emit("user_typing", { userId, isTyping });
     });
 
     /* ================= READ ================= */
@@ -160,17 +168,20 @@ const initSocket = (server) => {
       const uid = socket.firebaseUid;
       const dbId = socket.databaseId;
 
+      console.log("🔴 Disconnecting:", { socketId: socket.id, uid, dbId });
+
       if (uid && onlineUsers.has(uid)) {
         onlineUsers.get(uid).delete(socket.id);
         if (onlineUsers.get(uid).size === 0) {
           onlineUsers.delete(uid);
+          firebaseUidToDbId.delete(uid);
         }
       }
 
-      if (dbId && onlineUsers.has(`db_${dbId}`)) {
-        onlineUsers.get(`db_${dbId}`).delete(socket.id);
-        if (onlineUsers.get(`db_${dbId}`).size === 0) {
-          onlineUsers.delete(`db_${dbId}`);
+      if (dbId && dbIdToSocketIds.has(dbId)) {
+        dbIdToSocketIds.get(dbId).delete(socket.id);
+        if (dbIdToSocketIds.get(dbId).size === 0) {
+          dbIdToSocketIds.delete(dbId);
         }
       }
 
@@ -186,48 +197,32 @@ const initSocket = (server) => {
 /* =========================================================
    🎯 EMIT CHAT LIST UPDATE TO SPECIFIC USER
 ========================================================= */
-const emitChatListUpdateToUser = async (userId, firebaseUid = null) => {
+const emitChatListUpdateToUser = async (userId) => {
   if (!userId) return;
 
-  // If we have Firebase UID directly, use it
-  if (firebaseUid) {
-    const sockets = onlineUsers.get(firebaseUid);
-    if (sockets && sockets.size > 0) {
-      console.log("📋 Emitting chat_list_update to Firebase UID:", firebaseUid);
-      sockets.forEach((socketId) => {
-        io.to(socketId).emit("chat_list_update");
-      });
-      return;
-    }
-  }
+  console.log("📋 Emitting chat_list_update for user ID:", userId);
 
-  // Try to find by database ID
-  const dbIdStr = String(userId);
-  
-  // Check if we have a direct mapping
-  const mappedFirebaseUid = dbIdToFirebaseUid.get(dbIdStr);
-  if (mappedFirebaseUid) {
-    const sockets = onlineUsers.get(mappedFirebaseUid);
-    if (sockets && sockets.size > 0) {
-      console.log("📋 Emitting chat_list_update to mapped Firebase UID:", mappedFirebaseUid);
-      sockets.forEach((socketId) => {
-        io.to(socketId).emit("chat_list_update");
-      });
-      return;
-    }
-  }
-
-  // Try the db_ prefix
-  const dbSockets = onlineUsers.get(`db_${dbIdStr}`);
-  if (dbSockets && dbSockets.size > 0) {
-    console.log("📋 Emitting chat_list_update to database ID:", dbIdStr);
-    dbSockets.forEach((socketId) => {
+  // Try to find by database ID first
+  const dbIdSockets = dbIdToSocketIds.get(Number(userId));
+  if (dbIdSockets && dbIdSockets.size > 0) {
+    console.log("📋 Found by database ID:", userId, "Sockets:", Array.from(dbIdSockets));
+    dbIdSockets.forEach((socketId) => {
       io.to(socketId).emit("chat_list_update");
     });
     return;
   }
 
-  // Last resort: try to look up from database
+  // Try to find by Firebase UID
+  const fbSockets = onlineUsers.get(String(userId));
+  if (fbSockets && fbSockets.size > 0) {
+    console.log("📋 Found by Firebase UID:", userId, "Sockets:", Array.from(fbSockets));
+    fbSockets.forEach((socketId) => {
+      io.to(socketId).emit("chat_list_update");
+    });
+    return;
+  }
+
+  // Look up in database
   try {
     const [rows] = await db.query(
       "SELECT firebase_uid FROM users WHERE id = ?",
@@ -236,10 +231,10 @@ const emitChatListUpdateToUser = async (userId, firebaseUid = null) => {
     
     if (rows[0]?.firebase_uid) {
       const fbUid = rows[0].firebase_uid;
-      const sockets = onlineUsers.get(fbUid);
-      if (sockets && sockets.size > 0) {
-        console.log("📋 Emitting chat_list_update to DB-looked-up Firebase UID:", fbUid);
-        sockets.forEach((socketId) => {
+      const fbSocketsFromDb = onlineUsers.get(fbUid);
+      if (fbSocketsFromDb && fbSocketsFromDb.size > 0) {
+        console.log("📋 Found by DB lookup:", fbUid);
+        fbSocketsFromDb.forEach((socketId) => {
           io.to(socketId).emit("chat_list_update");
         });
       }
@@ -256,24 +251,15 @@ const emitChatListUpdateToUser = async (userId, firebaseUid = null) => {
 const getIO = () => io;
 
 const isUserOnline = (userId) => {
-  // Check both Firebase UID and database ID
-  return onlineUsers.has(String(userId)) || 
-         onlineUsers.has(`db_${userId}`) ||
-         (dbIdToFirebaseUid.has(String(userId)) && 
-          onlineUsers.has(dbIdToFirebaseUid.get(String(userId))));
+  return onlineUsers.has(String(userId)) || dbIdToSocketIds.has(Number(userId));
 };
 
 const getUserSockets = (userId) => {
-  // Try to get sockets by various methods
   if (onlineUsers.has(String(userId))) {
     return onlineUsers.get(String(userId));
   }
-  if (onlineUsers.has(`db_${userId}`)) {
-    return onlineUsers.get(`db_${userId}`);
-  }
-  const fbUid = dbIdToFirebaseUid.get(String(userId));
-  if (fbUid && onlineUsers.has(fbUid)) {
-    return onlineUsers.get(fbUid);
+  if (dbIdToSocketIds.has(Number(userId))) {
+    return dbIdToSocketIds.get(Number(userId));
   }
   return new Set();
 };
