@@ -10,13 +10,13 @@ async function getMe(firebaseUser) {
 
   // 1️⃣ find by firebase_uid
   let [rows] = await db.query(
-    "SELECT id, name, email, role FROM users WHERE firebase_uid=?",
+    "SELECT id, name, email, role FROM users WHERE firebase_uid=? LIMIT 1",
     [uid]
   );
 
   if (rows.length) return rows[0];
 
-  // 2️⃣ find by phone (EXISTING ACCOUNT)
+  // 2️⃣ find by phone
   if (phone_number) {
     [rows] = await db.query(
       "SELECT id, name, email, role FROM users WHERE phone=? LIMIT 1",
@@ -32,7 +32,7 @@ async function getMe(firebaseUser) {
     }
   }
 
-  // 3️⃣ create new user (ONLY ONCE)
+  // 3️⃣ create
   const [result] = await db.query(
     `INSERT INTO users (firebase_uid, name, email, phone, role)
      VALUES (?, ?, ?, ?, 'tenant')`,
@@ -40,7 +40,7 @@ async function getMe(firebaseUser) {
       uid,
       name || (email ? email.split("@")[0] : "User"),
       email || null,
-      phone_number,
+      phone_number || null,
     ]
   );
 
@@ -52,9 +52,9 @@ async function getMe(firebaseUser) {
 }
 
 /* =========================================================
-   🔐 MIDDLEWARE TO LOAD USER ONCE
+   🔐 LOAD USER MIDDLEWARE
 ========================================================= */
-async function loadMe(req, res, next) {
+exports.loadMe = async (req, res, next) => {
   try {
     if (!req.me) {
       req.me = await getMe(req.user);
@@ -64,19 +64,19 @@ async function loadMe(req, res, next) {
     console.error("loadMe error:", err);
     res.status(500).json({ message: "Auth error" });
   }
-}
+};
 
 /* =========================================================
    👤 GET LOGGED IN USER
 ========================================================= */
-const getMeHandler = async (req, res) => {
+exports.getMe = (req, res) => {
   res.json(req.me);
 };
 
 /* =========================================================
-   📃 CHAT LIST
+   📃 CHAT LIST WITH UNREAD COUNT
 ========================================================= */
-const getMyChatList = async (req, res) => {
+exports.getMyChatList = async (req, res) => {
   try {
     const me = req.me;
 
@@ -85,15 +85,28 @@ const getMyChatList = async (req, res) => {
       SELECT 
         u.id,
         COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User') AS name,
+        u.firebase_uid,
+
         pm.message AS last_message,
         pm.created_at AS last_time,
-        CASE WHEN pm.sender_id=? THEN 'me' ELSE 'other' END AS last_sender
+
+        CASE WHEN pm.sender_id=? THEN 'me' ELSE 'other' END AS last_sender,
+
+        (
+          SELECT COUNT(*) FROM private_messages
+          WHERE sender_id = u.id 
+          AND receiver_id = ?
+          AND is_read = 0
+        ) AS unread
+
       FROM private_messages pm
+
       JOIN users u 
         ON u.id = CASE 
             WHEN pm.sender_id=? THEN pm.receiver_id 
             ELSE pm.sender_id 
           END
+
       WHERE pm.id IN (
         SELECT MAX(id)
         FROM private_messages
@@ -101,9 +114,10 @@ const getMyChatList = async (req, res) => {
         GROUP BY LEAST(sender_id,receiver_id),
                  GREATEST(sender_id,receiver_id)
       )
+
       ORDER BY last_time DESC
       `,
-      [me.id, me.id, me.id, me.id]
+      [me.id, me.id, me.id, me.id, me.id]
     );
 
     res.json(rows);
@@ -114,9 +128,28 @@ const getMyChatList = async (req, res) => {
 };
 
 /* =========================================================
-   📥 GET MESSAGES
+   👤 GET OTHER USER
 ========================================================= */
-const getPrivateMessages = async (req, res) => {
+exports.getUserById = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT id, name, firebase_uid FROM users WHERE id=? LIMIT 1",
+      [req.params.id]
+    );
+
+    if (!rows.length)
+      return res.status(404).json({ message: "User not found" });
+
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* =========================================================
+   📥 GET MESSAGES + MARK AS READ
+========================================================= */
+exports.getPrivateMessages = async (req, res) => {
   try {
     const me = req.me;
     const otherId = Number(req.params.userId);
@@ -134,6 +167,14 @@ const getPrivateMessages = async (req, res) => {
       [me.id, otherId, otherId, me.id]
     );
 
+    // ✅ mark as read
+    await db.query(
+      `UPDATE private_messages 
+       SET is_read = 1 
+       WHERE sender_id=? AND receiver_id=?`,
+      [otherId, me.id]
+    );
+
     res.json(rows);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
@@ -143,18 +184,18 @@ const getPrivateMessages = async (req, res) => {
 /* =========================================================
    📤 SEND MESSAGE
 ========================================================= */
-const sendPrivateMessage = async (req, res) => {
+exports.sendPrivateMessage = async (req, res) => {
   try {
     const me = req.me;
     const { receiver_id, message } = req.body;
 
-    if (!receiver_id || !message)
+    if (!receiver_id || !message?.trim())
       return res.status(400).json({ message: "Missing fields" });
 
     const [result] = await db.query(
       `INSERT INTO private_messages 
-       (sender_id, receiver_id, message)
-       VALUES (?, ?, ?)`,
+       (sender_id, receiver_id, message, is_read)
+       VALUES (?, ?, ?, 0)`,
       [me.id, receiver_id, message]
     );
 
@@ -164,17 +205,45 @@ const sendPrivateMessage = async (req, res) => {
       receiver_id,
       message,
       created_at: new Date(),
+      status: "sent",
     });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
-/* ========================================================= */
-module.exports = {
-  loadMe,
-  getMe: getMeHandler,
-  getMyChatList,
-  getPrivateMessages,
-  sendPrivateMessage,
+/* =========================================================
+   ✏️ UPDATE MESSAGE
+========================================================= */
+exports.updatePrivateMessage = async (req, res) => {
+  try {
+    const me = req.me;
+
+    await db.query(
+      "UPDATE private_messages SET message=? WHERE id=? AND sender_id=?",
+      [req.body.message, req.params.id, me.id]
+    );
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* =========================================================
+   🗑 DELETE MESSAGE
+========================================================= */
+exports.deletePrivateMessage = async (req, res) => {
+  try {
+    const me = req.me;
+
+    await db.query(
+      "DELETE FROM private_messages WHERE id=? AND sender_id=?",
+      [req.params.id, me.id]
+    );
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
 };

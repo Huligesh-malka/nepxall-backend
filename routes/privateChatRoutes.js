@@ -4,28 +4,42 @@ const router = express.Router();
 const auth = require("../middlewares/auth");
 const privateChat = require("../controllers/privateChatController");
 
-/* 🔐 ALL PRIVATE CHAT ROUTES REQUIRE AUTH */
-router.use(auth);
+/* 🔐 APPLY MIDDLEWARE ONCE */
+router.use(auth, privateChat.loadMe);
 
-/* 👤 USER (load once) */
-router.get("/me", privateChat.loadMe, privateChat.getMe);
+/* =====================================================
+   👤 CURRENT USER
+===================================================== */
+router.get("/me", privateChat.getMe);
 
-/* 📃 CHAT LIST */
-router.get("/list", privateChat.loadMe, privateChat.getMyChatList);
+/* =====================================================
+   📃 CHAT LIST
+===================================================== */
+router.get("/list", privateChat.getMyChatList);
 
-/* 👤 OTHER USER */
-router.get("/user/:id", privateChat.loadMe, privateChat.getUserById);
+/* =====================================================
+   👤 GET OTHER USER
+===================================================== */
+router.get("/user/:id", privateChat.getUserById);
 
-/* 💬 MESSAGES */
-router.get("/messages/:userId", privateChat.loadMe, privateChat.getPrivateMessages);
+/* =====================================================
+   💬 GET MESSAGES WITH A USER
+===================================================== */
+router.get("/messages/:userId", privateChat.getPrivateMessages);
 
-/* 📤 SEND */
-router.post("/send", privateChat.loadMe, privateChat.sendPrivateMessage);
+/* =====================================================
+   📤 SEND MESSAGE
+===================================================== */
+router.post("/send", privateChat.sendPrivateMessage);
 
-/* ✏️ UPDATE */
-router.put("/update/:id", privateChat.loadMe, privateChat.updatePrivateMessage);
+/* =====================================================
+   ✏️ UPDATE MESSAGE
+===================================================== */
+router.put("/message/:id", privateChat.updatePrivateMessage);
 
-/* 🗑 DELETE */
-router.delete("/delete/:id", privateChat.loadMe, privateChat.deletePrivateMessage);
+/* =====================================================
+   🗑 DELETE MESSAGE
+===================================================== */
+router.delete("/message/:id", privateChat.deletePrivateMessage);
 
 module.exports = router;
