@@ -5,13 +5,11 @@ const db = require("../db");
 ========================================================= */
 async function getMe(firebaseUser) {
 
-  // ✅ SUPPORT BOTH AUTH FORMATS
   const uid = firebaseUser.uid || firebaseUser.firebaseUid;
   const name = firebaseUser.name || "User";
   const email = firebaseUser.email || null;
   const phone_number = firebaseUser.phone_number || firebaseUser.phone || null;
 
-  // ✅ IF MYSQL ID ALREADY PROVIDED → SKIP DB SEARCH
   if (firebaseUser.mysqlId) {
     return {
       id: firebaseUser.mysqlId,
@@ -23,7 +21,6 @@ async function getMe(firebaseUser) {
 
   if (!uid) throw new Error("Firebase UID missing");
 
-  /* 1️⃣ FIND BY FIREBASE UID */
   let [rows] = await db.query(
     "SELECT id, name, email, role FROM users WHERE firebase_uid=? LIMIT 1",
     [uid]
@@ -31,7 +28,6 @@ async function getMe(firebaseUser) {
 
   if (rows.length) return rows[0];
 
-  /* 2️⃣ FIND BY PHONE */
   if (phone_number) {
     [rows] = await db.query(
       "SELECT id, name, email, role FROM users WHERE phone=? LIMIT 1",
@@ -47,16 +43,10 @@ async function getMe(firebaseUser) {
     }
   }
 
-  /* 3️⃣ CREATE NEW USER */
   const [result] = await db.query(
     `INSERT INTO users (firebase_uid, name, email, phone, role)
      VALUES (?, ?, ?, ?, 'tenant')`,
-    [
-      uid,
-      name || (email ? email.split("@")[0] : "User"),
-      email,
-      phone_number,
-    ]
+    [uid, name, email, phone_number]
   );
 
   return {
@@ -66,14 +56,10 @@ async function getMe(firebaseUser) {
   };
 }
 
-/* =========================================================
-   🔐 LOAD USER MIDDLEWARE
-========================================================= */
+/* ========================================================= */
 exports.loadMe = async (req, res, next) => {
   try {
-    if (!req.me) {
-      req.me = await getMe(req.user);
-    }
+    if (!req.me) req.me = await getMe(req.user);
     next();
   } catch (err) {
     console.error("loadMe error:", err);
@@ -81,15 +67,11 @@ exports.loadMe = async (req, res, next) => {
   }
 };
 
-/* =========================================================
-   👤 GET LOGGED IN USER
-========================================================= */
-exports.getMe = (req, res) => {
-  res.json(req.me);
-};
+/* ========================================================= */
+exports.getMe = (req, res) => res.json(req.me);
 
 /* =========================================================
-   📃 CHAT LIST WITH UNREAD COUNT
+   📃 CHAT LIST (UNCHANGED)
 ========================================================= */
 exports.getMyChatList = async (req, res) => {
   try {
@@ -144,12 +126,25 @@ exports.getMyChatList = async (req, res) => {
 };
 
 /* =========================================================
-   👤 GET OTHER USER
+   👤 GET OTHER USER + PG NAME
 ========================================================= */
 exports.getUserById = async (req, res) => {
   try {
+
     const [rows] = await db.query(
-      "SELECT id, name, firebase_uid FROM users WHERE id=? LIMIT 1",
+      `
+      SELECT 
+        u.id,
+        u.name,
+        u.firebase_uid,
+        p.name AS pg_name
+      FROM users u
+      LEFT JOIN bookings b 
+        ON (b.user_id = u.id OR b.owner_id = u.id)
+      LEFT JOIN pgs p ON p.id = b.pg_id
+      WHERE u.id = ?
+      LIMIT 1
+      `,
       [req.params.id]
     );
 
@@ -164,12 +159,30 @@ exports.getUserById = async (req, res) => {
 };
 
 /* =========================================================
-   📥 GET MESSAGES + MARK AS READ
+   📥 GET MESSAGES + 🔒 ACCESS PROTECTION
 ========================================================= */
 exports.getPrivateMessages = async (req, res) => {
   try {
     const me = req.me;
     const otherId = Number(req.params.userId);
+
+    /* 🔒 BOOKING RELATION CHECK */
+    const [access] = await db.query(
+      `
+      SELECT 1
+      FROM bookings b
+      JOIN pgs p ON p.id = b.pg_id
+      WHERE 
+      (b.user_id=? AND p.owner_id=?)
+      OR
+      (b.user_id=? AND p.owner_id=?)
+      LIMIT 1
+      `,
+      [me.id, otherId, otherId, me.id]
+    );
+
+    if (!access.length)
+      return res.status(403).json({ message: "Not allowed to chat" });
 
     const [rows] = await db.query(
       `
@@ -198,9 +211,7 @@ exports.getPrivateMessages = async (req, res) => {
   }
 };
 
-/* =========================================================
-   📤 SEND MESSAGE
-========================================================= */
+/* ========================================================= */
 exports.sendPrivateMessage = async (req, res) => {
   try {
     const me = req.me;
@@ -230,9 +241,7 @@ exports.sendPrivateMessage = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✏️ UPDATE MESSAGE
-========================================================= */
+/* ========================================================= */
 exports.updatePrivateMessage = async (req, res) => {
   try {
     const me = req.me;
@@ -249,9 +258,7 @@ exports.updatePrivateMessage = async (req, res) => {
   }
 };
 
-/* =========================================================
-   🗑 DELETE MESSAGE
-========================================================= */
+/* ========================================================= */
 exports.deletePrivateMessage = async (req, res) => {
   try {
     const me = req.me;
