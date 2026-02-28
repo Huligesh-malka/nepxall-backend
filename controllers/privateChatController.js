@@ -1,7 +1,7 @@
 const db = require("../db");
 
 /* =========================================================
-   🧠 INTERNAL HELPER: GET OR CREATE MYSQL USER
+   🧠 GET OR CREATE MYSQL USER
 ========================================================= */
 async function getMe(firebaseUser) {
   const { uid, name, email, phone_number } = firebaseUser;
@@ -18,20 +18,18 @@ async function getMe(firebaseUser) {
       [uid, name || null, email || null, phone_number || null]
     );
 
-    return { 
-      id: result.insertId, 
-      name: name || (email ? email.split("@")[0] : "User"), 
-      role: "tenant" 
+    return {
+      id: result.insertId,
+      name: name || email?.split("@")[0] || "User",
+      role: "tenant",
     };
   }
 
-  const user = rows[0];
-  user.name = user.name || (user.email ? user.email.split("@")[0] : "User");
-  return user;
+  return rows[0];
 }
 
 /* =========================================================
-   📃 GET CHAT LIST (Fixes the 404 Error)
+   📃 CHAT LIST (OWNER + TENANT SAFE)
 ========================================================= */
 exports.getMyChatList = async (req, res) => {
   try {
@@ -41,25 +39,50 @@ exports.getMyChatList = async (req, res) => {
       `
       SELECT 
         u.id,
+        u.firebase_uid,
+
         CASE 
-          WHEN u.role = 'owner' THEN (SELECT pg_name FROM pgs WHERE owner_id = u.id LIMIT 1)
-          ELSE COALESCE(u.name, SUBSTRING_INDEX(u.email, '@', 1), 'User')
+          WHEN u.role = 'owner'
+            THEN (SELECT pg_name FROM pgs WHERE owner_id = u.id LIMIT 1)
+          ELSE COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User')
         END AS name,
-        pm.message AS last_message,
-        pm.created_at AS last_time,
-        CASE WHEN pm.sender_id = ? THEN 'me' ELSE 'other' END AS last_sender,
-        (
-          SELECT COUNT(*) FROM private_messages 
-          WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0 AND deleted_by_receiver = 0
+
+        MAX(pm.created_at) AS last_time,
+
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(pm.message ORDER BY pm.created_at DESC),
+          ',',1
+        ) AS last_message,
+
+        CASE 
+          WHEN SUBSTRING_INDEX(
+            GROUP_CONCAT(pm.sender_id ORDER BY pm.created_at DESC),
+            ',',1
+          ) = ? THEN 'me'
+          ELSE 'other'
+        END AS last_sender,
+
+        SUM(
+          CASE 
+            WHEN pm.receiver_id = ? 
+            AND pm.sender_id = u.id 
+            AND pm.is_read = 0 
+            THEN 1 ELSE 0 
+          END
         ) AS unread
-      FROM private_messages pm
-      JOIN users u ON u.id = CASE WHEN pm.sender_id = ? THEN pm.receiver_id ELSE pm.sender_id END
-      WHERE pm.id IN (
-        SELECT MAX(id) FROM private_messages 
-        WHERE (sender_id = ? AND deleted_by_sender = 0) 
-           OR (receiver_id = ? AND deleted_by_receiver = 0)
-        GROUP BY LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id)
-      )
+
+      FROM users u
+
+      JOIN private_messages pm
+        ON (
+          (pm.sender_id = u.id AND pm.receiver_id = ?)
+          OR
+          (pm.receiver_id = u.id AND pm.sender_id = ?)
+        )
+
+      WHERE u.id != ?
+
+      GROUP BY u.id
       ORDER BY last_time DESC
       `,
       [me.id, me.id, me.id, me.id, me.id]
@@ -67,41 +90,33 @@ exports.getMyChatList = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("getMyChatList Error:", err);
+    console.error("Chat list error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
 
 /* =========================================================
-   👤 GET LOGGED-IN USER
+   👤 GET LOGGED USER
 ========================================================= */
 exports.getMe = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-    res.json(me);
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
+  const me = await getMe(req.user);
+  res.json(me);
 };
 
 /* =========================================================
-   👤 GET OTHER USER BY ID
+   👤 GET USER BY ID
 ========================================================= */
 exports.getUserById = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT u.id, u.firebase_uid,
-        CASE 
-          WHEN u.role = 'owner' THEN (SELECT pg_name FROM pgs WHERE owner_id = u.id LIMIT 1)
-          ELSE COALESCE(u.name, SUBSTRING_INDEX(u.email,'@',1),'User')
-        END AS name
-      FROM users u WHERE u.id=?`,
-      [req.params.id]
-    );
-    res.json(rows[0] || null);
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
+  const [rows] = await db.query(
+    `
+    SELECT id, firebase_uid,
+    COALESCE(name, SUBSTRING_INDEX(email,'@',1),'User') AS name
+    FROM users WHERE id=?
+    `,
+    [req.params.id]
+  );
+
+  res.json(rows[0] || null);
 };
 
 /* =========================================================
@@ -113,13 +128,8 @@ exports.sendPrivateMessage = async (req, res) => {
     const receiverId = Number(req.body.receiver_id);
     const message = req.body.message?.trim();
 
-    if (!receiverId || !message) {
-      return res.status(400).json({ message: "Missing fields" });
-    }
-
     const [result] = await db.query(
-      `INSERT INTO private_messages 
-       (sender_id, receiver_id, message) 
+      `INSERT INTO private_messages (sender_id, receiver_id, message)
        VALUES (?, ?, ?)`,
       [me.id, receiverId, message]
     );
@@ -132,10 +142,11 @@ exports.sendPrivateMessage = async (req, res) => {
       created_at: new Date(),
     });
   } catch (err) {
-    console.error("sendPrivateMessage Error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 /* =========================================================
    📥 GET CONVERSATION
 ========================================================= */
@@ -144,70 +155,29 @@ exports.getPrivateMessages = async (req, res) => {
     const me = await getMe(req.user);
     const otherUserId = Number(req.params.userId);
 
-    if (!otherUserId) {
-      return res.status(400).json({ message: "Invalid userId" });
-    }
-
     await db.query(
-      `UPDATE private_messages 
-       SET is_read = 1 
+      `UPDATE private_messages
+       SET is_read = 1
        WHERE sender_id = ? AND receiver_id = ?`,
       [otherUserId, me.id]
     );
 
     const [rows] = await db.query(
-      `SELECT pm.*, 
-        CASE 
-          WHEN s.role = 'owner' THEN 
-            (SELECT pg_name FROM pgs WHERE owner_id = s.id LIMIT 1)
-          ELSE COALESCE(s.name,'User') 
-        END AS sender_name
-       FROM private_messages pm
-       JOIN users s ON s.id = pm.sender_id
-       WHERE 
-         (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_sender=0)
-       OR
-         (pm.sender_id=? AND pm.receiver_id=? AND pm.deleted_by_receiver=0)
-       ORDER BY pm.created_at ASC`,
+      `
+      SELECT *
+      FROM private_messages
+      WHERE
+        (sender_id=? AND receiver_id=?)
+        OR
+        (sender_id=? AND receiver_id=?)
+      ORDER BY created_at ASC
+      `,
       [me.id, otherUserId, otherUserId, me.id]
     );
 
     res.json(rows);
   } catch (err) {
-    console.error("getPrivateMessages Error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-/* =========================================================
-   📝 UPDATE / DELETE MESSAGE
-========================================================= */
-exports.updatePrivateMessage = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-    const [result] = await db.query(
-      "UPDATE private_messages SET message = ? WHERE id = ? AND sender_id = ?",
-      [req.body.message.trim(), req.params.id, me.id]
-    );
-    res.json({ success: result.affectedRows > 0 });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-exports.deletePrivateMessage = async (req, res) => {
-  try {
-    const me = await getMe(req.user);
-    const { id } = req.params;
-    const [[msg]] = await db.query("SELECT * FROM private_messages WHERE id=?", [id]);
-    if (!msg) return res.status(404).json({ message: "Not found" });
-
-    if (msg.sender_id === me.id) {
-      await db.query("UPDATE private_messages SET deleted_by_sender=1 WHERE id=?", [id]);
-    } else {
-      await db.query("UPDATE private_messages SET deleted_by_receiver=1 WHERE id=?", [id]);
-    }
-    res.json({ success: true });
-  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };

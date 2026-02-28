@@ -3,13 +3,17 @@ const { Server } = require("socket.io");
 let io;
 const onlineUsers = new Map();
 
-/* ================= ROOM HELPER ================= */
+/* =========================================================
+   🏠 ROOM HELPER
+========================================================= */
 const getPrivateRoom = (a, b) => {
   const ids = [String(a), String(b)].sort();
   return `private_${ids[0]}_${ids[1]}`;
 };
 
-/* ================= INIT SOCKET ================= */
+/* =========================================================
+   🚀 INIT SOCKET
+========================================================= */
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
@@ -17,26 +21,26 @@ const initSocket = (server) => {
         if (!origin) return callback(null, true);
 
         if (origin.includes("localhost")) return callback(null, true);
-
         if (origin.includes("vercel.app")) return callback(null, true);
 
         if (
           process.env.FRONTEND_URL &&
           origin === process.env.FRONTEND_URL
-        )
+        ) {
           return callback(null, true);
+        }
 
         return callback(null, true);
       },
-      methods: ["GET", "POST"],
       credentials: true,
+      methods: ["GET", "POST"],
     },
   });
 
   io.on("connection", (socket) => {
     console.log("🟢 Socket connected:", socket.id);
 
-    /* ================= REGISTER USER ================= */
+    /* ================= REGISTER ================= */
     socket.on("register", (firebaseUid) => {
       if (!firebaseUid) return;
 
@@ -49,44 +53,7 @@ const initSocket = (server) => {
 
       io.emit("user_online", firebaseUid);
 
-      console.log(`✅ User registered → ${firebaseUid}`);
-    });
-
-    /* =========================================================
-       🏠 PG ROOM
-    ========================================================= */
-
-    socket.on("join_pg_room", (pgId) => {
-      if (!pgId) return;
-      socket.join(`pg_${pgId}`);
-    });
-
-    socket.on("leave_pg_room", (pgId) => {
-      if (!pgId) return;
-      socket.leave(`pg_${pgId}`);
-    });
-
-    socket.on("send_announcement", (data) => {
-      const room = `pg_${data.pg_id}`;
-      io.to(room).emit("receive_announcement", {
-        ...data,
-        timestamp: new Date(),
-      });
-    });
-
-    socket.on("send_pg_message", (data) => {
-      const room = `pg_${data.pg_id}`;
-
-      socket.to(room).emit("receive_pg_message", {
-        ...data,
-        timestamp: new Date(),
-      });
-
-      socket.emit("message_sent", data);
-
-      if (data.is_important) {
-        io.to(room).emit("receive_announcement", data);
-      }
+      console.log("✅ Registered:", firebaseUid);
     });
 
     /* =========================================================
@@ -99,7 +66,7 @@ const initSocket = (server) => {
       const room = getPrivateRoom(userA, userB);
       socket.join(room);
 
-      console.log(`📩 Joined private room → ${room}`);
+      console.log("📩 Joined:", room);
     });
 
     socket.on("leave_private_room", ({ userA, userB }) => {
@@ -109,6 +76,8 @@ const initSocket = (server) => {
 
     socket.on("send_private_message", (data) => {
       try {
+        if (!data?.sender_id || !data?.receiver_id) return;
+
         const room = getPrivateRoom(
           data.sender_id,
           data.receiver_id
@@ -119,27 +88,33 @@ const initSocket = (server) => {
           created_at: data.created_at || new Date(),
         };
 
+        /* 🔥 SEND TO ROOM */
         socket.to(room).emit("receive_private_message", message);
 
+        /* 🔥 CONFIRM TO SENDER */
         socket.emit("message_sent_confirmation", {
           ...message,
           status: "delivered",
         });
 
-        io.emit("chat_list_update");
+        /* 🔥 UPDATE CHAT LIST ONLY FOR BOTH USERS */
+        emitChatListUpdate(data.sender_firebase_uid);
+        emitChatListUpdate(data.receiver_firebase_uid);
 
-        console.log("💬 Private message →", room);
+        console.log("💬 Message →", room);
       } catch (err) {
         console.error("❌ Private message error", err);
       }
     });
 
+    /* ================= TYPING ================= */
     socket.on("typing", ({ userA, userB, isTyping }) => {
       socket
         .to(getPrivateRoom(userA, userB))
         .emit("user_typing", { userId: userA, isTyping });
     });
 
+    /* ================= READ ================= */
     socket.on("mark_messages_read", ({ userA, userB, messageIds }) => {
       socket
         .to(getPrivateRoom(userA, userB))
@@ -159,14 +134,32 @@ const initSocket = (server) => {
         }
       }
 
-      console.log("🔴 Socket disconnected:", socket.id);
+      console.log("🔴 Disconnected:", socket.id);
     });
   });
 
   return io;
 };
 
-/* ================= HELPERS ================= */
+/* =========================================================
+   🎯 EMIT CHAT LIST UPDATE TO SPECIFIC USER
+========================================================= */
+const emitChatListUpdate = (firebaseUid) => {
+  if (!firebaseUid) return;
+
+  const sockets = onlineUsers.get(firebaseUid);
+  if (!sockets) return;
+
+  sockets.forEach((id) => {
+    io.to(id).emit("chat_list_update");
+  });
+};
+
+/* =========================================================
+   🧠 HELPERS
+========================================================= */
+
+const getIO = () => io;
 
 const isUserOnline = (userId) =>
   onlineUsers.has(userId) && onlineUsers.get(userId).size > 0;
@@ -176,6 +169,7 @@ const getUserSockets = (userId) =>
 
 module.exports = {
   initSocket,
+  getIO,
   isUserOnline,
   getUserSockets,
   getPrivateRoom,

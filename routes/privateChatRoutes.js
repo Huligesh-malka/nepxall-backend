@@ -1,36 +1,74 @@
 const express = require("express");
 const router = express.Router();
+
 const privateChat = require("../controllers/privateChatController");
 const auth = require("../middlewares/auth");
 
-// All routes here require Firebase Auth middleware
+/* =========================================================
+   🔐 ALL PRIVATE CHAT ROUTES REQUIRE AUTH
+========================================================= */
 router.use(auth);
 
 /* =========================================================
-   👤 USER & LIST ROUTES
+   👤 USER & CHAT LIST
 ========================================================= */
-// GET /api/private-chat/list -> Load the dashboard chat list
-router.get("/list", privateChat.getMyChatList); 
 
-// GET /api/private-chat/me -> Get current user info
+/**
+ * @route   GET /api/private-chat/me
+ * @desc    Get logged-in user (MySQL mapped from Firebase)
+ */
 router.get("/me", privateChat.getMe);
 
-// GET /api/private-chat/user/:id -> Get specific user info (name/avatar)
+/**
+ * @route   GET /api/private-chat/list
+ * @desc    Get chat list (owner + tenant safe)
+ */
+router.get("/list", privateChat.getMyChatList);
+
+/**
+ * @route   GET /api/private-chat/user/:id
+ * @desc    Get other user basic info
+ */
 router.get("/user/:id", privateChat.getUserById);
 
+
 /* =========================================================
-   💬 MESSAGE OPERATIONS
+   💬 MESSAGES
 ========================================================= */
-// GET /api/private-chat/messages/:userId -> Load chat history
+
+/**
+ * @route   GET /api/private-chat/messages/:userId
+ * @desc    Get full conversation with a user
+ */
 router.get("/messages/:userId", privateChat.getPrivateMessages);
 
-// POST /api/private-chat/send -> Save new message to DB
+/**
+ * @route   POST /api/private-chat/send
+ * @desc    Send a new message
+ */
 router.post("/send", privateChat.sendPrivateMessage);
 
-// PUT /api/private-chat/update/:id -> Edit an existing message
-router.put("/update/:id", privateChat.updatePrivateMessage); 
+/**
+ * @route   PUT /api/private-chat/update/:id
+ * @desc    Edit message (only sender)
+ */
+router.put("/update/:id", privateChat.updatePrivateMessage);
 
-// DELETE /api/private-chat/delete/:id -> Hide message for user
+/**
+ * @route   DELETE /api/private-chat/delete/:id
+ * @desc    Soft delete message (sender/receiver)
+ */
 router.delete("/delete/:id", privateChat.deletePrivateMessage);
+
+
+/* =========================================================
+   🚫 404 HANDLER FOR THIS ROUTER
+========================================================= */
+router.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Private chat route not found → ${req.originalUrl}`,
+  });
+});
 
 module.exports = router;
