@@ -1,7 +1,7 @@
 const db = require("../db");
 
 //////////////////////////////////////////////////////
-// 🧑 CREATE BOOKING
+// 🧑 CREATE BOOKING → PRODUCTION SAFE
 //////////////////////////////////////////////////////
 exports.createBooking = async (req, res) => {
   try {
@@ -10,12 +10,10 @@ exports.createBooking = async (req, res) => {
     const userId = req.user.mysqlId;
 
     if (!check_in_date || !room_type) {
-      return res.status(400).json({
-        message: "Please select move-in date and room type"
-      });
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // 🚫 Already applied check
+    // 🔐 PREVENT DOUBLE CLICK (CHECK FIRST)
     const [[existing]] = await db.query(
       `SELECT id FROM bookings
        WHERE user_id=? AND pg_id=? AND check_in_date=? LIMIT 1`,
@@ -23,9 +21,8 @@ exports.createBooking = async (req, res) => {
     );
 
     if (existing) {
-      return res.status(200).json({
-        alreadyBooked: true,
-        message: "You have already sent a request for this property"
+      return res.status(400).json({
+        message: "You already applied for this PG on this date"
       });
     }
 
@@ -35,17 +32,15 @@ exports.createBooking = async (req, res) => {
       [userId]
     );
 
-    if (!user)
-      return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     // 🏠 PG
     const [[pg]] = await db.query("SELECT * FROM pgs WHERE id=?", [pgId]);
 
-    if (!pg)
-      return res.status(404).json({ message: "Property not found" });
+    if (!pg) return res.status(404).json({ message: "PG not found" });
 
     //////////////////////////////////////////////////////
-    // 💰 RENT
+    // 💰 RENT CALCULATION
     //////////////////////////////////////////////////////
     let rent = 0;
 
@@ -62,7 +57,10 @@ exports.createBooking = async (req, res) => {
       if (room_type === "Single Room")
         rent = pg.co_living_single_room || 0;
 
-      if (room_type.includes("Double"))
+      if (
+        room_type === "Double Room" ||
+        room_type === "Co-Living Double Room"
+      )
         rent = pg.co_living_double_room || 0;
     }
 
@@ -80,7 +78,7 @@ exports.createBooking = async (req, res) => {
     const finalPhone = phone?.trim() || user.phone;
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT BOOKING
+    // 📝 INSERT
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO bookings
@@ -103,24 +101,19 @@ exports.createBooking = async (req, res) => {
       ]
     );
 
-    res.json({
-      success: true,
-      message: "Your booking request has been sent to the owner"
-    });
+    res.json({ success: true });
 
   } catch (err) {
 
+    // 🔥 UNIQUE CONSTRAINT PROTECTION
     if (err.code === "ER_DUP_ENTRY") {
-      return res.status(200).json({
-        alreadyBooked: true,
-        message: "You have already sent a request for this property"
+      return res.status(400).json({
+        message: "Booking already exists (multiple click blocked)"
       });
     }
 
-    console.error(err);
-    res.status(500).json({
-      message: "Something went wrong. Please try again"
-    });
+    console.error("CREATE BOOKING ERROR:", err);
+    res.status(500).json({ message: err.message });
   }
 };
 
@@ -130,30 +123,72 @@ exports.createBooking = async (req, res) => {
 exports.getUserBookings = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT 
-        b.*, 
+      `
+      SELECT 
+        b.id,
+        b.pg_id,
+        b.owner_id,
+        b.room_id,
+        b.room_type,
+        b.check_in_date,
+        b.status,
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
         (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
-        p.pg_name, p.city, p.area, p.contact_phone AS owner_phone,
+        b.kyc_verified,
+        b.agreement_signed,
+        b.move_in_completed,
+        b.created_at,
+        p.pg_name,
+        p.city,
+        p.area,
+        p.contact_phone AS owner_phone,
         pr.room_no
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
       WHERE b.user_id=?
-      ORDER BY b.created_at DESC`,
+      ORDER BY b.created_at DESC
+      `,
       [req.user.mysqlId]
     );
 
     res.json(rows);
-
-  } catch {
-    res.status(500).json({
-      message: "Unable to load bookings"
-    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
 //////////////////////////////////////////////////////
-// 👑 OWNER UPDATE STATUS
+// 👑 OWNER BOOKINGS
+//////////////////////////////////////////////////////
+exports.getOwnerBookings = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `
+      SELECT 
+        b.*,
+        p.pg_name,
+        u.name AS tenant_name,
+        u.phone AS tenant_phone
+      FROM bookings b
+      JOIN pgs p ON p.id = b.pg_id
+      JOIN users u ON u.id = b.user_id
+      WHERE b.owner_id=?
+      ORDER BY b.created_at DESC
+      `,
+      [req.user.mysqlId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//////////////////////////////////////////////////////
+// 👑 OWNER APPROVE / REJECT
 //////////////////////////////////////////////////////
 exports.updateBookingStatus = async (req, res) => {
   try {
@@ -165,15 +200,9 @@ exports.updateBookingStatus = async (req, res) => {
       [status, bookingId, req.user.mysqlId]
     );
 
-    res.json({
-      success: true,
-      message: `Booking ${status}`
-    });
-
-  } catch {
-    res.status(500).json({
-      message: "Unable to update booking"
-    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
@@ -206,6 +235,7 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
+    // 🔐 prevent duplicate active tenant
     await db.query(
       `INSERT INTO pg_users (pg_id,room_id,user_id,owner_id,status)
        VALUES (?,?,?,?, 'ACTIVE')
@@ -218,14 +248,35 @@ exports.markPaymentDone = async (req, res) => {
       ]
     );
 
-    res.json({
-      success: true,
-      message: "Payment successful. Your stay is confirmed"
-    });
+    res.json({ success: true });
 
-  } catch {
-    res.status(500).json({
-      message: "Payment processed, but something went wrong"
-    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//////////////////////////////////////////////////////
+// 👑 ACTIVE TENANTS
+//////////////////////////////////////////////////////
+exports.getActiveTenantsByOwner = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `
+      SELECT 
+        pu.*,
+        u.name,
+        u.phone,
+        p.pg_name
+      FROM pg_users pu
+      JOIN users u ON u.id = pu.user_id
+      JOIN pgs p ON p.id = pu.pg_id
+      WHERE pu.owner_id=? AND pu.status='ACTIVE'
+      `,
+      [req.user.mysqlId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
