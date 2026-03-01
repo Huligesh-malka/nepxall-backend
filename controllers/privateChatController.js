@@ -203,52 +203,85 @@ LIMIT 1
 /* =========================================================
    📥 GET MESSAGES + 🔒 ACCESS PROTECTION
 ========================================================= */
-exports.getPrivateMessages = async (req, res) => {
+exports.getMyChatList = async (req, res) => {
   try {
     const me = req.me;
-    const otherId = Number(req.params.userId);
-
-    /* 🔒 BOOKING RELATION CHECK */
-    const [access] = await db.query(
-      `
-      SELECT 1
-      FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
-      WHERE 
-      (b.user_id=? AND p.owner_id=?)
-      OR
-      (b.user_id=? AND p.owner_id=?)
-      LIMIT 1
-      `,
-      [me.id, otherId, otherId, me.id]
-    );
-
-    if (!access.length)
-      return res.status(403).json({ message: "Not allowed to chat" });
 
     const [rows] = await db.query(
       `
-      SELECT *
-      FROM private_messages
-      WHERE 
-        (sender_id=? AND receiver_id=?)
-        OR
-        (sender_id=? AND receiver_id=?)
-      ORDER BY created_at ASC
-      `,
-      [me.id, otherId, otherId, me.id]
-    );
+SELECT 
+  u.id,
 
-    await db.query(
-      `UPDATE private_messages 
-       SET is_read = 1 
-       WHERE sender_id=? AND receiver_id=?`,
-      [otherId, me.id]
+  /* 🎯 ROLE BASED DISPLAY NAME */
+  CASE 
+    WHEN ? = 'owner' 
+      THEN COALESCE(MAX(b.name), u.name, 'User')
+    ELSE MAX(p.pg_name)
+  END AS name,
+
+  MAX(p.pg_name) AS pg_name,
+  u.firebase_uid,
+
+  pm.message AS last_message,
+  pm.created_at AS last_time,
+
+  CASE 
+    WHEN pm.sender_id = ? THEN 'me'
+    ELSE 'other'
+  END AS last_sender,
+
+  (
+    SELECT COUNT(*)
+    FROM private_messages
+    WHERE sender_id = u.id
+      AND receiver_id = ?
+      AND is_read = 0
+  ) AS unread
+
+FROM private_messages pm
+
+JOIN users u 
+  ON u.id = CASE 
+      WHEN pm.sender_id = ? THEN pm.receiver_id
+      ELSE pm.sender_id
+    END
+
+/* ✅ GET LATEST BOOKING ONLY */
+LEFT JOIN bookings b 
+  ON b.user_id = u.id 
+ AND b.owner_id = ?
+
+LEFT JOIN pgs p 
+  ON p.id = b.pg_id
+
+/* ✅ LAST MESSAGE PER CONVERSATION */
+WHERE pm.id IN (
+  SELECT MAX(id)
+  FROM private_messages
+  WHERE sender_id = ? OR receiver_id = ?
+  GROUP BY LEAST(sender_id, receiver_id),
+           GREATEST(sender_id, receiver_id)
+)
+
+/* ⭐ REMOVE DUPLICATES */
+GROUP BY u.id
+
+ORDER BY last_time DESC
+      `,
+      [
+        me.role,
+        me.id,
+        me.id,
+        me.id,
+        me.id,
+        me.id,
+        me.id,
+      ]
     );
 
     res.json(rows);
-
-  } catch {
+  } catch (err) {
+    console.error("CHAT LIST ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
