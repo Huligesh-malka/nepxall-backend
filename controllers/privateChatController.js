@@ -115,13 +115,17 @@ JOIN users u
       ELSE pm.sender_id 
     END
 
-/* ✅ BOOKING JOIN */
-JOIN bookings b 
-  ON (
+/* ✅ THIS PART FIXES DUPLICATE CHATS */
+JOIN (
+    SELECT user_id, owner_id, pg_id, MAX(name) AS name
+    FROM bookings
+    GROUP BY user_id, owner_id, pg_id
+) b
+ON (
     (b.user_id = u.id AND b.owner_id = ?)
     OR
     (b.owner_id = u.id AND b.user_id = ?)
-  )
+)
 
 JOIN pgs p ON p.id = b.pg_id
 
@@ -148,12 +152,12 @@ ORDER BY last_time DESC
     );
 
     res.json(rows);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
-
 /* =========================================================
    👤 GET OTHER USER + PG NAME
 ========================================================= */
