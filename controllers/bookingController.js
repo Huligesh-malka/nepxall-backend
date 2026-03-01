@@ -107,10 +107,11 @@ exports.createBooking = async (req, res) => {
 
     // 🔥 UNIQUE CONSTRAINT PROTECTION
     if (err.code === "ER_DUP_ENTRY") {
-      return res.status(400).json({
-        message: "Booking already exists (multiple click blocked)"
-      });
-    }
+  return res.status(200).json({
+    alreadyBooked: true,
+    message: "You have already sent a request for this property"
+  });
+}
 
     console.error("CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
