@@ -17,21 +17,7 @@ const getPrivateRoom = (a, b) => {
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-
-        if (origin.includes("localhost")) return callback(null, true);
-        if (origin.includes("vercel.app")) return callback(null, true);
-
-        if (
-          process.env.FRONTEND_URL &&
-          origin === process.env.FRONTEND_URL
-        ) {
-          return callback(null, true);
-        }
-
-        return callback(null, true);
-      },
+      origin: (origin, callback) => callback(null, true),
       credentials: true,
       methods: ["GET", "POST"],
     },
@@ -52,8 +38,6 @@ const initSocket = (server) => {
       socket.firebaseUid = firebaseUid;
 
       io.emit("user_online", firebaseUid);
-
-      console.log("✅ Registered:", firebaseUid);
     });
 
     /* =========================================================
@@ -62,11 +46,7 @@ const initSocket = (server) => {
 
     socket.on("join_private_room", ({ userA, userB }) => {
       if (!userA || !userB) return;
-
-      const room = getPrivateRoom(userA, userB);
-      socket.join(room);
-
-      console.log("📩 Joined:", room);
+      socket.join(getPrivateRoom(userA, userB));
     });
 
     socket.on("leave_private_room", ({ userA, userB }) => {
@@ -74,6 +54,7 @@ const initSocket = (server) => {
       socket.leave(getPrivateRoom(userA, userB));
     });
 
+    /* ================= SEND MESSAGE ================= */
     socket.on("send_private_message", (data) => {
       try {
         if (!data?.sender_id || !data?.receiver_id) return;
@@ -88,22 +69,43 @@ const initSocket = (server) => {
           created_at: data.created_at || new Date(),
         };
 
-        /* 🔥 SEND TO ROOM */
         socket.to(room).emit("receive_private_message", message);
 
-        /* 🔥 CONFIRM TO SENDER */
         socket.emit("message_sent_confirmation", {
           ...message,
           status: "delivered",
         });
 
-        /* 🔥 UPDATE CHAT LIST ONLY FOR BOTH USERS */
         emitChatListUpdate(data.sender_firebase_uid);
         emitChatListUpdate(data.receiver_firebase_uid);
 
-        console.log("💬 Message →", room);
       } catch (err) {
         console.error("❌ Private message error", err);
+      }
+    });
+
+    /* =========================================================
+       🗑 DELETE MESSAGE (NEW)
+    ========================================================= */
+    socket.on("delete_private_message", (data) => {
+      try {
+        const { sender_id, receiver_id, messageId } = data;
+
+        if (!sender_id || !receiver_id || !messageId) return;
+
+        const room = getPrivateRoom(sender_id, receiver_id);
+
+        /* 🔥 REMOVE FOR BOTH USERS */
+        io.to(room).emit("message_deleted", { messageId });
+
+        /* 🔥 UPDATE CHAT LIST */
+        emitChatListUpdate(data.sender_firebase_uid);
+        emitChatListUpdate(data.receiver_firebase_uid);
+
+        console.log("🗑 Message deleted →", room);
+
+      } catch (err) {
+        console.error("❌ Delete message error", err);
       }
     });
 
@@ -158,7 +160,6 @@ const emitChatListUpdate = (firebaseUid) => {
 /* =========================================================
    🧠 HELPERS
 ========================================================= */
-
 const getIO = () => io;
 
 const isUserOnline = (userId) =>
