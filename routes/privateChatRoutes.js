@@ -40,6 +40,6 @@ router.put("/message/:id", privateChat.updatePrivateMessage);
 /* =====================================================
    🗑 DELETE MESSAGE
 ===================================================== */
-router.delete("/message/:id", privateChat.deletePrivateMessage);
+router.delete("/delete/:id", authMiddleware, loadMe, deletePrivateMessage);
 
 module.exports = router;

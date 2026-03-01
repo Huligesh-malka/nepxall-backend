@@ -304,15 +304,23 @@ exports.updatePrivateMessage = async (req, res) => {
 exports.deletePrivateMessage = async (req, res) => {
   try {
     const me = req.me;
+    const messageId = req.params.id;
 
-    await db.query(
-      "DELETE FROM private_messages WHERE id=? AND sender_id=?",
-      [req.params.id, me.id]
+    /* ✅ Only sender can delete */
+    const [result] = await db.query(
+      `DELETE FROM private_messages 
+       WHERE id = ? AND sender_id = ?`,
+      [messageId, me.id]
     );
+
+    if (!result.affectedRows) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
 
     res.json({ success: true });
 
-  } catch {
+  } catch (err) {
+    console.error("DELETE MESSAGE ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
