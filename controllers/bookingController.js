@@ -22,7 +22,7 @@ exports.createBooking = async (req, res) => {
 
     if (existing) {
       return res.status(400).json({
-        message: "You already applied for this PG on this date"
+        message: "Your booking is already submitted"
       });
     }
 
