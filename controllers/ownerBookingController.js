@@ -21,33 +21,52 @@ const getOwner = async (firebaseUid) => {
 exports.getOwnerBookings = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebaseUid);
-    if (!owner) return res.status(403).json({ message: "Not an owner" });
+
+    if (!owner) {
+      return res.status(403).json({ message: "Not an owner" });
+    }
 
     const [rows] = await db.query(
-      `SELECT 
+      `
+      SELECT 
           b.id,
           b.pg_id,
           b.check_in_date,
           b.room_type,
           b.status,
-          b.phone,
           b.created_at,
+
           p.pg_name,
-          u.name AS tenant_name
-       FROM bookings b
-       JOIN (
+
+          /* ✅ SNAPSHOT TENANT NAME */
+          b.name AS tenant_name,
+
+          /* 🔒 SHOW PHONE ONLY AFTER APPROVAL */
+          CASE 
+            WHEN b.status IN ('approved','confirmed') 
+            THEN b.phone
+            ELSE NULL
+          END AS tenant_phone
+
+      FROM bookings b
+
+      /* ✅ GET ONLY LATEST BOOKING */
+      JOIN (
           SELECT MAX(id) id
           FROM bookings
           WHERE owner_id = ?
           GROUP BY pg_id, user_id, check_in_date, room_type
-       ) latest ON latest.id = b.id
-       JOIN pgs p ON p.id = b.pg_id
-       JOIN users u ON u.id = b.user_id
-       ORDER BY b.created_at DESC`,
+      ) latest ON latest.id = b.id
+
+      JOIN pgs p ON p.id = b.pg_id
+
+      ORDER BY b.created_at DESC
+      `,
       [owner.id]
     );
 
     res.json(rows);
+
   } catch (err) {
     console.error("❌ GET OWNER BOOKINGS:", err);
     res.status(500).json({ message: "Server error" });
