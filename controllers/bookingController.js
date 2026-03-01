@@ -6,24 +6,38 @@ const db = require("../db");
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const { check_in_date, room_type, phone } = req.body;
+    const { name, check_in_date, room_type, phone } = req.body;
     const userId = req.user.mysqlId;
 
+    if (!check_in_date || !room_type) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // 👤 Get logged-in user
     const [[user]] = await db.query(
       "SELECT name, email, phone FROM users WHERE id=?",
       [userId]
     );
 
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 🏠 Get PG
     const [[pg]] = await db.query(
       "SELECT * FROM pgs WHERE id=?",
       [pgId]
     );
 
-    if (!pg) return res.status(404).json({ message: "PG not found" });
+    if (!pg) {
+      return res.status(404).json({ message: "PG not found" });
+    }
 
+    //////////////////////////////////////////////////////
+    // 💰 RENT CALCULATION
+    //////////////////////////////////////////////////////
     let rent = 0;
 
-    // 🏠 RENT
     if (pg.pg_category === "pg") {
       if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
       if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
@@ -51,23 +65,34 @@ exports.createBooking = async (req, res) => {
       if (room_type === "4BHK") rent = pg.price_4bhk || 0;
     }
 
-    // 💰 EXTRA
+    //////////////////////////////////////////////////////
+    // 💸 EXTRA CHARGES
+    //////////////////////////////////////////////////////
     const deposit = pg.deposit_amount || pg.security_deposit || 0;
     const maintenance = pg.maintenance_amount || 0;
 
+    //////////////////////////////////////////////////////
+    // 🧾 SNAPSHOT DATA (REAL WORLD METHOD)
+    //////////////////////////////////////////////////////
+    const finalName = name?.trim() || user.name;
+    const finalPhone = phone?.trim() || user.phone;
+
+    //////////////////////////////////////////////////////
+    // 📝 INSERT BOOKING
+    //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO bookings
-      (pg_id,user_id,owner_id,name,email,phone,
-       check_in_date,room_type,
-       rent_amount,security_deposit,maintenance_amount,status)
+      (pg_id, user_id, owner_id, name, email, phone,
+       check_in_date, room_type,
+       rent_amount, security_deposit, maintenance_amount, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`,
       [
         pgId,
         userId,
         pg.owner_id,
-        user.name,
+        finalName,
         user.email,
-        phone || user.phone,
+        finalPhone,
         check_in_date,
         room_type,
         rent,
@@ -79,7 +104,7 @@ exports.createBooking = async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-    console.log(err);
+    console.error("CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
