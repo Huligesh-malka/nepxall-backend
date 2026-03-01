@@ -306,18 +306,30 @@ exports.deletePrivateMessage = async (req, res) => {
     const me = req.me;
     const messageId = req.params.id;
 
-    /* ✅ Only sender can delete */
-    const [result] = await db.query(
-      `DELETE FROM private_messages 
-       WHERE id = ? AND sender_id = ?`,
-      [messageId, me.id]
+    /* 🔍 Check message belongs to this user */
+    const [[msg]] = await db.query(
+      `SELECT sender_id, receiver_id 
+       FROM private_messages 
+       WHERE id=?`,
+      [messageId]
     );
 
-    if (!result.affectedRows) {
+    if (!msg) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    /* ❌ Not your message */
+    if (msg.sender_id !== me.id && msg.receiver_id !== me.id) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    res.json({ success: true });
+    /* 🗑 PERMANENT DELETE */
+    await db.query(
+      `DELETE FROM private_messages WHERE id=?`,
+      [messageId]
+    );
+
+    res.json({ success: true, type: "permanent" });
 
   } catch (err) {
     console.error("DELETE MESSAGE ERROR:", err);
