@@ -26,6 +26,6 @@ router.post("/send", privateChat.sendPrivateMessage);
 router.put("/message/:id", privateChat.updatePrivateMessage);
 
 /* 🗑 PERMANENT DELETE MESSAGE */
-router.delete("/delete/:id", privateChat.deletePrivateMessage);
+
 
 module.exports = router;
