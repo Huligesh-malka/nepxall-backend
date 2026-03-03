@@ -14,10 +14,16 @@ const ensureDir = dir => {
 //////////////////////////////////////////////////////
 // CREATE OR LOAD AGREEMENT (NO PAYMENT CHECK)
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// CREATE OR LOAD AGREEMENT (STABLE VERSION)
+//////////////////////////////////////////////////////
 exports.getAgreement = async (req, res) => {
   try {
     const { bookingId } = req.params;
 
+    //////////////////////////////////////////////////////
+    // 1️⃣ LOAD BOOKING
+    //////////////////////////////////////////////////////
     const [bookingRows] = await db.query(
       `SELECT b.*, p.owner_id
        FROM bookings b
@@ -26,21 +32,34 @@ exports.getAgreement = async (req, res) => {
       [bookingId]
     );
 
-    if (!bookingRows.length)
+    if (!bookingRows.length) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
     const booking = bookingRows[0];
 
+    //////////////////////////////////////////////////////
+    // 2️⃣ SAFE VALUES
+    //////////////////////////////////////////////////////
     const minDuration = 1;
     const duration = Math.max(booking.duration || 6, minDuration);
+    const moveInDate = booking.check_in_date || new Date();
 
+    //////////////////////////////////////////////////////
+    // 3️⃣ CHECK IF AGREEMENT EXISTS
+    //////////////////////////////////////////////////////
     const [agreementRows] = await db.query(
       `SELECT * FROM rent_agreements WHERE booking_id=?`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // 4️⃣ CREATE IF NOT EXISTS
+    //////////////////////////////////////////////////////
     if (!agreementRows.length) {
+
       const agreementNumber = `AGR-${new Date().getFullYear()}-${bookingId}`;
+
       const verificationCode = crypto
         .randomBytes(3)
         .toString("hex")
@@ -52,11 +71,13 @@ exports.getAgreement = async (req, res) => {
          rent_amount, security_deposit, maintenance_amount,
          move_in_date, agreement_duration_months,
          agreement_number, verification_code,
-         expires_at, status, agreement_type)
+         expires_at, status, agreement_type,
+         lock_in_months, notice_period_days, rent_due_day)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,
         DATE_ADD(?, INTERVAL ? MONTH),
         'draft',
-        ?)`,
+        'pg',
+        ?, 30, 5)`,
         [
           bookingId,
           booking.pg_id,
@@ -65,17 +86,20 @@ exports.getAgreement = async (req, res) => {
           booking.rent_amount || 0,
           booking.security_deposit || 0,
           booking.maintenance_amount || 0,
-          booking.check_in_date,
+          moveInDate,
           duration,
           agreementNumber,
           verificationCode,
-          booking.check_in_date,
+          moveInDate,
           duration,
-          duration >= 12 ? 'registered' : 'standard'
+          duration
         ]
       );
     }
 
+    //////////////////////////////////////////////////////
+    // 5️⃣ RETURN AGREEMENT DATA
+    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `SELECT ra.*,
        p.pg_name, p.address, p.city,
@@ -94,41 +118,50 @@ exports.getAgreement = async (req, res) => {
       [bookingId]
     );
 
-    res.json({ data: rows[0] });
+    return res.json({ success: true, data: rows[0] });
 
   } catch (err) {
-    console.log("AGREEMENT LOAD ERROR:", err);
-    res.status(500).json({ message: "Agreement load failed" });
+    console.error("AGREEMENT LOAD ERROR:", err);
+    return res.status(500).json({
+      message: "Agreement load failed",
+      error: err.message   // helpful for debugging
+    });
   }
 };
 
 //////////////////////////////////////////////////////
-// STATUS
+// AGREEMENT STATUS
 //////////////////////////////////////////////////////
 exports.getAgreementStatus = async (req, res) => {
-  const [rows] = await db.query(
-    `SELECT status, tenant_esigned, owner_esigned, final_pdf_generated
-     FROM rent_agreements WHERE booking_id=?`,
-    [req.params.bookingId]
-  );
+  try {
+    const [rows] = await db.query(
+      `SELECT status,
+              tenant_esigned,
+              owner_esigned,
+              final_pdf_generated,
+              agreement_number,
+              verification_code
+       FROM rent_agreements
+       WHERE booking_id=?`,
+      [req.params.bookingId]
+    );
 
-  res.json(rows[0] || {});
-};
+    if (!rows.length) {
+      return res.json({ exists: false });
+    }
 
-//////////////////////////////////////////////////////
-// OWNER SIGN
-//////////////////////////////////////////////////////
-exports.ownerESign = async (req, res) => {
-  const { bookingId, signatureFile } = req.body;
+    return res.json({
+      exists: true,
+      ...rows[0]
+    });
 
-  await db.query(
-    `UPDATE rent_agreements
-     SET owner_signature_file=?, owner_esigned=1
-     WHERE booking_id=?`,
-    [signatureFile, bookingId]
-  );
-
-  res.json({ success: true });
+  } catch (err) {
+    console.error("STATUS ERROR:", err);
+    return res.status(500).json({
+      message: "Status fetch failed",
+      error: err.message
+    });
+  }
 };
 
 //////////////////////////////////////////////////////
@@ -170,7 +203,14 @@ exports.tenantESign = async (req, res) => {
 //////////////////////////////////////////////////////
 const generateFinalPDF = async bookingId => {
   const [rows] = await db.query(
-    `SELECT * FROM rent_agreements WHERE booking_id=?`,
+    `SELECT ra.*,
+     p.pg_name, p.address, p.city,
+     p.contact_person AS owner_name,
+     u.name AS tenant_name
+     FROM rent_agreements ra
+     JOIN pgs p ON p.id = ra.pg_id
+     JOIN users u ON u.id = ra.user_id
+     WHERE ra.booking_id=?`,
     [bookingId]
   );
 
@@ -184,15 +224,76 @@ const generateFinalPDF = async bookingId => {
   const fileName = `final-${bookingId}.pdf`;
   const filePath = path.join(dir, fileName);
 
-  const doc = new PDFDocument();
+  const doc = new PDFDocument({ margin: 50 });
   const stream = fs.createWriteStream(filePath);
-
   doc.pipe(stream);
 
-  doc.fontSize(16).text("RENT AGREEMENT", { align: "center" });
+  //////////////////////////////////////////////////////
+  // HEADER
+  //////////////////////////////////////////////////////
+  doc.fontSize(18).text("RENTAL AGREEMENT", { align: "center" });
   doc.moveDown();
-  doc.text(`Agreement ID: ${data.agreement_number}`);
+
+  doc.fontSize(10).text(`Agreement No: ${data.agreement_number}`);
   doc.text(`Verification Code: ${data.verification_code}`);
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // INTRODUCTION
+  //////////////////////////////////////////////////////
+  doc.fontSize(12).text(
+    `This Rental Agreement is made on ${new Date().toLocaleDateString()} 
+between ${data.owner_name} (hereinafter referred to as the "Landlord") 
+and ${data.tenant_name} (hereinafter referred to as the "Tenant").`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // PROPERTY
+  //////////////////////////////////////////////////////
+  doc.text(
+    `The Landlord agrees to rent the property located at:
+${data.pg_name},
+${data.address},
+${data.city}.`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // TERMS
+  //////////////////////////////////////////////////////
+  doc.text(`1. Duration: ${data.agreement_duration_months} Months`);
+  doc.text(`2. Monthly Rent: ₹${data.rent_amount}`);
+  doc.text(`3. Security Deposit: ₹${data.security_deposit}`);
+  doc.text(`4. Maintenance Charges: ₹${data.maintenance_amount}`);
+  doc.text(`5. Rent Due Date: Every ${data.rent_due_day}th of month`);
+  doc.text(`6. Notice Period: ${data.notice_period_days} Days`);
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // LEGAL CLAUSE
+  //////////////////////////////////////////////////////
+  doc.fontSize(11).text(
+    `LEGAL CLAUSE:
+This agreement is governed under the Karnataka Rent Act, 1999.
+Both parties agree to comply with all applicable rental laws.
+In case of dispute, jurisdiction shall be the courts of Bengaluru, Karnataka.`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // SIGNATURE BLOCK
+  //////////////////////////////////////////////////////
+  doc.moveDown();
+  doc.text("Landlord Signature: __________________________");
+  doc.moveDown();
+  doc.text("Tenant Signature: __________________________");
+  doc.moveDown();
+
+  doc.text(`Signed Date: ${new Date().toLocaleDateString()}`);
 
   doc.end();
 
