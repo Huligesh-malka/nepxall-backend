@@ -11,6 +11,9 @@ const ensureDir = dir => {
 //////////////////////////////////////////////////////
 // CREATE OR LOAD AGREEMENT
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// CREATE OR LOAD AGREEMENT (NO PAYMENT CHECK)
+//////////////////////////////////////////////////////
 exports.getAgreement = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -28,18 +31,19 @@ exports.getAgreement = async (req, res) => {
 
     const booking = bookingRows[0];
 
-    // ✅ only allow after payment
-    if (booking.status !== "confirmed") {
-      return res.status(400).json({
-        message: "Agreement available after payment confirmation"
-      });
-    }
+    // ❌ PAYMENT CHECK REMOVED
 
+    //////////////////////////////////////////////////////
+    // CHECK IF AGREEMENT EXISTS
+    //////////////////////////////////////////////////////
     const [agreementRows] = await db.query(
       `SELECT * FROM rent_agreements WHERE booking_id=?`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // CREATE IF NOT EXISTS
+    //////////////////////////////////////////////////////
     if (!agreementRows.length) {
       const agreementNumber = `AGR-${new Date().getFullYear()}-${bookingId}`;
       const verificationCode = crypto
@@ -72,6 +76,9 @@ exports.getAgreement = async (req, res) => {
       );
     }
 
+    //////////////////////////////////////////////////////
+    // RETURN AGREEMENT DATA
+    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `SELECT ra.*,
        p.pg_name, p.address, p.city,
