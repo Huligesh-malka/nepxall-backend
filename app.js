@@ -98,17 +98,31 @@ app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
+
+/* ================= ADMIN CORE ================= */
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 
+/* ================= ✅ NEW: ADMIN SERVICE MANAGEMENT ================= */
+app.use("/api/admin/services", safeLoad("./routes/adminServiceRoutes"));
+
+/* ================= ✅ NEW: VENDOR ROUTES ================= */
+app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
+
 /* ================= 404 & ERROR HANDLING ================= */
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: `❌ Route ${req.originalUrl} not found` });
+  res.status(404).json({
+    success: false,
+    message: `❌ Route ${req.originalUrl} not found`
+  });
 });
 
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
-  res.status(err.status || 500).json({ success: false, message: err.message || "Internal Server Error" });
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error"
+  });
 });
 
 module.exports = app;
