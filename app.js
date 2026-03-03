@@ -58,13 +58,15 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+
+/* ✅ EXPRESS 5 PREFLIGHT FIX */
+app.options(/.*/, cors(corsOptions));
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 Nepxall Backend API Running",
+    message: "🚀 Nepxall Backend API",
     environment: process.env.NODE_ENV,
     time: new Date(),
   });
@@ -96,7 +98,7 @@ const safeLoad = (path) => {
     console.log("✅ Loaded:", path);
     return route;
   } catch (err) {
-    console.error("❌ Failed to load:", path, err.message);
+    console.error("❌ Failed:", path, err.message);
     return express.Router();
   }
 };
@@ -113,7 +115,7 @@ app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
-/* ================= ✅ SERVICES ROUTE ================= */
+/* ✅ ADD THIS BACK (VERY IMPORTANT) */
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
 /* ================= SOCIAL ================= */
