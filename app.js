@@ -116,6 +116,9 @@ app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
+/* ✅ ADD SERVICES ROUTE HERE */
+app.use("/api/services", safeLoad("./routes/serviceRoutes"));
+
 /* ================= SOCIAL ================= */
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
