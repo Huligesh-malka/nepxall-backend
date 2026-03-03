@@ -48,9 +48,7 @@ const allowedOrigins = [
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-
     if (origin.includes("vercel.app")) return callback(null, true);
-
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
     console.log("❌ Blocked by CORS:", origin);
@@ -60,8 +58,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-/* ✅ EXPRESS 5 PREFLIGHT FIX */
 app.options(/.*/, cors(corsOptions));
 
 /* ================= ROOT ================= */
@@ -82,7 +78,7 @@ app.get("/api/health", (req, res) => {
 /* ================= DB WARMUP ================= */
 setInterval(async () => {
   try {
-    const db = require("./db");
+    const db = require("./config/db");
     await db.query("SELECT 1");
     console.log("🔥 DB Warmup success");
   } catch (err) {
@@ -115,6 +111,9 @@ app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
+
+/* ✅ NEW: SERVICES ROUTE */
+app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
 /* ================= SOCIAL ================= */
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
