@@ -5,7 +5,7 @@ const db = require("../db");
 //////////////////////////////////////////////////
 exports.bookService = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.mysqlId;  // ✅ FIXED
 
     const {
       bookingId,
@@ -32,7 +32,6 @@ exports.bookService = async (req, res) => {
 
     const commission = Number(amount) * 0.15;
 
-    // 🚀 NO booking validation anymore
     await db.query(
       `INSERT INTO service_bookings
       (booking_id, user_id, service_type, service_date, address, notes, amount, commission)
@@ -58,36 +57,7 @@ exports.bookService = async (req, res) => {
     console.error("BOOK SERVICE ERROR:", err);
     res.status(500).json({
       success: false,
-      message: "Server error"
-    });
-  }
-};
-
-//////////////////////////////////////////////////
-// GET USER SERVICES
-//////////////////////////////////////////////////
-exports.getUserServices = async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    const [rows] = await db.query(
-      `SELECT *
-       FROM service_bookings
-       WHERE user_id = ?
-       ORDER BY created_at DESC`,
-      [userId]
-    );
-
-    res.json({
-      success: true,
-      services: rows
-    });
-
-  } catch (err) {
-    console.error("GET USER SERVICES ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
+      message: err.message
     });
   }
 };
