@@ -18,6 +18,7 @@ exports.getAgreement = async (req, res) => {
   try {
     const { bookingId } = req.params;
 
+    // 1️⃣ Get booking + owner
     const [bookingRows] = await db.query(
       `SELECT b.*, p.owner_id
        FROM bookings b
@@ -26,21 +27,26 @@ exports.getAgreement = async (req, res) => {
       [bookingId]
     );
 
-    if (!bookingRows.length)
+    if (!bookingRows.length) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
     const booking = bookingRows[0];
 
     const minDuration = 1;
     const duration = Math.max(booking.duration || 6, minDuration);
 
+    // 2️⃣ Check if agreement already exists
     const [agreementRows] = await db.query(
       `SELECT * FROM rent_agreements WHERE booking_id=?`,
       [bookingId]
     );
 
+    // 3️⃣ If not exists → create new agreement
     if (!agreementRows.length) {
+
       const agreementNumber = `AGR-${new Date().getFullYear()}-${bookingId}`;
+
       const verificationCode = crypto
         .randomBytes(3)
         .toString("hex")
@@ -71,11 +77,12 @@ exports.getAgreement = async (req, res) => {
           verificationCode,
           booking.check_in_date,
           duration,
-          duration >= 12 ? 'registered' : 'standard'
+          'pg' // ✅ FIXED (must match enum: 'pg','coliving','tolet')
         ]
       );
     }
 
+    // 4️⃣ Load final agreement data
     const [rows] = await db.query(
       `SELECT ra.*,
        p.pg_name, p.address, p.city,
@@ -94,10 +101,14 @@ exports.getAgreement = async (req, res) => {
       [bookingId]
     );
 
+    if (!rows.length) {
+      return res.status(404).json({ message: "Agreement not found" });
+    }
+
     res.json({ data: rows[0] });
 
   } catch (err) {
-    console.log("AGREEMENT LOAD ERROR:", err);
+    console.error("AGREEMENT LOAD ERROR:", err);
     res.status(500).json({ message: "Agreement load failed" });
   }
 };
