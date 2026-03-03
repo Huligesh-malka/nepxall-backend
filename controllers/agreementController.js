@@ -31,19 +31,14 @@ exports.getAgreement = async (req, res) => {
 
     const booking = bookingRows[0];
 
-    // ❌ PAYMENT CHECK REMOVED
+    const minDuration = 1;
+    const duration = Math.max(booking.duration || 6, minDuration);
 
-    //////////////////////////////////////////////////////
-    // CHECK IF AGREEMENT EXISTS
-    //////////////////////////////////////////////////////
     const [agreementRows] = await db.query(
       `SELECT * FROM rent_agreements WHERE booking_id=?`,
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // CREATE IF NOT EXISTS
-    //////////////////////////////////////////////////////
     if (!agreementRows.length) {
       const agreementNumber = `AGR-${new Date().getFullYear()}-${bookingId}`;
       const verificationCode = crypto
@@ -57,8 +52,11 @@ exports.getAgreement = async (req, res) => {
          rent_amount, security_deposit, maintenance_amount,
          move_in_date, agreement_duration_months,
          agreement_number, verification_code,
-         expires_at, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,DATE_ADD(?, INTERVAL 6 MONTH),'requested')`,
+         expires_at, status, agreement_type)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,
+        DATE_ADD(?, INTERVAL ? MONTH),
+        'draft',
+        ?)`,
         [
           bookingId,
           booking.pg_id,
@@ -68,27 +66,28 @@ exports.getAgreement = async (req, res) => {
           booking.security_deposit || 0,
           booking.maintenance_amount || 0,
           booking.check_in_date,
-          6,
+          duration,
           agreementNumber,
           verificationCode,
-          booking.check_in_date
+          booking.check_in_date,
+          duration,
+          duration >= 12 ? 'registered' : 'standard'
         ]
       );
     }
 
-    //////////////////////////////////////////////////////
-    // RETURN AGREEMENT DATA
-    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `SELECT ra.*,
        p.pg_name, p.address, p.city,
        COALESCE(p.contact_person,'') AS owner_name,
        COALESCE(p.contact_email,'') AS owner_email,
        COALESCE(p.contact_phone,'') AS owner_phone,
-       COALESCE(u.name,'') AS tenant_name,
-       COALESCE(u.email,'') AS tenant_email,
-       COALESCE(u.phone,'') AS tenant_phone
+       COALESCE(b.name, u.name, '') AS tenant_name,
+       COALESCE(b.email, u.email, '') AS tenant_email,
+       COALESCE(b.phone, u.phone, '') AS tenant_phone,
+       b.duration AS booking_duration
        FROM rent_agreements ra
+       JOIN bookings b ON b.id = ra.booking_id
        JOIN pgs p ON p.id = ra.pg_id
        JOIN users u ON u.id = ra.user_id
        WHERE ra.booking_id=?`,
@@ -171,7 +170,14 @@ exports.tenantESign = async (req, res) => {
 //////////////////////////////////////////////////////
 const generateFinalPDF = async bookingId => {
   const [rows] = await db.query(
-    `SELECT * FROM rent_agreements WHERE booking_id=?`,
+    `SELECT ra.*,
+     p.pg_name, p.address, p.city,
+     p.contact_person AS owner_name,
+     u.name AS tenant_name
+     FROM rent_agreements ra
+     JOIN pgs p ON p.id = ra.pg_id
+     JOIN users u ON u.id = ra.user_id
+     WHERE ra.booking_id=?`,
     [bookingId]
   );
 
@@ -185,15 +191,76 @@ const generateFinalPDF = async bookingId => {
   const fileName = `final-${bookingId}.pdf`;
   const filePath = path.join(dir, fileName);
 
-  const doc = new PDFDocument();
+  const doc = new PDFDocument({ margin: 50 });
   const stream = fs.createWriteStream(filePath);
-
   doc.pipe(stream);
 
-  doc.fontSize(16).text("RENT AGREEMENT", { align: "center" });
+  //////////////////////////////////////////////////////
+  // HEADER
+  //////////////////////////////////////////////////////
+  doc.fontSize(18).text("RENTAL AGREEMENT", { align: "center" });
   doc.moveDown();
-  doc.text(`Agreement ID: ${data.agreement_number}`);
+
+  doc.fontSize(10).text(`Agreement No: ${data.agreement_number}`);
   doc.text(`Verification Code: ${data.verification_code}`);
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // INTRODUCTION
+  //////////////////////////////////////////////////////
+  doc.fontSize(12).text(
+    `This Rental Agreement is made on ${new Date().toLocaleDateString()} 
+between ${data.owner_name} (hereinafter referred to as the "Landlord") 
+and ${data.tenant_name} (hereinafter referred to as the "Tenant").`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // PROPERTY
+  //////////////////////////////////////////////////////
+  doc.text(
+    `The Landlord agrees to rent the property located at:
+${data.pg_name},
+${data.address},
+${data.city}.`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // TERMS
+  //////////////////////////////////////////////////////
+  doc.text(`1. Duration: ${data.agreement_duration_months} Months`);
+  doc.text(`2. Monthly Rent: ₹${data.rent_amount}`);
+  doc.text(`3. Security Deposit: ₹${data.security_deposit}`);
+  doc.text(`4. Maintenance Charges: ₹${data.maintenance_amount}`);
+  doc.text(`5. Rent Due Date: Every ${data.rent_due_day}th of month`);
+  doc.text(`6. Notice Period: ${data.notice_period_days} Days`);
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // LEGAL CLAUSE
+  //////////////////////////////////////////////////////
+  doc.fontSize(11).text(
+    `LEGAL CLAUSE:
+This agreement is governed under the Karnataka Rent Act, 1999.
+Both parties agree to comply with all applicable rental laws.
+In case of dispute, jurisdiction shall be the courts of Bengaluru, Karnataka.`
+  );
+
+  doc.moveDown();
+
+  //////////////////////////////////////////////////////
+  // SIGNATURE BLOCK
+  //////////////////////////////////////////////////////
+  doc.moveDown();
+  doc.text("Landlord Signature: __________________________");
+  doc.moveDown();
+  doc.text("Tenant Signature: __________________________");
+  doc.moveDown();
+
+  doc.text(`Signed Date: ${new Date().toLocaleDateString()}`);
 
   doc.end();
 
