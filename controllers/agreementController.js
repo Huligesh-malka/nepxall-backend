@@ -31,19 +31,14 @@ exports.getAgreement = async (req, res) => {
 
     const booking = bookingRows[0];
 
-    // ❌ PAYMENT CHECK REMOVED
+    const minDuration = 1;
+    const duration = Math.max(booking.duration || 6, minDuration);
 
-    //////////////////////////////////////////////////////
-    // CHECK IF AGREEMENT EXISTS
-    //////////////////////////////////////////////////////
     const [agreementRows] = await db.query(
       `SELECT * FROM rent_agreements WHERE booking_id=?`,
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // CREATE IF NOT EXISTS
-    //////////////////////////////////////////////////////
     if (!agreementRows.length) {
       const agreementNumber = `AGR-${new Date().getFullYear()}-${bookingId}`;
       const verificationCode = crypto
@@ -57,8 +52,11 @@ exports.getAgreement = async (req, res) => {
          rent_amount, security_deposit, maintenance_amount,
          move_in_date, agreement_duration_months,
          agreement_number, verification_code,
-         expires_at, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,DATE_ADD(?, INTERVAL 6 MONTH),'requested')`,
+         expires_at, status, agreement_type)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,
+        DATE_ADD(?, INTERVAL ? MONTH),
+        'draft',
+        ?)`,
         [
           bookingId,
           booking.pg_id,
@@ -68,27 +66,28 @@ exports.getAgreement = async (req, res) => {
           booking.security_deposit || 0,
           booking.maintenance_amount || 0,
           booking.check_in_date,
-          6,
+          duration,
           agreementNumber,
           verificationCode,
-          booking.check_in_date
+          booking.check_in_date,
+          duration,
+          duration >= 12 ? 'registered' : 'standard'
         ]
       );
     }
 
-    //////////////////////////////////////////////////////
-    // RETURN AGREEMENT DATA
-    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `SELECT ra.*,
        p.pg_name, p.address, p.city,
        COALESCE(p.contact_person,'') AS owner_name,
        COALESCE(p.contact_email,'') AS owner_email,
        COALESCE(p.contact_phone,'') AS owner_phone,
-       COALESCE(u.name,'') AS tenant_name,
-       COALESCE(u.email,'') AS tenant_email,
-       COALESCE(u.phone,'') AS tenant_phone
+       COALESCE(b.name, u.name, '') AS tenant_name,
+       COALESCE(b.email, u.email, '') AS tenant_email,
+       COALESCE(b.phone, u.phone, '') AS tenant_phone,
+       b.duration AS booking_duration
        FROM rent_agreements ra
+       JOIN bookings b ON b.id = ra.booking_id
        JOIN pgs p ON p.id = ra.pg_id
        JOIN users u ON u.id = ra.user_id
        WHERE ra.booking_id=?`,
