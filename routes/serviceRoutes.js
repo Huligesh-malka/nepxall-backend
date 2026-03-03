@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../middlewares/auth");
-
 const {
   bookService,
   getUserServices,
@@ -9,6 +8,7 @@ const {
   updateServiceStatus
 } = require("../controllers/serviceController");
 
+// All routes are protected by auth middleware
 router.post("/book", auth, bookService);
 router.get("/user", auth, getUserServices);
 router.get("/owner", auth, getOwnerServices);
