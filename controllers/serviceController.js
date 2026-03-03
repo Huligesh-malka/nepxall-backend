@@ -1,7 +1,7 @@
-const db = require("../db"); 
+const db = require("../db");
 
 //////////////////////////////////////////////////
-// BOOK SERVICE
+// BOOK SERVICE (BOOKING OPTIONAL)
 //////////////////////////////////////////////////
 exports.bookService = async (req, res) => {
   try {
@@ -16,8 +16,8 @@ exports.bookService = async (req, res) => {
       amount
     } = req.body;
 
-    // Basic validation
-    if (!bookingId || !serviceType || !serviceDate || !address || !amount) {
+    // Basic validation (bookingId NOT required now)
+    if (!serviceType || !serviceDate || !address || !amount) {
       return res.status(400).json({
         success: false,
         message: "All required fields must be provided"
@@ -31,20 +31,21 @@ exports.bookService = async (req, res) => {
       });
     }
 
-    // Commission 15%
     const commission = Number(amount) * 0.15;
 
-    // Check booking belongs to user
-    const [booking] = await db.query(
-      `SELECT id FROM bookings WHERE id = ? AND user_id = ?`,
-      [bookingId, userId]
-    );
+    // If bookingId provided → just validate it exists
+    if (bookingId) {
+      const [booking] = await db.query(
+        `SELECT id FROM bookings WHERE id = ?`,
+        [bookingId]
+      );
 
-    if (!booking.length) {
-      return res.status(403).json({
-        success: false,
-        message: "Invalid booking"
-      });
+      if (!booking.length) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid booking ID"
+        });
+      }
     }
 
     await db.query(
@@ -52,7 +53,7 @@ exports.bookService = async (req, res) => {
       (booking_id, user_id, service_type, service_date, address, notes, amount, commission)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        bookingId,
+        bookingId || null,
         userId,
         serviceType,
         serviceDate,
@@ -114,10 +115,10 @@ exports.getOwnerServices = async (req, res) => {
     const ownerId = req.user.id;
 
     const [rows] = await db.query(
-      `SELECT sb.*, b.pg_id, b.id AS booking_id
+      `SELECT sb.*, b.pg_id
        FROM service_bookings sb
-       JOIN bookings b ON sb.booking_id = b.id
-       JOIN pgs p ON b.pg_id = p.id
+       LEFT JOIN bookings b ON sb.booking_id = b.id
+       LEFT JOIN pgs p ON b.pg_id = p.id
        WHERE p.owner_id = ?
        ORDER BY sb.created_at DESC`,
       [ownerId]
@@ -138,7 +139,7 @@ exports.getOwnerServices = async (req, res) => {
 };
 
 //////////////////////////////////////////////////
-// UPDATE SERVICE STATUS (OWNER ONLY)
+// UPDATE SERVICE STATUS (OWNER)
 //////////////////////////////////////////////////
 exports.updateServiceStatus = async (req, res) => {
   try {
@@ -161,12 +162,12 @@ exports.updateServiceStatus = async (req, res) => {
       });
     }
 
-    // Ensure service belongs to owner
+    // Check ownership only if linked to booking
     const [service] = await db.query(
       `SELECT sb.id
        FROM service_bookings sb
-       JOIN bookings b ON sb.booking_id = b.id
-       JOIN pgs p ON b.pg_id = p.id
+       LEFT JOIN bookings b ON sb.booking_id = b.id
+       LEFT JOIN pgs p ON b.pg_id = p.id
        WHERE sb.id = ? AND p.owner_id = ?`,
       [id, ownerId]
     );

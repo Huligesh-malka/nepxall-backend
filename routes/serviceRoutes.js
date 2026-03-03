@@ -9,11 +9,8 @@ const {
   updateServiceStatus
 } = require("../controllers/serviceController");
 
-// USER
 router.post("/book", auth, bookService);
 router.get("/user", auth, getUserServices);
-
-// OWNER
 router.get("/owner", auth, getOwnerServices);
 router.put("/status/:id", auth, updateServiceStatus);
 
