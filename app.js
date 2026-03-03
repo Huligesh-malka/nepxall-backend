@@ -58,13 +58,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 Nepxall Backend API",
+    message: "🚀 Nepxall Backend API Running",
     environment: process.env.NODE_ENV,
     time: new Date(),
   });
@@ -76,9 +76,10 @@ app.get("/api/health", (req, res) => {
 });
 
 /* ================= DB WARMUP ================= */
+const db = require("./config/db");
+
 setInterval(async () => {
   try {
-    const db = require("./config/db");
     await db.query("SELECT 1");
     console.log("🔥 DB Warmup success");
   } catch (err) {
@@ -95,7 +96,7 @@ const safeLoad = (path) => {
     console.log("✅ Loaded:", path);
     return route;
   } catch (err) {
-    console.error("❌ Failed:", path, err.message);
+    console.error("❌ Failed to load:", path, err.message);
     return express.Router();
   }
 };
@@ -112,7 +113,7 @@ app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
-/* ✅ NEW: SERVICES ROUTE */
+/* ================= ✅ SERVICES ROUTE ================= */
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
 /* ================= SOCIAL ================= */
