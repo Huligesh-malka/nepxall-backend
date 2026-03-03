@@ -8,7 +8,7 @@ const {
   updateServiceStatus
 } = require("../controllers/serviceController");
 
-// All routes are protected by auth middleware
+// Path: /api/services/...
 router.post("/book", auth, bookService);
 router.get("/user", auth, getUserServices);
 router.get("/owner", auth, getOwnerServices);
