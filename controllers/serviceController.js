@@ -16,7 +16,6 @@ exports.bookService = async (req, res) => {
       amount
     } = req.body;
 
-    // Basic validation (bookingId NOT required now)
     if (!serviceType || !serviceDate || !address || !amount) {
       return res.status(400).json({
         success: false,
@@ -33,21 +32,7 @@ exports.bookService = async (req, res) => {
 
     const commission = Number(amount) * 0.15;
 
-    // If bookingId provided → just validate it exists
-    if (bookingId) {
-      const [booking] = await db.query(
-        `SELECT id FROM bookings WHERE id = ?`,
-        [bookingId]
-      );
-
-      if (!booking.length) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid booking ID"
-        });
-      }
-    }
-
+    // 🚀 NO booking validation anymore
     await db.query(
       `INSERT INTO service_bookings
       (booking_id, user_id, service_type, service_date, address, notes, amount, commission)
