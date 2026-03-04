@@ -104,8 +104,7 @@ app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 
 /* ================= ✅ NEW: ADMIN SERVICE MANAGEMENT ================= */
-app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
-
+app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));   
 /* ================= ✅ NEW: VENDOR ROUTES ================= */
 app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
 
