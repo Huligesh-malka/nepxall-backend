@@ -3,13 +3,13 @@ const router = express.Router();
 const adminServiceController = require("../controllers/adminServiceController");
 const auth = require("../middlewares/auth");
 
-// This matches: GET /api/admin/services
-router.get("/", auth, adminServiceController.getAllServiceBookings);
+/* GET ALL SERVICE BOOKINGS */
+router.get("/services", auth, adminServiceController.getAllServiceBookings);
 
-// This matches: GET /api/admin/services/vendors
+/* GET ALL VENDORS */
 router.get("/vendors", auth, adminServiceController.getVendors);
 
-// This matches: POST /api/admin/services/assign-vendor
+/* ASSIGN VENDOR */
 router.post("/assign-vendor", auth, adminServiceController.assignVendor);
 
 module.exports = router;
