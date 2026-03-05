@@ -10,7 +10,7 @@ const verifyFirebaseToken = require("../middlewares/auth");
 // TENANT PAYMENT (UPI SYSTEM)
 //////////////////////////////////////////////////////
 
-// 🔹 Generate UPI payment QR
+// Generate UPI QR
 router.post(
   "/create-payment",
   verifyFirebaseToken,
@@ -21,25 +21,17 @@ router.post(
 // USER PAYMENT CONFIRMATION
 //////////////////////////////////////////////////////
 
-// 🔹 User clicks "I Have Paid"
+// User clicks "I Have Paid"
 router.post(
   "/confirm-payment",
   verifyFirebaseToken,
   paymentController.confirmPayment
 );
 
-// 🔹 Optional: user submits UTR (backup system)
-router.post(
-  "/submit-utr",
-  verifyFirebaseToken,
-  paymentController.submitUTR
-);
-
 //////////////////////////////////////////////////////
-// BANK / AUTO MATCH SYSTEM
+// BANK AUTO MATCH
 //////////////////////////////////////////////////////
 
-// 🔹 Match bank remark with orderId
 router.post(
   "/match-bank-transaction",
   verifyFirebaseToken,
@@ -47,7 +39,7 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// WEBHOOK (future payment gateway)
+// WEBHOOK (future gateway)
 //////////////////////////////////////////////////////
 
 router.post(
@@ -56,7 +48,7 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – VERIFY PAYMENT
+// ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 
 router.put(
@@ -66,17 +58,15 @@ router.put(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – SETTLEMENT
+// ADMIN SETTLEMENT
 //////////////////////////////////////////////////////
 
-// 🔹 Pending owner settlements
 router.get(
   "/admin/pending-settlements",
   verifyFirebaseToken,
   paymentController.getPendingSettlements
 );
 
-// 🔹 Mark settlement complete
 router.put(
   "/admin/mark-settled/:bookingId",
   verifyFirebaseToken,
@@ -84,17 +74,15 @@ router.put(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – FINANCE
+// ADMIN FINANCE
 //////////////////////////////////////////////////////
 
-// 🔹 Finance dashboard
 router.get(
   "/admin/finance-summary",
   verifyFirebaseToken,
   paymentController.getFinanceSummary
 );
 
-// 🔹 Settlement history
 router.get(
   "/admin/settlement-history",
   verifyFirebaseToken,
