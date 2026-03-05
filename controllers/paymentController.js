@@ -7,21 +7,22 @@ const db = require("../db");
 exports.createPayment = async (req, res) => {
   try {
 
-    const { bookingId, amount } = req.body;
+    const { bookingId } = req.body;
 
-    if (!bookingId || !amount) {
+    if (!bookingId) {
       return res.status(400).json({
         success: false,
-        message: "bookingId and amount required"
+        message: "bookingId required"
       });
     }
+
+    const amount = 1; // FORCE ₹1 PAYMENT
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
     const upiId = "huligeshmalka-1@oksbi";
     const merchantName = "Nepxall";
 
-    // Correct UPI format (important fix)
     const upiLink =
       `upi://pay?pa=${upiId}` +
       `&pn=${encodeURIComponent(merchantName)}` +
