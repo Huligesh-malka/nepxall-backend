@@ -20,7 +20,7 @@ exports.createPayment = async (req, res) => {
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
-    const upiId = "7483090510@ybl";
+    const upiId = "huligeshmalka-1@oksbi";
     const merchantName = "Nepxall";
 const upiLink =
   `upi://pay?pa=${upiId}` +
