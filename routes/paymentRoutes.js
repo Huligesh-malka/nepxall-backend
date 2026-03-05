@@ -1,22 +1,34 @@
 const express = require("express");
 const router = express.Router();
+
 const paymentController = require("../controllers/paymentController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// TENANT PAYMENT
+// TENANT PAYMENT (UPI SYSTEM)
 //////////////////////////////////////////////////////
 
-// 🔹 Create Cashfree order
+// 🔹 Generate UPI payment link + QR
 router.post(
-  "/create-order",
+  "/create-payment",
   verifyFirebaseToken,
-  paymentController.createOrder
+  paymentController.createPayment
 );
 
-// 🔹 Verify payment after redirect
-router.get(
-  "/verify-payment/:orderId",
+// 🔹 User submits UTR after payment
+router.post(
+  "/submit-utr",
+  verifyFirebaseToken,
+  paymentController.submitUTR
+);
+
+//////////////////////////////////////////////////////
+// ADMIN – VERIFY PAYMENT
+//////////////////////////////////////////////////////
+
+// 🔹 Admin verifies payment manually
+router.put(
+  "/admin/verify-payment/:orderId",
   verifyFirebaseToken,
   paymentController.verifyPayment
 );
@@ -39,15 +51,18 @@ router.put(
   paymentController.markAsSettled
 );
 
+//////////////////////////////////////////////////////
+// ADMIN – FINANCE
+//////////////////////////////////////////////////////
 
-
-
+// 🔹 Finance summary
 router.get(
   "/admin/finance-summary",
   verifyFirebaseToken,
   paymentController.getFinanceSummary
 );
 
+// 🔹 Settlement history
 router.get(
   "/admin/settlement-history",
   verifyFirebaseToken,
