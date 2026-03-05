@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 const paymentController = require("../controllers/paymentController");
+const webhookController = require("../controllers/paymentWebhookController");
+
+
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
@@ -21,6 +24,13 @@ router.post(
   verifyFirebaseToken,
   paymentController.submitUTR
 );
+
+
+
+
+
+
+router.post("/webhook", webhookController.paymentWebhook);
 
 //////////////////////////////////////////////////////
 // ADMIN – VERIFY PAYMENT
