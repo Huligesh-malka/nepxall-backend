@@ -1,9 +1,6 @@
 const QRCode = require("qrcode");
 const db = require("../db");
 
-//////////////////////////////////////////////////////
-// CREATE UPI PAYMENT
-//////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
 
@@ -16,21 +13,47 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    const amount = 1; // testing
+    const amount = 1; // testing amount
 
-    const orderId = `order_${bookingId}_${Date.now()}`;
+    //////////////////////////////////////////////////////
+    // GENERATE ORDER ID LIKE NEPX001
+    //////////////////////////////////////////////////////
+
+    const [[lastPayment]] = await db.query(
+      `SELECT order_id FROM payments
+       ORDER BY id DESC
+       LIMIT 1`
+    );
+
+    let nextNumber = 1;
+
+    if (lastPayment && lastPayment.order_id) {
+      const lastNumber = parseInt(lastPayment.order_id.replace("NEPX", ""));
+      nextNumber = lastNumber + 1;
+    }
+
+    const orderId = "NEPX" + String(nextNumber).padStart(3, "0");
+
+    //////////////////////////////////////////////////////
+    // UPI DETAILS
+    //////////////////////////////////////////////////////
 
     const upiId = "7483090510@ybl";
     const merchantName = "Nepxall";
-const upiLink =
-  `upi://pay?pa=${upiId}` +
-  `&pn=${encodeURIComponent(merchantName)}` +
-  `&tr=${orderId}` +
-  `&tn=${orderId}` +
-  `&am=${amount}` +
-  `&cu=INR`;
+
+    const upiLink =
+      `upi://pay?pa=${upiId}` +
+      `&pn=${encodeURIComponent(merchantName)}` +
+      `&tr=${orderId}` +
+      `&tn=${orderId}` +
+      `&am=${amount}` +
+      `&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
+
+    //////////////////////////////////////////////////////
+    // SAVE PAYMENT
+    //////////////////////////////////////////////////////
 
     await db.query(
       `INSERT INTO payments (booking_id, order_id, amount, status, created_at)
