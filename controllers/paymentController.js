@@ -18,10 +18,16 @@ exports.createPayment = async (req, res) => {
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
-    const upiId = process.env.UPI_ID || "nepxall@upi";
+    const upiId = "huligeshmalka-1@oksbi";
     const merchantName = "Nepxall";
 
-    const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${orderId}`;
+    // Correct UPI format (important fix)
+    const upiLink =
+      `upi://pay?pa=${upiId}` +
+      `&pn=${encodeURIComponent(merchantName)}` +
+      `&tr=${orderId}` +
+      `&am=${amount}` +
+      `&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 
@@ -70,8 +76,8 @@ exports.submitUTR = async (req, res) => {
 
     await db.query(
       `UPDATE payments
-       SET utr = ?, status = 'submitted', updated_at = NOW()
-       WHERE order_id = ?`,
+       SET utr=?, status='submitted', updated_at=NOW()
+       WHERE order_id=?`,
       [utr, orderId]
     );
 
@@ -124,7 +130,7 @@ exports.verifyPayment = async (req, res) => {
 
     await db.query(
       `UPDATE payments
-       SET status='paid', updated_at = NOW()
+       SET status='paid', updated_at=NOW()
        WHERE order_id=?`,
       [orderId]
     );
@@ -222,7 +228,7 @@ exports.markAsSettled = async (req, res) => {
     await db.query(
       `UPDATE bookings
        SET owner_settlement='DONE',
-           settlement_date = NOW()
+           settlement_date=NOW()
        WHERE id=?`,
       [bookingId]
     );
