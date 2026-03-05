@@ -61,45 +61,60 @@ exports.createPayment = async (req, res) => {
 //////////////////////////////////////////////////////
 // USER CLICKED "I HAVE PAID"
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// USER CLICKED "I HAVE PAID"
+//////////////////////////////////////////////////////
 exports.confirmPayment = async (req, res) => {
-
   try {
 
     const { orderId } = req.body;
 
     if (!orderId) {
       return res.status(400).json({
-        success:false,
-        message:"orderId required"
+        success: false,
+        message: "orderId required"
+      });
+    }
+
+    // check payment exists
+    const [rows] = await db.query(
+      "SELECT * FROM payments WHERE order_id=?",
+      [orderId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
       });
     }
 
     await db.query(
       `UPDATE payments
-       SET status='submitted', updated_at=NOW()
+       SET status='submitted',
+           updated_at=NOW()
        WHERE order_id=?`,
       [orderId]
     );
 
-    console.log("📩 Payment submitted by user:", orderId);
+    console.log("📩 Payment submitted:", orderId);
 
     res.json({
-      success:true,
-      message:"Payment submitted for verification"
+      success: true,
+      message: "Payment submitted for verification"
     });
 
   } catch (err) {
 
-    console.error(err);
+    console.error("❌ CONFIRM PAYMENT ERROR:", err);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: "Internal server error"
     });
 
   }
-
 };
-
 //////////////////////////////////////////////////////
 // OPTIONAL: AUTO MATCH BANK REMARK
 //////////////////////////////////////////////////////
