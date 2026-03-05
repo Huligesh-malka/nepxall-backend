@@ -16,23 +16,6 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ======================================================
-    💳 CASHFREE WEBHOOK (MUST BE BEFORE GENERAL JSON PARSER)
-====================================================== */
-app.post(
-  "/api/payments/webhook",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    try {
-      const webhookController = require("./controllers/paymentWebhookController");
-      webhookController.cashfreeWebhook(req, res);
-    } catch (err) {
-      console.error("❌ Webhook Error:", err.message);
-      res.status(500).send("Webhook handler error");
-    }
-  }
-);
-
 /* ================= BODY PARSER ================= */
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -42,7 +25,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   process.env.CLIENT_URL,
-  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL
 ].filter(Boolean);
 
 const corsOptions = {
@@ -50,30 +33,45 @@ const corsOptions = {
     if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+
     console.log("❌ Blocked by CORS:", origin);
-    return callback(null, true); // Set to false in strict production
+    return callback(null, true); // change to false for strict production
   },
-  credentials: true,
+  credentials: true
 };
 
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
-/* ================= 🧠 SAFE ROUTE LOADER ================= */
+/* ================= SAFE ROUTE LOADER ================= */
 const safeLoad = (path) => {
   try {
     const route = require(path);
     console.log("✅ Loaded:", path);
     return route;
   } catch (err) {
-    console.error("❌ Failed:", path, err.message);
+    console.error("❌ Failed to load:", path, err.message);
     return express.Router();
   }
 };
 
+/* ================= ROOT ROUTES ================= */
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "🚀 Nepxall Backend API Running"
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "healthy"
+  });
+});
+
 /* ================= CORE ROUTES ================= */
-app.get("/", (req, res) => res.json({ success: true, message: "🚀 Nepxall Backend API" }));
-app.get("/api/health", (req, res) => res.json({ success: true, status: "healthy" }));
 
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
@@ -83,32 +81,45 @@ app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
+
+/* ================= PAYMENT ROUTES (UPI SYSTEM) ================= */
+
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
+
+/* ================= MOVE-IN / KYC ================= */
+
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
-/* ✅ SERVICES ROUTE */
+/* ================= SERVICES ================= */
+
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
-/* ================= SOCIAL & OWNER & ADMIN ================= */
+/* ================= CHAT & SOCIAL ================= */
+
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
 app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
+
+/* ================= OWNER ================= */
+
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 
-/* ================= ADMIN CORE ================= */
+/* ================= ADMIN ================= */
+
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
+app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
 
-/* ================= ✅ NEW: ADMIN SERVICE MANAGEMENT ================= */
-app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));   
-/* ================= ✅ NEW: VENDOR ROUTES ================= */
+/* ================= VENDOR ================= */
+
 app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
 
-/* ================= 404 & ERROR HANDLING ================= */
+/* ================= 404 HANDLER ================= */
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -116,8 +127,11 @@ app.use((req, res) => {
   });
 });
 
+/* ================= GLOBAL ERROR HANDLER ================= */
+
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
+
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error"

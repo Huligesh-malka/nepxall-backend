@@ -1,9 +1,66 @@
+const QRCode = require("qrcode");
 const db = require("../db");
+
+const UPI_ID = "huligeshmalka-1@oksbi";
+const MERCHANT_NAME = "Nepxall";
+
+//////////////////////////////////////////////////////
+// CREATE UPI PAYMENT
+//////////////////////////////////////////////////////
+exports.createPayment = async (req, res) => {
+
+  try {
+
+    const { bookingId, amount } = req.body;
+
+    if (!bookingId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId and amount required"
+      });
+    }
+
+    const orderId = `order_${bookingId}_${Date.now()}`;
+
+    const upiLink =
+      `upi://pay?pa=${UPI_ID}&pn=${MERCHANT_NAME}&am=${amount}&cu=INR&tn=${orderId}`;
+
+    const qr = await QRCode.toDataURL(upiLink);
+
+    await db.query(
+      `INSERT INTO payments
+       (booking_id, order_id, amount, status, created_at)
+       VALUES (?, ?, ?, 'pending', NOW())`,
+      [bookingId, orderId, amount]
+    );
+
+    console.log("💰 Payment created:", orderId);
+
+    res.json({
+      success: true,
+      orderId,
+      upiLink,
+      qr
+    });
+
+  } catch (err) {
+
+    console.error("❌ CREATE PAYMENT ERROR:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Payment creation failed"
+    });
+
+  }
+
+};
 
 //////////////////////////////////////////////////////
 // USER SUBMIT UTR
 //////////////////////////////////////////////////////
 exports.submitUTR = async (req, res) => {
+
   try {
 
     const { orderId, utr } = req.body;
@@ -50,6 +107,7 @@ exports.submitUTR = async (req, res) => {
     });
 
   }
+
 };
 
 //////////////////////////////////////////////////////
