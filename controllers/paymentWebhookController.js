@@ -20,9 +20,13 @@ exports.createPayment = async (req, res) => {
     }
 
     const orderId = `order_${bookingId}_${Date.now()}`;
-
-    const upiLink =
-      `upi://pay?pa=${UPI_ID}&pn=${MERCHANT_NAME}&am=${amount}&cu=INR&tn=${orderId}`;
+const upiLink =
+  `upi://pay?pa=${UPI_ID}` +
+  `&pn=${encodeURIComponent(MERCHANT_NAME)}` +
+  `&tr=${orderId}` +
+  `&tn=${orderId}` +
+  `&am=${amount}` +
+  `&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 

@@ -22,13 +22,13 @@ exports.createPayment = async (req, res) => {
 
     const upiId = "7483090510@ybl";
     const merchantName = "Nepxall";
-
-    const upiLink =
-      `upi://pay?pa=${upiId}` +
-      `&pn=${encodeURIComponent(merchantName)}` +
-      `&tr=${orderId}` +
-      `&am=${amount}` +
-      `&cu=INR`;
+const upiLink =
+  `upi://pay?pa=${upiId}` +
+  `&pn=${encodeURIComponent(merchantName)}` +
+  `&tr=${orderId}` +
+  `&tn=${orderId}` +
+  `&am=${amount}` +
+  `&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 
