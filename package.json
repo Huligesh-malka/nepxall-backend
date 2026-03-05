@@ -3,22 +3,18 @@
   "version": "1.0.0",
   "description": "Nepxall Production Backend",
   "main": "server.js",
-
   "engines": {
     "node": "20.x"
   },
-
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
     "build": "echo Build completed",
     "postinstall": "npm audit fix || true"
   },
-
   "keywords": [],
   "author": "Huligesh",
   "license": "ISC",
-
   "dependencies": {
     "axios": "^1.13.5",
     "cashfree-pg": "^5.1.0",
@@ -33,9 +29,9 @@
     "multer-storage-cloudinary": "^4.0.0",
     "mysql2": "^3.18.2",
     "pdfkit": "^0.17.2",
+    "qrcode": "^1.5.4",
     "socket.io": "^4.8.3"
   },
-
   "devDependencies": {
     "nodemon": "^3.1.0"
   }
