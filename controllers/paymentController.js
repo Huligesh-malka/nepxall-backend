@@ -16,7 +16,7 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    
+    const amount = 1; // testing
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
