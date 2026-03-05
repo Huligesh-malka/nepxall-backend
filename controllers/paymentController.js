@@ -16,7 +16,7 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    const amount = 1; // FORCE ₹1 PAYMENT
+    const amount = 1; // testing
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
@@ -52,49 +52,118 @@ exports.createPayment = async (req, res) => {
     console.error("❌ CREATE PAYMENT ERROR:", err);
 
     res.status(500).json({
-      success: false,
-      message: "Payment creation failed"
+      success: false
     });
 
   }
 };
 
 //////////////////////////////////////////////////////
-// USER SUBMIT UTR
+// USER CLICKED "I HAVE PAID"
 //////////////////////////////////////////////////////
-exports.submitUTR = async (req, res) => {
+exports.confirmPayment = async (req, res) => {
 
   try {
 
-    const { orderId, utr } = req.body;
+    const { orderId } = req.body;
 
-    if (!orderId || !utr) {
+    if (!orderId) {
       return res.status(400).json({
-        success: false,
-        message: "orderId and UTR required"
+        success:false,
+        message:"orderId required"
       });
     }
 
     await db.query(
       `UPDATE payments
-       SET utr=?, status='submitted', updated_at=NOW()
+       SET status='submitted', updated_at=NOW()
        WHERE order_id=?`,
-      [utr, orderId]
+      [orderId]
     );
 
-    console.log("🧾 UTR submitted:", orderId);
+    console.log("📩 Payment submitted by user:", orderId);
 
     res.json({
-      success: true,
-      message: "Payment submitted for verification"
+      success:true,
+      message:"Payment submitted for verification"
     });
 
   } catch (err) {
 
-    console.error("❌ UTR SUBMIT ERROR:", err);
+    console.error(err);
 
     res.status(500).json({
-      success: false
+      success:false
+    });
+
+  }
+
+};
+
+//////////////////////////////////////////////////////
+// OPTIONAL: AUTO MATCH BANK REMARK
+//////////////////////////////////////////////////////
+exports.matchBankTransaction = async (req, res) => {
+
+  try {
+
+    const { remark } = req.body;
+
+    if (!remark) {
+      return res.status(400).json({
+        success:false,
+        message:"remark required"
+      });
+    }
+
+    const match = remark.match(/order_[0-9]+_[0-9]+/);
+
+    if (!match) {
+      return res.json({
+        success:false,
+        message:"order id not found"
+      });
+    }
+
+    const orderId = match[0];
+
+    const [[payment]] = await db.query(
+      `SELECT booking_id FROM payments WHERE order_id=?`,
+      [orderId]
+    );
+
+    if (!payment) {
+      return res.json({
+        success:false,
+        message:"payment not found"
+      });
+    }
+
+    await db.query(
+      `UPDATE payments
+       SET status='paid', updated_at=NOW()
+       WHERE order_id=?`,
+      [orderId]
+    );
+
+    await db.query(
+      `UPDATE bookings
+       SET status='confirmed'
+       WHERE id=?`,
+      [payment.booking_id]
+    );
+
+    res.json({
+      success:true,
+      message:"payment matched and confirmed"
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success:false
     });
 
   }
@@ -110,8 +179,8 @@ exports.verifyPayment = async (req, res) => {
 
     if (req.user.role !== "admin") {
       return res.status(403).json({
-        success: false,
-        message: "Access denied"
+        success:false,
+        message:"Access denied"
       });
     }
 
@@ -124,8 +193,8 @@ exports.verifyPayment = async (req, res) => {
 
     if (!payment) {
       return res.status(404).json({
-        success: false,
-        message: "Payment not found"
+        success:false,
+        message:"Payment not found"
       });
     }
 
@@ -154,15 +223,15 @@ exports.verifyPayment = async (req, res) => {
     console.log("✅ PAYMENT VERIFIED:", orderId);
 
     res.json({
-      success: true
+      success:true
     });
 
   } catch (err) {
 
-    console.error("❌ VERIFY ERROR:", err);
+    console.error(err);
 
     res.status(500).json({
-      success: false
+      success:false
     });
 
   }
@@ -177,7 +246,7 @@ exports.getPendingSettlements = async (req, res) => {
   try {
 
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ success:false });
     }
 
     const [rows] = await db.query(`
@@ -199,15 +268,15 @@ exports.getPendingSettlements = async (req, res) => {
     `);
 
     res.json({
-      success: true,
-      data: rows
+      success:true,
+      data:rows
     });
 
   } catch (err) {
 
-    console.error("❌ SETTLEMENT LIST ERROR:", err);
+    console.error(err);
 
-    res.status(500).json({ success: false });
+    res.status(500).json({ success:false });
 
   }
 
@@ -221,7 +290,7 @@ exports.markAsSettled = async (req, res) => {
   try {
 
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ success:false });
     }
 
     const { bookingId } = req.params;
@@ -235,15 +304,15 @@ exports.markAsSettled = async (req, res) => {
     );
 
     res.json({
-      success: true,
-      message: "Settlement completed"
+      success:true,
+      message:"Settlement completed"
     });
 
   } catch (err) {
 
-    console.error("❌ SETTLEMENT UPDATE ERROR:", err);
+    console.error(err);
 
-    res.status(500).json({ success: false });
+    res.status(500).json({ success:false });
 
   }
 
@@ -257,7 +326,7 @@ exports.getFinanceSummary = async (req, res) => {
   try {
 
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ success:false });
     }
 
     const [[summary]] = await db.query(`
@@ -283,15 +352,15 @@ exports.getFinanceSummary = async (req, res) => {
     `);
 
     res.json({
-      success: true,
-      data: summary
+      success:true,
+      data:summary
     });
 
   } catch (err) {
 
-    console.error("❌ FINANCE SUMMARY ERROR:", err);
+    console.error(err);
 
-    res.status(500).json({ success: false });
+    res.status(500).json({ success:false });
 
   }
 
@@ -317,15 +386,15 @@ exports.getSettlementHistory = async (req, res) => {
     `);
 
     res.json({
-      success: true,
-      data: rows
+      success:true,
+      data:rows
     });
 
   } catch (err) {
 
-    console.error("❌ SETTLEMENT HISTORY ERROR:", err);
+    console.error(err);
 
-    res.status(500).json({ success: false });
+    res.status(500).json({ success:false });
 
   }
 

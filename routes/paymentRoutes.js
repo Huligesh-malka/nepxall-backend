@@ -4,39 +4,61 @@ const router = express.Router();
 const paymentController = require("../controllers/paymentController");
 const webhookController = require("../controllers/paymentWebhookController");
 
-
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
 // TENANT PAYMENT (UPI SYSTEM)
 //////////////////////////////////////////////////////
 
-// 🔹 Generate UPI payment link + QR
+// 🔹 Generate UPI payment QR
 router.post(
   "/create-payment",
   verifyFirebaseToken,
   paymentController.createPayment
 );
 
-// 🔹 User submits UTR after payment
+//////////////////////////////////////////////////////
+// USER PAYMENT CONFIRMATION
+//////////////////////////////////////////////////////
+
+// 🔹 User clicks "I Have Paid"
+router.post(
+  "/confirm-payment",
+  verifyFirebaseToken,
+  paymentController.confirmPayment
+);
+
+// 🔹 Optional: user submits UTR (backup system)
 router.post(
   "/submit-utr",
   verifyFirebaseToken,
   paymentController.submitUTR
 );
 
+//////////////////////////////////////////////////////
+// BANK / AUTO MATCH SYSTEM
+//////////////////////////////////////////////////////
 
+// 🔹 Match bank remark with orderId
+router.post(
+  "/match-bank-transaction",
+  verifyFirebaseToken,
+  paymentController.matchBankTransaction
+);
 
+//////////////////////////////////////////////////////
+// WEBHOOK (future payment gateway)
+//////////////////////////////////////////////////////
 
-
-
-router.post("/webhook", webhookController.paymentWebhook);
+router.post(
+  "/webhook",
+  webhookController.paymentWebhook
+);
 
 //////////////////////////////////////////////////////
 // ADMIN – VERIFY PAYMENT
 //////////////////////////////////////////////////////
 
-// 🔹 Admin verifies payment manually
 router.put(
   "/admin/verify-payment/:orderId",
   verifyFirebaseToken,
@@ -47,14 +69,14 @@ router.put(
 // ADMIN – SETTLEMENT
 //////////////////////////////////////////////////////
 
-// 🔹 Get all pending settlements
+// 🔹 Pending owner settlements
 router.get(
   "/admin/pending-settlements",
   verifyFirebaseToken,
   paymentController.getPendingSettlements
 );
 
-// 🔹 Mark settlement as completed
+// 🔹 Mark settlement complete
 router.put(
   "/admin/mark-settled/:bookingId",
   verifyFirebaseToken,
@@ -65,7 +87,7 @@ router.put(
 // ADMIN – FINANCE
 //////////////////////////////////////////////////////
 
-// 🔹 Finance summary
+// 🔹 Finance dashboard
 router.get(
   "/admin/finance-summary",
   verifyFirebaseToken,
