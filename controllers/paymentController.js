@@ -64,6 +64,9 @@ exports.createPayment = async (req, res) => {
 //////////////////////////////////////////////////////
 // USER CLICKED "I HAVE PAID"
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// USER CLICKED "I HAVE PAID"
+//////////////////////////////////////////////////////
 exports.confirmPayment = async (req, res) => {
   try {
 
@@ -76,7 +79,7 @@ exports.confirmPayment = async (req, res) => {
       });
     }
 
-    // check payment exists
+    // check if payment exists
     const [rows] = await db.query(
       "SELECT * FROM payments WHERE order_id=?",
       [orderId]
@@ -89,10 +92,10 @@ exports.confirmPayment = async (req, res) => {
       });
     }
 
+    // update payment status
     await db.query(
       `UPDATE payments
-       SET status='submitted',
-           updated_at=NOW()
+       SET status='submitted'
        WHERE order_id=?`,
       [orderId]
     );
