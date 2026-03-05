@@ -86,4 +86,5 @@ router.get(
   paymentController.getSettlementHistory
 );
 
+// Make sure to export the router
 module.exports = router;

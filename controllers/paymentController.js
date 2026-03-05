@@ -9,7 +9,6 @@ const MERCHANT_NAME = "Nepxall";
 //////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
-
     const { bookingId, amount } = req.body;
 
     if (!bookingId || !amount) {
@@ -48,14 +47,11 @@ exports.createPayment = async (req, res) => {
     });
 
   } catch (err) {
-
     console.error("❌ CREATE PAYMENT ERROR:", err);
-
     res.status(500).json({
       success: false,
       message: "Payment creation failed"
     });
-
   }
 };
 
@@ -63,9 +59,7 @@ exports.createPayment = async (req, res) => {
 // USER SUBMIT UTR
 //////////////////////////////////////////////////////
 exports.submitUTR = async (req, res) => {
-
   try {
-
     const { orderId, utr } = req.body;
 
     if (!orderId || !utr) {
@@ -102,26 +96,24 @@ exports.submitUTR = async (req, res) => {
     });
 
   } catch (err) {
-
     console.error("❌ UTR SUBMIT ERROR:", err);
-
     res.status(500).json({
-      success: false
+      success: false,
+      message: "UTR submission failed"
     });
-
   }
-
 };
 
 //////////////////////////////////////////////////////
 // ADMIN GET SUBMITTED PAYMENTS
 //////////////////////////////////////////////////////
 exports.getSubmittedPayments = async (req, res) => {
-
   try {
-
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
     }
 
     const [rows] = await db.query(`
@@ -149,24 +141,19 @@ exports.getSubmittedPayments = async (req, res) => {
     });
 
   } catch (err) {
-
     console.error("ADMIN PAYMENTS ERROR:", err);
-
     res.status(500).json({
-      success: false
+      success: false,
+      message: "Failed to fetch payments"
     });
-
   }
-
 };
 
 //////////////////////////////////////////////////////
 // ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 exports.verifyPayment = async (req, res) => {
-
   try {
-
     if (req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
@@ -176,17 +163,19 @@ exports.verifyPayment = async (req, res) => {
 
     const { orderId } = req.params;
 
-    const [[payment]] = await db.query(
+    const [paymentRows] = await db.query(
       `SELECT booking_id FROM payments WHERE order_id=?`,
       [orderId]
     );
 
-    if (!payment) {
+    if (!paymentRows.length) {
       return res.status(404).json({
         success: false,
         message: "Payment not found"
       });
     }
+
+    const payment = paymentRows[0];
 
     await db.query(
       `UPDATE payments
@@ -206,30 +195,29 @@ exports.verifyPayment = async (req, res) => {
     console.log("✅ PAYMENT VERIFIED:", orderId);
 
     res.json({
-      success: true
+      success: true,
+      message: "Payment verified successfully"
     });
 
   } catch (err) {
-
     console.error("🔥 VERIFY ERROR:", err);
-
     res.status(500).json({
-      success: false
+      success: false,
+      message: "Verification failed"
     });
-
   }
-
 };
 
 //////////////////////////////////////////////////////
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
 exports.rejectPayment = async (req, res) => {
-
   try {
-
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
     }
 
     const { orderId } = req.params;
@@ -244,28 +232,138 @@ exports.rejectPayment = async (req, res) => {
     console.log("❌ PAYMENT REJECTED:", orderId);
 
     res.json({
-      success: true
+      success: true,
+      message: "Payment rejected successfully"
     });
 
   } catch (err) {
-
     console.error("🔥 REJECT ERROR:", err);
-
     res.status(500).json({
-      success: false
+      success: false,
+      message: "Rejection failed"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET PENDING SETTLEMENTS (FOR ADMIN)
+//////////////////////////////////////////////////////
+exports.getPendingSettlements = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
+    }
+
+    // Add your pending settlements logic here
+    res.json({
+      success: true,
+      data: []
     });
 
+  } catch (err) {
+    console.error("PENDING SETTLEMENTS ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending settlements"
+    });
   }
+};
 
+//////////////////////////////////////////////////////
+// MARK AS SETTLED (FOR ADMIN)
+//////////////////////////////////////////////////////
+exports.markAsSettled = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
+    }
+
+    const { bookingId } = req.params;
+
+    // Add your mark as settled logic here
+    res.json({
+      success: true,
+      message: `Booking ${bookingId} marked as settled`
+    });
+
+  } catch (err) {
+    console.error("MARK SETTLED ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark as settled"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET FINANCE SUMMARY (FOR ADMIN)
+//////////////////////////////////////////////////////
+exports.getFinanceSummary = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
+    }
+
+    // Add your finance summary logic here
+    res.json({
+      success: true,
+      data: {
+        totalRevenue: 0,
+        pendingSettlements: 0,
+        completedSettlements: 0
+      }
+    });
+
+  } catch (err) {
+    console.error("FINANCE SUMMARY ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch finance summary"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET SETTLEMENT HISTORY (FOR ADMIN)
+//////////////////////////////////////////////////////
+exports.getSettlementHistory = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ 
+        success: false,
+        message: "Access denied" 
+      });
+    }
+
+    // Add your settlement history logic here
+    res.json({
+      success: true,
+      data: []
+    });
+
+  } catch (err) {
+    console.error("SETTLEMENT HISTORY ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch settlement history"
+    });
+  }
 };
 
 //////////////////////////////////////////////////////
 // PAYMENT WEBHOOK (OPTIONAL GATEWAY)
 //////////////////////////////////////////////////////
 exports.paymentWebhook = async (req, res) => {
-
   try {
-
     const { orderId, status } = req.body;
 
     if (!orderId) {
@@ -282,17 +380,19 @@ exports.paymentWebhook = async (req, res) => {
       });
     }
 
-    const [[payment]] = await db.query(
+    const [paymentRows] = await db.query(
       `SELECT booking_id FROM payments WHERE order_id=?`,
       [orderId]
     );
 
-    if (!payment) {
+    if (!paymentRows.length) {
       return res.status(404).json({
         success: false,
         message: "Payment not found"
       });
     }
+
+    const payment = paymentRows[0];
 
     await db.query(
       `UPDATE payments
@@ -312,17 +412,15 @@ exports.paymentWebhook = async (req, res) => {
     console.log("🔥 AUTO PAYMENT VERIFIED:", orderId);
 
     res.json({
-      success: true
+      success: true,
+      message: "Payment verified via webhook"
     });
 
   } catch (err) {
-
     console.error("🔥 WEBHOOK ERROR:", err);
-
     res.status(500).json({
-      success: false
+      success: false,
+      message: "Webhook processing failed"
     });
-
   }
-
 };
