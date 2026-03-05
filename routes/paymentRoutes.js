@@ -5,17 +5,17 @@ const paymentController = require("../controllers/paymentController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// TENANT PAYMENT (UPI QR GENERATION)
+// TENANT PAYMENT (GENERATE UPI QR)
 //////////////////////////////////////////////////////
 
 router.post(
-  "/create-payment",
+  "/create",
   verifyFirebaseToken,
   paymentController.createPayment
 );
 
 //////////////////////////////////////////////////////
-// USER SUBMIT UTR
+// USER SUBMIT UTR AFTER PAYMENT
 //////////////////////////////////////////////////////
 
 router.post(
@@ -25,29 +25,24 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – GET USER PAYMENTS FOR VERIFICATION
+// ADMIN ROUTES
 //////////////////////////////////////////////////////
 
+// Get all submitted payments
 router.get(
   "/admin/payments",
   verifyFirebaseToken,
   paymentController.getSubmittedPayments
 );
 
-//////////////////////////////////////////////////////
-// ADMIN – VERIFY PAYMENT
-//////////////////////////////////////////////////////
-
+// Verify payment
 router.put(
   "/admin/payments/:orderId/verify",
   verifyFirebaseToken,
   paymentController.verifyPayment
 );
 
-//////////////////////////////////////////////////////
-// ADMIN – REJECT PAYMENT
-//////////////////////////////////////////////////////
-
+// Reject payment
 router.put(
   "/admin/payments/:orderId/reject",
   verifyFirebaseToken,
@@ -55,23 +50,25 @@ router.put(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – OWNER SETTLEMENTS
+// OWNER SETTLEMENT ROUTES
 //////////////////////////////////////////////////////
 
+// Get pending settlements
 router.get(
   "/admin/pending-settlements",
   verifyFirebaseToken,
   paymentController.getPendingSettlements
 );
 
+// Mark owner settlement done
 router.put(
-  "/admin/mark-settled/:bookingId",
+  "/admin/settlements/:bookingId",
   verifyFirebaseToken,
   paymentController.markAsSettled
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – FINANCE DASHBOARD
+// FINANCE DASHBOARD
 //////////////////////////////////////////////////////
 
 router.get(
@@ -86,5 +83,6 @@ router.get(
   paymentController.getSettlementHistory
 );
 
-// Make sure to export the router
+//////////////////////////////////////////////////////
+
 module.exports = router;
