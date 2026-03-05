@@ -1,13 +1,16 @@
 const express = require("express");
 const router = express.Router();
 
-const paymentController = require("../controllers/paymentController");
+const paymentController = require("../controllers/paymentController");  
+const webhookController = require("../controllers/paymentWebhookController");
+
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// TENANT PAYMENT (UPI QR GENERATION)
+// TENANT PAYMENT (UPI SYSTEM)
 //////////////////////////////////////////////////////
 
+// Generate UPI QR
 router.post(
   "/create-payment",
   verifyFirebaseToken,
@@ -15,47 +18,47 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// USER SUBMIT UTR
+// USER PAYMENT CONFIRMATION
+//////////////////////////////////////////////////////
+
+// User clicks "I Have Paid"
+router.post(
+  "/confirm-payment",
+  verifyFirebaseToken,
+  paymentController.confirmPayment
+);
+
+//////////////////////////////////////////////////////
+// BANK AUTO MATCH
 //////////////////////////////////////////////////////
 
 router.post(
-  "/submit-utr",
+  "/match-bank-transaction",
   verifyFirebaseToken,
-  paymentController.submitUTR
+  paymentController.matchBankTransaction
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – GET USER PAYMENTS FOR VERIFICATION
+// WEBHOOK (future gateway)
 //////////////////////////////////////////////////////
 
-router.get(
-  "/admin/payments",
-  verifyFirebaseToken,
-  paymentController.getSubmittedPayments
+router.post(
+  "/webhook",
+  webhookController.paymentWebhook
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – VERIFY PAYMENT
+// ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 
 router.put(
-  "/admin/payments/:orderId/verify",
+  "/admin/verify-payment/:orderId",
   verifyFirebaseToken,
   paymentController.verifyPayment
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – REJECT PAYMENT
-//////////////////////////////////////////////////////
-
-router.put(
-  "/admin/payments/:orderId/reject",
-  verifyFirebaseToken,
-  paymentController.rejectPayment
-);
-
-//////////////////////////////////////////////////////
-// ADMIN – OWNER SETTLEMENTS
+// ADMIN SETTLEMENT
 //////////////////////////////////////////////////////
 
 router.get(
@@ -71,7 +74,7 @@ router.put(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN – FINANCE DASHBOARD
+// ADMIN FINANCE
 //////////////////////////////////////////////////////
 
 router.get(
@@ -86,4 +89,4 @@ router.get(
   paymentController.getSettlementHistory
 );
 
-module.exports = router;
+module.exports = router;  
