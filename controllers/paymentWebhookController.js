@@ -1,110 +1,154 @@
-const crypto = require("crypto");
 const db = require("../db");
 
-exports.cashfreeWebhook = async (req, res) => {
+//////////////////////////////////////////////////////
+// USER SUBMIT UTR
+//////////////////////////////////////////////////////
+exports.submitUTR = async (req, res) => {
   try {
-    const rawBody = req.body.toString();
-    const signature = req.headers["x-webhook-signature"];
 
-    console.log("💥 WEBHOOK RECEIVED");
+    const { orderId, utr } = req.body;
 
-    /* =====================================================
-       🔐 SIGNATURE VERIFICATION (RECOMMENDED FOR PROD)
-    ===================================================== */
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.CASHFREE_WEBHOOK_SECRET)
-      .update(rawBody)
-      .digest("base64");
-
-    if (signature !== expectedSignature) {
-      console.error("❌ Invalid webhook signature");
-      return res.status(400).send("Invalid signature");
+    if (!orderId || !utr) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId and UTR required"
+      });
     }
 
-    const payload = JSON.parse(rawBody);
-
-    const orderId = payload?.data?.order?.order_id;
-    const orderStatus = payload?.data?.order?.order_status;
-    const cfPaymentId = payload?.data?.payment?.cf_payment_id;
-    const amount = payload?.data?.payment?.payment_amount;
-
-    if (!orderId) {
-      return res.status(400).json({ error: "Missing order_id" });
-    }
-
-    console.log(`🔎 ORDER: ${orderId} | STATUS: ${orderStatus}`);
-
-    /* =====================================================
-       🛑 IDEMPOTENCY CHECK (avoid duplicate updates)
-    ===================================================== */
     const [existing] = await db.query(
-      `SELECT status FROM payments WHERE order_id = ?`,
+      `SELECT status FROM payments WHERE order_id=?`,
       [orderId]
     );
 
     if (!existing.length) {
-      console.log("⚠️ Payment record not found for order:", orderId);
-      return res.sendStatus(200);
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
     }
 
-    if (existing[0].status === "paid") {
-      console.log("⚠️ Already processed:", orderId);
-      return res.sendStatus(200);
-    }
+    await db.query(
+      `UPDATE payments
+       SET utr=?, status='submitted', updated_at=NOW()
+       WHERE order_id=?`,
+      [utr, orderId]
+    );
 
-    /* =====================================================
-       ✅ PAYMENT SUCCESS FLOW
-    ===================================================== */
-    if (orderStatus === "PAID") {
-      await db.query(
-        `UPDATE payments 
-         SET status = 'paid',
-             cf_payment_id = ?,
-             amount = ?,
-             updated_at = NOW()
-         WHERE order_id = ?`,
-        [cfPaymentId, amount, orderId]
-      );
+    console.log("🧾 UTR Submitted:", orderId);
 
-      const [rows] = await db.query(
-        `SELECT booking_id FROM payments WHERE order_id = ? LIMIT 1`,
-        [orderId]
-      );
-
-      const bookingId = rows[0]?.booking_id;
-
-      if (bookingId) {
-        await db.query(
-          `UPDATE bookings 
-           SET payment_status = 'paid'
-           WHERE id = ?`,
-          [bookingId]
-        );
-
-        console.log("🏠 Booking updated:", bookingId);
-      }
-
-      console.log("✅ PAYMENT STORED SUCCESSFULLY");
-    }
-
-    /* =====================================================
-       ❌ PAYMENT FAILED FLOW (optional but recommended)
-    ===================================================== */
-    if (orderStatus === "FAILED") {
-      await db.query(
-        `UPDATE payments 
-         SET status = 'failed', updated_at = NOW()
-         WHERE order_id = ?`,
-        [orderId]
-      );
-
-      console.log("❌ PAYMENT FAILED:", orderId);
-    }
-
-    res.sendStatus(200);
+    res.json({
+      success: true,
+      message: "Payment submitted for verification"
+    });
 
   } catch (err) {
-    console.error("🔥 WEBHOOK ERROR:", err);
-    res.sendStatus(500);
+
+    console.error("❌ UTR SUBMIT ERROR:", err);
+
+    res.status(500).json({
+      success: false
+    });
+
   }
+};
+
+//////////////////////////////////////////////////////
+// ADMIN VERIFY PAYMENT
+//////////////////////////////////////////////////////
+exports.verifyPayment = async (req, res) => {
+
+  try {
+
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    const { orderId } = req.params;
+
+    const [[payment]] = await db.query(
+      `SELECT booking_id FROM payments WHERE order_id=?`,
+      [orderId]
+    );
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+    }
+
+    await db.query(
+      `UPDATE payments
+       SET status='paid', updated_at=NOW()
+       WHERE order_id=?`,
+      [orderId]
+    );
+
+    await db.query(
+      `UPDATE bookings
+       SET status='confirmed',
+           payment_status='paid'
+       WHERE id=?`,
+      [payment.booking_id]
+    );
+
+    console.log("✅ PAYMENT VERIFIED:", orderId);
+
+    res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error("🔥 VERIFY ERROR:", err);
+
+    res.status(500).json({
+      success: false
+    });
+
+  }
+
+};
+
+//////////////////////////////////////////////////////
+// ADMIN REJECT PAYMENT
+//////////////////////////////////////////////////////
+exports.rejectPayment = async (req, res) => {
+
+  try {
+
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false
+      });
+    }
+
+    const { orderId } = req.params;
+
+    await db.query(
+      `UPDATE payments
+       SET status='rejected', updated_at=NOW()
+       WHERE order_id=?`,
+      [orderId]
+    );
+
+    console.log("❌ PAYMENT REJECTED:", orderId);
+
+    res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error("🔥 REJECT ERROR:", err);
+
+    res.status(500).json({
+      success: false
+    });
+
+  }
+
 };

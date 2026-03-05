@@ -6,7 +6,15 @@ const db = require("../db");
 //////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
+
     const { bookingId, amount } = req.body;
+
+    if (!bookingId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId and amount required"
+      });
+    }
 
     const orderId = `order_${bookingId}_${Date.now()}`;
 
@@ -18,68 +26,89 @@ exports.createPayment = async (req, res) => {
     const qr = await QRCode.toDataURL(upiLink);
 
     await db.query(
-      `INSERT INTO payments (booking_id, order_id, amount, status)
-       VALUES (?, ?, ?, 'pending')`,
+      `INSERT INTO payments (booking_id, order_id, amount, status, created_at)
+       VALUES (?, ?, ?, 'pending', NOW())`,
       [bookingId, orderId, amount]
     );
+
+    console.log("💰 Payment created:", orderId);
 
     res.json({
       success: true,
       orderId,
       upiLink,
-      qr,
+      qr
     });
 
   } catch (err) {
-    console.error("❌ CREATE PAYMENT ERROR:", err.message);
+
+    console.error("❌ CREATE PAYMENT ERROR:", err);
 
     res.status(500).json({
       success: false,
-      message: "Payment creation failed",
+      message: "Payment creation failed"
     });
+
   }
 };
 
 //////////////////////////////////////////////////////
-// SUBMIT UTR (USER)
+// USER SUBMIT UTR
 //////////////////////////////////////////////////////
 exports.submitUTR = async (req, res) => {
+
   try {
+
     const { orderId, utr } = req.body;
+
+    if (!orderId || !utr) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId and UTR required"
+      });
+    }
 
     await db.query(
       `UPDATE payments
-       SET utr=?, status='submitted'
-       WHERE order_id=?`,
+       SET utr = ?, status = 'submitted', updated_at = NOW()
+       WHERE order_id = ?`,
       [utr, orderId]
     );
 
+    console.log("🧾 UTR submitted:", orderId);
+
     res.json({
       success: true,
-      message: "Payment submitted for verification",
+      message: "Payment submitted for verification"
     });
 
   } catch (err) {
-    console.error("❌ UTR SUBMIT ERROR:", err.message);
-    res.status(500).json({ success: false });
+
+    console.error("❌ UTR SUBMIT ERROR:", err);
+
+    res.status(500).json({
+      success: false
+    });
+
   }
+
 };
 
 //////////////////////////////////////////////////////
 // ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 exports.verifyPayment = async (req, res) => {
+
   try {
+
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
     }
 
     const { orderId } = req.params;
-
-    await db.query(
-      `UPDATE payments SET status='paid' WHERE order_id=?`,
-      [orderId]
-    );
 
     const [[payment]] = await db.query(
       `SELECT booking_id FROM payments WHERE order_id=?`,
@@ -87,40 +116,59 @@ exports.verifyPayment = async (req, res) => {
     );
 
     if (!payment) {
-      return res.json({ success: true });
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
     }
+
+    await db.query(
+      `UPDATE payments
+       SET status='paid', updated_at = NOW()
+       WHERE order_id=?`,
+      [orderId]
+    );
 
     const bookingId = payment.booking_id;
 
     await db.query(
-      `
-      UPDATE bookings
-      SET 
-        status = 'confirmed',
-        owner_amount = (
-          COALESCE(rent_amount,0) +
-          COALESCE(security_deposit,0) +
-          COALESCE(maintenance_amount,0)
-        ),
-        owner_settlement = 'PENDING'
-      WHERE id = ?
-      `,
+      `UPDATE bookings
+       SET status='confirmed',
+           owner_amount = (
+             COALESCE(rent_amount,0) +
+             COALESCE(security_deposit,0) +
+             COALESCE(maintenance_amount,0)
+           ),
+           owner_settlement='PENDING'
+       WHERE id=?`,
       [bookingId]
     );
 
-    res.json({ success: true });
+    console.log("✅ PAYMENT VERIFIED:", orderId);
+
+    res.json({
+      success: true
+    });
 
   } catch (err) {
-    console.error("❌ VERIFY ERROR:", err.message);
-    res.status(500).json({ success: false });
+
+    console.error("❌ VERIFY ERROR:", err);
+
+    res.status(500).json({
+      success: false
+    });
+
   }
+
 };
 
 //////////////////////////////////////////////////////
 // ADMIN – GET PENDING SETTLEMENTS
 //////////////////////////////////////////////////////
 exports.getPendingSettlements = async (req, res) => {
+
   try {
+
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false });
     }
@@ -143,19 +191,28 @@ exports.getPendingSettlements = async (req, res) => {
       ORDER BY b.id DESC
     `);
 
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows
+    });
 
   } catch (err) {
-    console.error("❌ SETTLEMENT LIST ERROR:", err.message);
+
+    console.error("❌ SETTLEMENT LIST ERROR:", err);
+
     res.status(500).json({ success: false });
+
   }
+
 };
 
 //////////////////////////////////////////////////////
 // ADMIN – MARK AS SETTLED
 //////////////////////////////////////////////////////
 exports.markAsSettled = async (req, res) => {
+
   try {
+
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false });
     }
@@ -165,27 +222,33 @@ exports.markAsSettled = async (req, res) => {
     await db.query(
       `UPDATE bookings
        SET owner_settlement='DONE',
-           settlement_date=NOW()
+           settlement_date = NOW()
        WHERE id=?`,
       [bookingId]
     );
 
     res.json({
       success: true,
-      message: "Settlement completed",
+      message: "Settlement completed"
     });
 
   } catch (err) {
-    console.error("❌ SETTLEMENT UPDATE ERROR:", err.message);
+
+    console.error("❌ SETTLEMENT UPDATE ERROR:", err);
+
     res.status(500).json({ success: false });
+
   }
+
 };
 
 //////////////////////////////////////////////////////
 // ADMIN – FINANCE SUMMARY
 //////////////////////////////////////////////////////
 exports.getFinanceSummary = async (req, res) => {
+
   try {
+
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false });
     }
@@ -212,19 +275,28 @@ exports.getFinanceSummary = async (req, res) => {
          AND DATE(created_at)=CURDATE()) AS today_collection
     `);
 
-    res.json({ success: true, data: summary });
+    res.json({
+      success: true,
+      data: summary
+    });
 
   } catch (err) {
-    console.error("❌ FINANCE SUMMARY ERROR:", err.message);
+
+    console.error("❌ FINANCE SUMMARY ERROR:", err);
+
     res.status(500).json({ success: false });
+
   }
+
 };
 
 //////////////////////////////////////////////////////
 // ADMIN – SETTLEMENT HISTORY
 //////////////////////////////////////////////////////
 exports.getSettlementHistory = async (req, res) => {
+
   try {
+
     const [rows] = await db.query(`
       SELECT
         b.id AS booking_id,
@@ -237,10 +309,17 @@ exports.getSettlementHistory = async (req, res) => {
       ORDER BY b.settlement_date DESC
     `);
 
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows
+    });
 
   } catch (err) {
-    console.error("❌ SETTLEMENT HISTORY ERROR:", err.message);
+
+    console.error("❌ SETTLEMENT HISTORY ERROR:", err);
+
     res.status(500).json({ success: false });
+
   }
+
 };
