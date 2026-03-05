@@ -7,10 +7,9 @@ const webhookController = require("../controllers/paymentWebhookController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// TENANT PAYMENT (UPI SYSTEM)
+// TENANT PAYMENT (UPI QR GENERATION)
 //////////////////////////////////////////////////////
 
-// Generate UPI QR
 router.post(
   "/create-payment",
   verifyFirebaseToken,
@@ -21,7 +20,7 @@ router.post(
 // USER PAYMENT CONFIRMATION
 //////////////////////////////////////////////////////
 
-// User clicks "I Have Paid"
+// User clicks "I HAVE PAID"
 router.post(
   "/confirm-payment",
   verifyFirebaseToken,
@@ -29,7 +28,17 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// BANK AUTO MATCH
+// USER SUBMIT UTR
+//////////////////////////////////////////////////////
+
+router.post(
+  "/submit-utr",
+  verifyFirebaseToken,
+  paymentController.submitUTR
+);
+
+//////////////////////////////////////////////////////
+// AUTO BANK MATCH (OPTIONAL)
 //////////////////////////////////////////////////////
 
 router.post(
@@ -39,7 +48,7 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// WEBHOOK (future gateway)
+// PAYMENT WEBHOOK (future payment gateway)
 //////////////////////////////////////////////////////
 
 router.post(
@@ -48,17 +57,37 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN VERIFY PAYMENT
+// ADMIN – GET SUBMITTED PAYMENTS (IMPORTANT)
+//////////////////////////////////////////////////////
+
+router.get(
+  "/admin/payments",
+  verifyFirebaseToken,
+  paymentController.getSubmittedPayments
+);
+
+//////////////////////////////////////////////////////
+// ADMIN – VERIFY PAYMENT
 //////////////////////////////////////////////////////
 
 router.put(
-  "/admin/verify-payment/:orderId",
+  "/admin/payments/:orderId/verify",
   verifyFirebaseToken,
   paymentController.verifyPayment
 );
 
 //////////////////////////////////////////////////////
-// ADMIN SETTLEMENT
+// ADMIN – REJECT PAYMENT
+//////////////////////////////////////////////////////
+
+router.put(
+  "/admin/payments/:orderId/reject",
+  verifyFirebaseToken,
+  paymentController.rejectPayment
+);
+
+//////////////////////////////////////////////////////
+// ADMIN – PENDING OWNER SETTLEMENT
 //////////////////////////////////////////////////////
 
 router.get(
@@ -67,6 +96,10 @@ router.get(
   paymentController.getPendingSettlements
 );
 
+//////////////////////////////////////////////////////
+// ADMIN – MARK OWNER PAID
+//////////////////////////////////////////////////////
+
 router.put(
   "/admin/mark-settled/:bookingId",
   verifyFirebaseToken,
@@ -74,7 +107,7 @@ router.put(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN FINANCE
+// ADMIN – FINANCE SUMMARY
 //////////////////////////////////////////////////////
 
 router.get(
@@ -82,6 +115,10 @@ router.get(
   verifyFirebaseToken,
   paymentController.getFinanceSummary
 );
+
+//////////////////////////////////////////////////////
+// ADMIN – SETTLEMENT HISTORY
+//////////////////////////////////////////////////////
 
 router.get(
   "/admin/settlement-history",
