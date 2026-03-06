@@ -115,39 +115,24 @@ exports.getAdminPayments = async (req, res) => {
 
   try {
 
-    if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success:false,
-        message:"Admin only"
-      });
-    }
-
     const [rows] = await db.query(`
       SELECT 
-        p.id AS payment_id,
         p.order_id,
         p.amount,
         p.status,
         p.created_at,
-
         p.booking_id,
 
-        b.id AS booking_id,
-        b.pg_id,
+        b.name AS tenant_name,
+        b.phone,
         b.owner_id,
-
-        u.name AS tenant_name,
-        u.phone AS tenant_phone,
 
         pg.pg_name
 
       FROM payments p
 
-      LEFT JOIN bookings b 
+      LEFT JOIN bookings b
         ON b.id = p.booking_id
-
-      LEFT JOIN users u 
-        ON u.id = b.user_id
 
       LEFT JOIN pgs pg
         ON pg.id = b.pg_id
@@ -160,13 +145,12 @@ exports.getAdminPayments = async (req, res) => {
       data:rows
     });
 
-  } catch (err) {
+  } catch(err){
 
-    console.error("ADMIN PAYMENTS ERROR:", err);
+    console.error(err);
 
     res.status(500).json({
-      success:false,
-      message:"Failed to fetch payments"
+      success:false
     });
 
   }
