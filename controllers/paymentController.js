@@ -22,13 +22,14 @@ exports.createPayment = async (req, res) => {
 
     const upiId = "huligeshmalka-1@oksbi";
     const merchantName = "Nepxall";
-const upiLink =
-  `upi://pay?pa=${upiId}` +
-  `&pn=${encodeURIComponent(merchantName)}` +
-  `&tr=${orderId}` +
-  `&tn=${orderId}` +
-  `&am=${amount}` +
-  `&cu=INR`;
+
+    const upiLink =
+      `upi://pay?pa=${upiId}` +
+      `&pn=${encodeURIComponent(merchantName)}` +
+      `&tr=${orderId}` +
+      `&tn=${orderId}` +
+      `&am=${amount}` +
+      `&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 
@@ -37,8 +38,6 @@ const upiLink =
        VALUES (?, ?, ?, 'pending', NOW())`,
       [bookingId, orderId, amount]
     );
-
-    console.log("💰 Payment created:", orderId);
 
     res.json({
       success: true,
@@ -49,7 +48,7 @@ const upiLink =
 
   } catch (err) {
 
-    console.error("❌ CREATE PAYMENT ERROR:", err);
+    console.error("CREATE PAYMENT ERROR:", err);
 
     res.status(500).json({
       success: false
@@ -58,10 +57,11 @@ const upiLink =
   }
 };
 
-
-// USER CLICKED "I HAVE PAID"
+//////////////////////////////////////////////////////
+// USER CONFIRM PAYMENT
 //////////////////////////////////////////////////////
 exports.confirmPayment = async (req, res) => {
+
   try {
 
     const { orderId } = req.body;
@@ -73,7 +73,6 @@ exports.confirmPayment = async (req, res) => {
       });
     }
 
-    // check if payment exists
     const [rows] = await db.query(
       "SELECT * FROM payments WHERE order_id=?",
       [orderId]
@@ -86,88 +85,61 @@ exports.confirmPayment = async (req, res) => {
       });
     }
 
-    // update payment status
     await db.query(
-      `UPDATE payments
-       SET status='submitted'
-       WHERE order_id=?`,
+      `UPDATE payments SET status='submitted' WHERE order_id=?`,
       [orderId]
     );
 
-    console.log("📩 Payment submitted:", orderId);
-
     res.json({
       success: true,
-      message: "Payment submitted for verification"
+      message: "Payment submitted"
     });
 
   } catch (err) {
 
-    console.error("❌ CONFIRM PAYMENT ERROR:", err);
+    console.error(err);
 
     res.status(500).json({
-      success: false,
-      message: "Internal server error"
+      success: false
     });
 
   }
+
 };
+
 //////////////////////////////////////////////////////
-// OPTIONAL: AUTO MATCH BANK REMARK
+// ADMIN GET ALL PAYMENTS
 //////////////////////////////////////////////////////
-exports.matchBankTransaction = async (req, res) => {
+exports.getAdminPayments = async (req, res) => {
 
   try {
 
-    const { remark } = req.body;
-
-    if (!remark) {
-      return res.status(400).json({
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
         success:false,
-        message:"remark required"
+        message:"Admin only"
       });
     }
 
-    const match = remark.match(/order_[0-9]+_[0-9]+/);
-
-    if (!match) {
-      return res.json({
-        success:false,
-        message:"order id not found"
-      });
-    }
-
-    const orderId = match[0];
-
-    const [[payment]] = await db.query(
-      `SELECT booking_id FROM payments WHERE order_id=?`,
-      [orderId]
-    );
-
-    if (!payment) {
-      return res.json({
-        success:false,
-        message:"payment not found"
-      });
-    }
-
-    await db.query(
-      `UPDATE payments
-       SET status='paid', updated_at=NOW()
-       WHERE order_id=?`,
-      [orderId]
-    );
-
-    await db.query(
-      `UPDATE bookings
-       SET status='confirmed'
-       WHERE id=?`,
-      [payment.booking_id]
-    );
+    const [rows] = await db.query(`
+      SELECT 
+        p.order_id,
+        p.amount,
+        p.status,
+        p.created_at,
+        u.name AS tenant_name,
+        u.phone,
+        pg.name AS pg_name
+      FROM payments p
+      LEFT JOIN bookings b ON b.id = p.booking_id
+      LEFT JOIN users u ON u.id = b.user_id
+      LEFT JOIN pgs pg ON pg.id = b.pg_id
+      ORDER BY p.created_at DESC
+    `);
 
     res.json({
       success:true,
-      message:"payment matched and confirmed"
+      data:rows
     });
 
   } catch (err) {
@@ -190,10 +162,7 @@ exports.verifyPayment = async (req, res) => {
   try {
 
     if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success:false,
-        message:"Access denied"
-      });
+      return res.status(403).json({ success:false });
     }
 
     const { orderId } = req.params;
@@ -211,28 +180,16 @@ exports.verifyPayment = async (req, res) => {
     }
 
     await db.query(
-      `UPDATE payments
-       SET status='paid', updated_at=NOW()
-       WHERE order_id=?`,
+      `UPDATE payments SET status='paid' WHERE order_id=?`,
       [orderId]
     );
 
-    const bookingId = payment.booking_id;
-
     await db.query(
       `UPDATE bookings
-       SET status='confirmed',
-           owner_amount = (
-             COALESCE(rent_amount,0) +
-             COALESCE(security_deposit,0) +
-             COALESCE(maintenance_amount,0)
-           ),
-           owner_settlement='PENDING'
+       SET status='confirmed'
        WHERE id=?`,
-      [bookingId]
+      [payment.booking_id]
     );
-
-    console.log("✅ PAYMENT VERIFIED:", orderId);
 
     res.json({
       success:true
@@ -251,9 +208,9 @@ exports.verifyPayment = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// ADMIN – GET PENDING SETTLEMENTS
+// ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
-exports.getPendingSettlements = async (req, res) => {
+exports.rejectPayment = async (req, res) => {
 
   try {
 
@@ -261,153 +218,25 @@ exports.getPendingSettlements = async (req, res) => {
       return res.status(403).json({ success:false });
     }
 
-    const [rows] = await db.query(`
-      SELECT 
-        b.id AS booking_id,
-        b.owner_amount,
-        u.name AS owner_name,
-        obd.account_holder_name,
-        obd.account_number,
-        obd.ifsc,
-        obd.bank_name,
-        obd.branch
-      FROM bookings b
-      JOIN users u ON u.id = b.owner_id
-      JOIN owner_bank_details obd ON obd.owner_id = u.id
-      WHERE b.status='confirmed'
-      AND b.owner_settlement='PENDING'
-      ORDER BY b.id DESC
-    `);
-
-    res.json({
-      success:true,
-      data:rows
-    });
-
-  } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json({ success:false });
-
-  }
-
-};
-
-//////////////////////////////////////////////////////
-// ADMIN – MARK AS SETTLED
-//////////////////////////////////////////////////////
-exports.markAsSettled = async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ success:false });
-    }
-
-    const { bookingId } = req.params;
+    const { orderId } = req.params;
 
     await db.query(
-      `UPDATE bookings
-       SET owner_settlement='DONE',
-           settlement_date=NOW()
-       WHERE id=?`,
-      [bookingId]
+      `UPDATE payments SET status='rejected' WHERE order_id=?`,
+      [orderId]
     );
 
     res.json({
-      success:true,
-      message:"Settlement completed"
+      success:true
     });
 
   } catch (err) {
 
     console.error(err);
 
-    res.status(500).json({ success:false });
+    res.status(500).json({
+      success:false
+    });
 
   }
 
 };
-
-//////////////////////////////////////////////////////
-// ADMIN – FINANCE SUMMARY
-//////////////////////////////////////////////////////
-exports.getFinanceSummary = async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ success:false });
-    }
-
-    const [[summary]] = await db.query(`
-      SELECT
-        (SELECT COALESCE(SUM(amount),0)
-         FROM payments
-         WHERE status='paid') AS total_received,
-
-        (SELECT COALESCE(SUM(owner_amount),0)
-         FROM bookings
-         WHERE owner_settlement='PENDING'
-         AND status='confirmed') AS pending_settlements,
-
-        (SELECT COALESCE(SUM(owner_amount),0)
-         FROM bookings
-         WHERE owner_settlement='DONE'
-         AND status='confirmed') AS total_settled,
-
-        (SELECT COALESCE(SUM(amount),0)
-         FROM payments
-         WHERE status='paid'
-         AND DATE(created_at)=CURDATE()) AS today_collection
-    `);
-
-    res.json({
-      success:true,
-      data:summary
-    });
-
-  } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json({ success:false });
-
-  }
-
-};
-
-//////////////////////////////////////////////////////
-// ADMIN – SETTLEMENT HISTORY
-//////////////////////////////////////////////////////
-exports.getSettlementHistory = async (req, res) => {
-
-  try {
-
-    const [rows] = await db.query(`
-      SELECT
-        b.id AS booking_id,
-        b.owner_amount,
-        b.settlement_date,
-        u.name AS owner_name
-      FROM bookings b
-      JOIN users u ON u.id = b.owner_id
-      WHERE b.owner_settlement='DONE'
-      ORDER BY b.settlement_date DESC
-    `);
-
-    res.json({
-      success:true,
-      data:rows
-    });
-
-  } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json({ success:false });
-
-  }
-
-}; 
