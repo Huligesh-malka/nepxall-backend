@@ -1,27 +1,23 @@
 const express = require("express");
 const router = express.Router();
 
-const adminSettlementController = require("../controllers/adminSettlementController");
+const controller = require("../controllers/adminSettlementController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// ADMIN - GET PENDING SETTLEMENTS
+// ADMIN ROUTES
 //////////////////////////////////////////////////////
 
 router.get(
-  "/admin/pending-settlements",
+  "/payments/admin/pending-settlements",
   verifyFirebaseToken,
-  adminSettlementController.getPendingSettlements
+  controller.getPendingSettlements
 );
 
-//////////////////////////////////////////////////////
-// ADMIN - MARK SETTLEMENT DONE
-//////////////////////////////////////////////////////
-
 router.put(
-  "/admin/mark-settled/:bookingId",
+  "/payments/admin/mark-settled/:bookingId",
   verifyFirebaseToken,
-  adminSettlementController.markAsSettled
+  controller.markAsSettled
 );
 
 module.exports = router;
