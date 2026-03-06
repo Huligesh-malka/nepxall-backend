@@ -1,11 +1,6 @@
 const db = require("../db");
 
-//////////////////////////////////////////////////////
-// GET PENDING SETTLEMENTS
-//////////////////////////////////////////////////////
-
 exports.getPendingSettlements = async (req, res) => {
-
   try {
 
     const [rows] = await db.query(`
@@ -21,31 +16,28 @@ exports.getPendingSettlements = async (req, res) => {
       FROM bookings b
       JOIN users u ON u.id = b.owner_id
       LEFT JOIN owner_bank_details obd ON obd.owner_id = u.id
-      WHERE b.owner_amount > 0
-      AND b.owner_settlement = 'PENDING'
-      ORDER BY b.id DESC
+      WHERE b.owner_settlement = 'PENDING'
+      AND b.owner_amount > 0
     `);
 
-    res.json({
+    return res.json({
       success: true,
       data: rows
     });
 
-  } catch (err) {
+  } catch (error) {
 
-    console.error(err);
+    console.error("Settlement error:", error);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: "Failed to load settlements"
     });
-
   }
-
 };
 
-//////////////////////////////////////////////////////
-// MARK SETTLED
-//////////////////////////////////////////////////////
+
+
 
 exports.markAsSettled = async (req, res) => {
 
@@ -54,25 +46,25 @@ exports.markAsSettled = async (req, res) => {
     const bookingId = req.params.bookingId;
 
     await db.query(
-      `UPDATE bookings
-       SET owner_settlement='DONE',
-           settlement_date=NOW()
-       WHERE id=?`,
+      `UPDATE bookings 
+       SET owner_settlement = 'DONE',
+           settlement_date = NOW()
+       WHERE id = ?`,
       [bookingId]
     );
 
     res.json({
-      success:true
+      success: true,
+      message: "Settlement completed"
     });
 
-  } catch (err) {
+  } catch (error) {
 
-    console.error(err);
+    console.error(error);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: "Settlement failed"
     });
-
   }
-
 };
