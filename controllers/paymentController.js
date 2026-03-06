@@ -167,7 +167,7 @@ exports.verifyPayment = async (req, res) => {
     const { orderId } = req.params;
 
     const [[payment]] = await db.query(
-      `SELECT booking_id FROM payments WHERE order_id=?`,
+      `SELECT booking_id, amount FROM payments WHERE order_id=?`,
       [orderId]
     );
 
@@ -178,20 +178,25 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
+    // mark payment paid
     await db.query(
       `UPDATE payments SET status='paid' WHERE order_id=?`,
       [orderId]
     );
 
+    // update booking automatically
     await db.query(
       `UPDATE bookings
-       SET status='confirmed'
+       SET status='confirmed',
+           owner_amount=?,
+           owner_settlement='PENDING'
        WHERE id=?`,
-      [payment.booking_id]
+      [payment.amount, payment.booking_id]
     );
 
     res.json({
-      success:true
+      success:true,
+      message:"Payment verified and settlement created"
     });
 
   } catch (err) {
