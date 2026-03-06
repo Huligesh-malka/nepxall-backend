@@ -110,7 +110,11 @@ exports.confirmPayment = async (req, res) => {
 //////////////////////////////////////////////////////
 // ADMIN GET ALL PAYMENTS
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// ADMIN GET ALL PAYMENTS
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
+
   try {
 
     if (req.user.role !== "admin") {
@@ -122,16 +126,34 @@ exports.getAdminPayments = async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT 
+        p.id AS payment_id,
         p.order_id,
         p.amount,
         p.status,
         p.created_at,
+
         p.booking_id,
+
+        b.id AS booking_id,
+        b.pg_id,
+        b.owner_id,
+
         u.name AS tenant_name,
-        u.phone
+        u.phone AS tenant_phone,
+
+        pg.pg_name
+
       FROM payments p
-      LEFT JOIN bookings b ON b.id = p.booking_id
-      LEFT JOIN users u ON u.id = b.user_id
+
+      LEFT JOIN bookings b 
+        ON b.id = p.booking_id
+
+      LEFT JOIN users u 
+        ON u.id = b.user_id
+
+      LEFT JOIN pgs pg
+        ON pg.id = b.pg_id
+
       ORDER BY p.created_at DESC
     `);
 
@@ -150,6 +172,7 @@ exports.getAdminPayments = async (req, res) => {
     });
 
   }
+
 };
 //////////////////////////////////////////////////////
 // ADMIN VERIFY PAYMENT
