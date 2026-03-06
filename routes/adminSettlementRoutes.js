@@ -5,7 +5,7 @@ const controller = require("../controllers/adminSettlementController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// ADMIN ROUTES
+// GET PENDING SETTLEMENTS
 //////////////////////////////////////////////////////
 
 router.get(
@@ -13,6 +13,10 @@ router.get(
   verifyFirebaseToken,
   controller.getPendingSettlements
 );
+
+//////////////////////////////////////////////////////
+// MARK SETTLED
+//////////////////////////////////////////////////////
 
 router.put(
   "/payments/admin/mark-settled/:bookingId",
