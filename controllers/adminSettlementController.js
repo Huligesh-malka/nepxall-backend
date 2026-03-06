@@ -91,3 +91,41 @@ exports.markAsSettled = async (req, res) => {
     });
   }
 };
+
+
+
+
+exports.getSettlementHistory = async (req, res) => {
+  try {
+
+    const [rows] = await db.query(`
+      SELECT 
+        b.id AS booking_id,
+        b.owner_amount,
+        b.settlement_date,
+        u.name AS owner_name,
+        u.phone AS owner_phone,
+        p.pg_name
+      FROM bookings b
+      JOIN users u ON u.id = b.owner_id
+      JOIN pgs p ON p.id = b.pg_id
+      WHERE b.owner_settlement = 'DONE'
+      ORDER BY b.settlement_date DESC
+    `);
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
+  } catch (error) {
+
+    console.error("Settlement history error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load settlement history"
+    });
+
+  }
+};

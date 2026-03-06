@@ -7,4 +7,7 @@ router.get("/pending-settlements", controller.getPendingSettlements);
 
 router.put("/mark-settled/:bookingId", controller.markAsSettled);
 
+
+router.get("/settlement-history", controller.getSettlementHistory);
+
 module.exports = router;
