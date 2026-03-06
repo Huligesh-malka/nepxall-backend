@@ -240,3 +240,53 @@ exports.rejectPayment = async (req, res) => {
   }
 
 };
+
+
+//////////////////////////////////////////////////////
+// AUTO MATCH BANK TRANSACTION
+//////////////////////////////////////////////////////
+exports.matchBankTransaction = async (req, res) => {
+  try {
+
+    const { remark } = req.body;
+
+    if (!remark) {
+      return res.status(400).json({
+        success:false,
+        message:"remark required"
+      });
+    }
+
+    const match = remark.match(/order_[0-9]+_[0-9]+/);
+
+    if (!match) {
+      return res.json({
+        success:false,
+        message:"order id not found"
+      });
+    }
+
+    const orderId = match[0];
+
+    await db.query(
+      `UPDATE payments
+       SET status='paid'
+       WHERE order_id=?`,
+      [orderId]
+    );
+
+    res.json({
+      success:true,
+      message:"payment matched"
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success:false
+    });
+
+  }
+};
