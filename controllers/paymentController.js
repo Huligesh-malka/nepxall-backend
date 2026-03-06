@@ -108,9 +108,6 @@ exports.confirmPayment = async (req, res) => {
 };
 
 
-//////////////////////////////////////////////////////
-// ADMIN GET ALL PAYMENTS
-//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
 
   try {
