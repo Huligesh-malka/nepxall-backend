@@ -6,31 +6,32 @@ exports.getOwnerPayments = async (req, res) => {
     const ownerId = req.user.id;
 
     const [rows] = await db.query(`
-      
       SELECT
-        b.id AS booking_id,
+        p.booking_id,
+        p.amount,
+        p.status AS payment_status,
+        p.created_at,
+
         b.name AS tenant_name,
         b.phone,
         b.owner_amount,
         b.owner_settlement,
-        b.status,
-        b.settlement_date,
-        b.platform_fee,
 
         pg.pg_name
 
-      FROM bookings b
+      FROM payments p
 
-      LEFT JOIN pgs pg
-      ON pg.id = b.pg_id
+      JOIN bookings b
+        ON b.id = p.booking_id
 
-      WHERE
-        b.owner_id = ?
-        AND b.status = 'confirmed'
+      JOIN pgs pg
+        ON pg.id = b.pg_id
 
-      ORDER BY b.updated_at DESC
+      WHERE b.owner_id = ?
+      AND p.status = 'paid'
 
-    `, [ownerId]);
+      ORDER BY p.created_at DESC
+    `,[ownerId]);
 
     res.json({
       success: true,
@@ -42,8 +43,7 @@ exports.getOwnerPayments = async (req, res) => {
     console.error("OWNER PAYMENTS ERROR:", err);
 
     res.status(500).json({
-      success: false,
-      message: "Failed to load owner payments"
+      success:false
     });
 
   }
