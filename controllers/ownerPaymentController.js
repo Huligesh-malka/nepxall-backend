@@ -6,6 +6,7 @@ exports.getOwnerPayments = async (req, res) => {
     const ownerId = req.user.id;
 
     const [rows] = await db.query(`
+
       SELECT
         b.id AS booking_id,
         b.name AS tenant_name,
@@ -32,6 +33,7 @@ exports.getOwnerPayments = async (req, res) => {
       WHERE b.owner_id = ?
 
       ORDER BY b.created_at DESC
+
     `, [ownerId]);
 
     res.json({

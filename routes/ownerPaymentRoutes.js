@@ -1,9 +1,14 @@
 const express = require("express");
 const router = express.Router();
 
-const controller = require("../controllers/ownerPaymentController");
-const auth = require("../middleware/authMiddleware");
+const firebaseAuth = require("../middlewares/auth");
 
-router.get("/payments", auth, controller.getOwnerPayments);
+const {
+  getOwnerPayments
+} = require("../controllers/ownerPaymentController");
+
+/* OWNER PAYMENT LIST */
+
+router.get("/payments", firebaseAuth, getOwnerPayments);
 
 module.exports = router;
