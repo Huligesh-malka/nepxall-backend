@@ -1,7 +1,6 @@
 const db = require("../db");
 
 exports.getOwnerPayments = async (req, res) => {
-
   try {
 
     const ownerId = req.user.id;
@@ -15,18 +14,12 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_amount,
         b.owner_settlement,
         b.status,
+        b.settlement_date,
+        b.platform_fee,
 
-        pg.pg_name,
-
-        p.amount,
-        p.status AS payment_status,
-        p.order_id,
-        p.created_at
+        pg.pg_name
 
       FROM bookings b
-
-      LEFT JOIN payments p
-      ON p.booking_id = b.id
 
       LEFT JOIN pgs pg
       ON pg.id = b.pg_id
@@ -49,10 +42,9 @@ exports.getOwnerPayments = async (req, res) => {
     console.error("OWNER PAYMENTS ERROR:", err);
 
     res.status(500).json({
-      success:false,
-      message:"Failed to load payments"
+      success: false,
+      message: "Failed to load owner payments"
     });
 
   }
-
 };
