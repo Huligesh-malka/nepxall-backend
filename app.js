@@ -5,22 +5,27 @@ const helmet = require("helmet");
 const app = express();
 
 /* ================= TRUST PROXY ================= */
+
 app.set("trust proxy", 1);
 
 /* ================= SECURITY ================= */
+
 app.use(helmet());
 
 /* ================= LOGGER ================= */
+
 app.use((req, res, next) => {
   console.log(`➡️ ${req.method} ${req.originalUrl}`);
   next();
 });
 
 /* ================= BODY PARSER ================= */
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ================= CORS ================= */
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
@@ -30,12 +35,14 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin, callback) => {
+
     if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
     console.log("❌ Blocked by CORS:", origin);
-    return callback(null, true); // change to false for strict production
+    return callback(null, true);
+
   },
   credentials: true
 };
@@ -44,31 +51,43 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
 /* ================= SAFE ROUTE LOADER ================= */
+
 const safeLoad = (path) => {
+
   try {
+
     const route = require(path);
     console.log("✅ Loaded:", path);
+
     return route;
+
   } catch (err) {
+
     console.error("❌ Failed to load:", path, err.message);
     return express.Router();
+
   }
+
 };
 
 /* ================= ROOT ROUTES ================= */
 
 app.get("/", (req, res) => {
+
   res.json({
     success: true,
     message: "🚀 Nepxall Backend API Running"
   });
+
 });
 
 app.get("/api/health", (req, res) => {
+
   res.json({
     success: true,
     status: "healthy"
   });
+
 });
 
 /* ================= CORE ROUTES ================= */
@@ -108,6 +127,10 @@ app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 
+/* 🔵 NEW ROUTE → OWNER PAYMENTS */
+
+app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
+
 /* ================= ADMIN ================= */
 
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
@@ -121,21 +144,25 @@ app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
 /* ================= 404 HANDLER ================= */
 
 app.use((req, res) => {
+
   res.status(404).json({
     success: false,
     message: `❌ Route ${req.originalUrl} not found`
   });
+
 });
 
 /* ================= GLOBAL ERROR HANDLER ================= */
 
 app.use((err, req, res, next) => {
+
   console.error("🔥 GLOBAL ERROR:", err);
 
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error"
   });
+
 });
 
 module.exports = app;
