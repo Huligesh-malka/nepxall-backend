@@ -7,32 +7,27 @@ exports.getOwnerPayments = async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT
-        p.id AS payment_id,
-        p.booking_id,
-        p.amount,
-        p.status AS payment_status,
-        p.owner_settlement,
-        p.settlement_date,
-        p.created_at,
-
+        b.id AS booking_id,
         b.name AS tenant_name,
         b.phone,
+        b.owner_amount,
+        b.owner_settlement,
+        b.settlement_date,
+        b.updated_at,
+        'paid' AS payment_status,
 
         pg.pg_name
 
-      FROM payments p
+      FROM bookings b
 
-      LEFT JOIN bookings b
-        ON b.id = p.booking_id
-
-      LEFT JOIN pgs pg
+      JOIN pgs pg
         ON pg.id = b.pg_id
 
-      WHERE p.owner_id = ?
-      AND p.status = 'paid'
+      WHERE b.owner_id = ?
+      AND b.status = 'confirmed'
 
-      ORDER BY p.created_at DESC
-    `,[ownerId]);
+      ORDER BY b.updated_at DESC
+    `, [ownerId]);
 
     res.json({
       success: true,
