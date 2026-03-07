@@ -7,6 +7,7 @@ exports.getOwnerPayments = async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT
+        p.id AS payment_id,
         p.booking_id,
         p.amount,
         p.status AS payment_status,
@@ -16,6 +17,7 @@ exports.getOwnerPayments = async (req, res) => {
         b.phone,
         b.owner_amount,
         b.owner_settlement,
+        b.settlement_date,
 
         pg.pg_name
 
@@ -34,8 +36,8 @@ exports.getOwnerPayments = async (req, res) => {
     `,[ownerId]);
 
     res.json({
-      success: true,
-      data: rows
+      success:true,
+      data:rows
     });
 
   } catch (err) {
