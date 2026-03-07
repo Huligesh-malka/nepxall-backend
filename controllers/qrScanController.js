@@ -32,28 +32,28 @@ exports.getPGScanData = async (req, res) => {
       });
     }
 
-    // SIMPLE QUERY - just get basic PG details
+    // Fetch only required PG details - no extra tables or complex operations
     const [rows] = await db.query(
-      `SELECT 
-        id, 
-        pg_name, 
-        city, 
-        area, 
+      `SELECT
+        id,
+        pg_name,
+        pg_type,
+        city,
+        area,
         address,
         landmark,
         rent_amount,
         deposit_amount,
-        maintenance_amount,
         available_rooms,
         total_rooms,
         contact_person,
         contact_phone,
         description,
         photos,
-        status,
-        pg_type
-      FROM pgs 
-      WHERE id = ? AND is_deleted = 0`,
+        status
+      FROM pgs
+      WHERE id = ?
+      AND is_deleted = 0`,
       [id]
     );
 
@@ -69,29 +69,25 @@ exports.getPGScanData = async (req, res) => {
     // Parse photos
     pg.photos = safeParsePhotos(pg.photos);
     
-    // Add computed fields
+    // Add simple computed fields
     pg.is_available = pg.status === 'active';
     
     if (pg.status !== 'active') {
-      pg.status_message = "This property is currently not available";
+      pg.status_message = "Currently unavailable";
     }
 
-    // DON'T try to update scan_count or create tables - just return the data
-    console.log(`✅ QR scan successful for PG: ${pg.pg_name} (ID: ${id})`);
+    console.log(`✅ QR scan successful for PG: ${pg.pg_name}`);
 
-    return res.json({
+    res.json({
       success: true,
       data: pg
     });
 
   } catch (error) {
     console.error("❌ QR SCAN ERROR:", error);
-    
-    // Send a proper error response
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: "Server error while fetching property details",
-      error: error.message
+      message: "Server error"
     });
   }
 };
@@ -100,21 +96,26 @@ exports.getPGScanData = async (req, res) => {
 exports.trackQRScan = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     console.log(`📊 Tracking scan for PG ID: ${id}`);
 
-    // Just return success - don't try to insert into database
-    // This prevents any database errors
-    
-    return res.json({
+    // Validate ID
+    if (!id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid PG ID format"
+      });
+    }
+
+    // Simple success response - no database operations
+    res.json({
       success: true,
-      message: "Scan tracked successfully"
+      message: "Scan tracked"
     });
 
   } catch (error) {
-    console.error("Error in trackQRScan:", error);
-    // Always return success to not break user experience
-    return res.json({
+    console.error("Error tracking QR scan:", error);
+    res.json({
       success: true,
       message: "Scan received"
     });
@@ -126,8 +127,8 @@ exports.getScanStatistics = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Return mock data for now
-    return res.json({
+    // Return empty stats for now
+    res.json({
       success: true,
       data: {
         total_scans: 0,
@@ -137,8 +138,8 @@ exports.getScanStatistics = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error in getScanStatistics:", error);
-    return res.status(500).json({
+    console.error("Error getting scan statistics:", error);
+    res.status(500).json({
       success: false,
       message: "Failed to get scan statistics"
     });
