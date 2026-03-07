@@ -32,6 +32,31 @@ exports.getPGScanData = async (req, res) => {
       });
     }
 
+    // First, check if the qr_scans table exists, if not create it
+    try {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS qr_scans (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          pg_id INT NOT NULL,
+          scanned_at DATETIME NOT NULL,
+          source VARCHAR(50) DEFAULT 'direct',
+          ip_address VARCHAR(45),
+          user_agent TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_pg_id (pg_id),
+          INDEX idx_scanned_at (scanned_at)
+        )
+      `);
+      
+      // Add scan_count column if it doesn't exist
+      await db.query(`
+        ALTER TABLE pgs 
+        ADD COLUMN IF NOT EXISTS scan_count INT DEFAULT 0
+      `);
+    } catch (tableError) {
+      console.log("Table creation error (might already exist):", tableError.message);
+    }
+
     // Fetch comprehensive PG details
     const [rows] = await db.query(
       `
@@ -92,19 +117,6 @@ exports.getPGScanData = async (req, res) => {
 
     const pg = rows[0];
 
-    // Check if PG is active
-    if (pg.status !== 'active') {
-      return res.json({
-        success: true,
-        data: {
-          ...pg,
-          photos: safeParsePhotos(pg.photos),
-          is_available: false,
-          status_message: "This property is currently not available for booking"
-        }
-      });
-    }
-
     // Parse photos
     pg.photos = safeParsePhotos(pg.photos);
     
@@ -112,41 +124,39 @@ exports.getPGScanData = async (req, res) => {
     pg.preview_photo = pg.photos && pg.photos.length > 0 ? pg.photos[0] : null;
 
     // Add computed fields
-    pg.is_available = true;
-    pg.total_sharing_options = [
+    pg.is_available = pg.status === 'active';
+    
+    // Calculate total sharing options
+    const sharingOptions = [
       pg.single_sharing,
       pg.double_sharing,
       pg.triple_sharing,
       pg.four_sharing
-    ].filter(price => price !== null && price > 0).length;
+    ];
+    pg.total_sharing_options = sharingOptions.filter(price => price !== null && price > 0).length;
 
-    pg.total_room_options = [
+    // Calculate total room options
+    const roomOptions = [
       pg.single_room,
       pg.double_room,
       pg.triple_room
-    ].filter(price => price !== null && price > 0).length;
+    ];
+    pg.total_room_options = roomOptions.filter(price => price !== null && price > 0).length;
 
-    // Increment scan count (track how many times QR is scanned)
+    // Add status message if not active
+    if (pg.status !== 'active') {
+      pg.status_message = "This property is currently not available for booking";
+    }
+
+    // Try to increment scan count, but don't fail if it doesn't work
     try {
       await db.query(
         "UPDATE pgs SET scan_count = IFNULL(scan_count, 0) + 1 WHERE id = ?",
         [id]
       );
     } catch (scanError) {
-      console.error("Error updating scan count:", scanError);
+      console.error("Error updating scan count:", scanError.message);
       // Don't fail the request if scan count update fails
-    }
-
-    // Log scan for analytics (optional)
-    try {
-      await db.query(
-        `INSERT INTO qr_scans (pg_id, scanned_at, ip_address, user_agent) 
-         VALUES (?, NOW(), ?, ?)`,
-        [id, req.ip || null, req.headers['user-agent'] || null]
-      );
-    } catch (logError) {
-      console.error("Error logging QR scan:", logError);
-      // Don't fail the request if logging fails
     }
 
     console.log(`✅ QR scan successful for PG: ${pg.pg_name} (ID: ${id})`);
@@ -168,16 +178,27 @@ exports.getPGScanData = async (req, res) => {
   }
 };
 
-/* ================= TRACK QR SCAN (Optional - for analytics) ================= */
+/* ================= TRACK QR SCAN ================= */
 exports.trackQRScan = async (req, res) => {
   try {
     const { id } = req.params;
     const { source } = req.body;
 
+    console.log(`📊 Tracking scan for PG ID: ${id}`);
+
+    // Validate ID
+    if (!id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid PG ID format"
+      });
+    }
+
+    // Insert scan record
     await db.query(
       `INSERT INTO qr_scans (pg_id, scanned_at, source, ip_address, user_agent) 
        VALUES (?, NOW(), ?, ?, ?)`,
-      [id, source || 'direct', req.ip || null, req.headers['user-agent'] || null]
+      [id, source || 'direct', req.ip || req.connection.remoteAddress || null, req.headers['user-agent'] || null]
     );
 
     res.json({
@@ -187,18 +208,21 @@ exports.trackQRScan = async (req, res) => {
 
   } catch (error) {
     console.error("Error tracking QR scan:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to track scan"
+    // Return success even if tracking fails - don't break the user experience
+    res.json({
+      success: true,
+      message: "Scan received"
     });
   }
 };
 
-/* ================= GET SCAN STATISTICS (Optional - for owners) ================= */
+/* ================= GET SCAN STATISTICS ================= */
 exports.getScanStatistics = async (req, res) => {
   try {
     const { id } = req.params;
     const { days = 30 } = req.query;
+
+    console.log(`📊 Getting scan statistics for PG ID: ${id}`);
 
     // Get total scans
     const [totalScans] = await db.query(
@@ -213,7 +237,7 @@ exports.getScanStatistics = async (req, res) => {
       [id, days]
     );
 
-    // Get daily scan trend
+    // Get daily scan trend (last 7 days)
     const [dailyTrend] = await db.query(
       `SELECT DATE(scanned_at) as date, COUNT(*) as count 
        FROM qr_scans 
