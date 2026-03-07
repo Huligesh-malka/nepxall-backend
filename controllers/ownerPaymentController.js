@@ -11,22 +11,21 @@ exports.getOwnerPayments = async (req, res) => {
         p.booking_id,
         p.amount,
         p.status AS payment_status,
+        p.owner_settlement,
+        p.settlement_date,
         p.created_at,
 
         b.name AS tenant_name,
         b.phone,
-        b.owner_amount,
-        b.owner_settlement,
-        b.settlement_date,
 
         pg.pg_name
 
       FROM payments p
 
-      JOIN bookings b
+      LEFT JOIN bookings b
         ON b.id = p.booking_id
 
-      JOIN pgs pg
+      LEFT JOIN pgs pg
         ON pg.id = b.pg_id
 
       WHERE p.owner_id = ?
