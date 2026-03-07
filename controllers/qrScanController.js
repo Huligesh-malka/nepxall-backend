@@ -1,51 +1,56 @@
-const db = require("../config/db"); // use your db connection file
+const db = require("../db"); // same db connection used in your main controller
+
+/* ================= GET PG DATA FOR QR SCAN ================= */
 
 exports.getPGScanData = async (req, res) => {
   try {
 
     const { id } = req.params;
 
-    const query = `
-      SELECT 
+    const [rows] = await db.query(
+      `
+      SELECT
         id,
         pg_name,
+        city,
+        area,
+        location,
         rent_amount,
         available_rooms,
+        total_rooms,
         single_sharing,
         double_sharing,
         triple_sharing,
         four_sharing,
         contact_phone,
-        city,
-        area
-      FROM pg
-      WHERE id = ? 
+        photos
+      FROM pgs
+      WHERE id = ?
       AND status = 'active'
       AND is_deleted = 0
-    `;
+      `,
+      [id]
+    );
 
-    db.query(query, [id], (err, result) => {
-
-      if (err) {
-        console.error("SCAN ERROR:", err);
-        return res.status(500).json({
-          success: false,
-          message: "Database error"
-        });
-      }
-
-      if (!result.length) {
-        return res.status(404).json({
-          success: false,
-          message: "PG not found"
-        });
-      }
-
-      res.json({
-        success: true,
-        data: result[0]
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "PG not found"
       });
+    }
 
+    const pg = rows[0];
+
+    // convert photos JSON
+    try {
+      pg.photos = JSON.parse(pg.photos || "[]");
+    } catch {
+      pg.photos = [];
+    }
+
+    res.json({
+      success: true,
+      data: pg
     });
 
   } catch (error) {
