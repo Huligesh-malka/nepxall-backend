@@ -1,3 +1,6 @@
+const db = require("../db");
+
+
 exports.getOwnerPayments = async (req, res) => {
   try {
     const ownerId = req.user.id;
