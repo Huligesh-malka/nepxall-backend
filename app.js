@@ -60,10 +60,8 @@ const safeLoad = (path) => {
     return route;
   } catch (err) {
     console.error("❌ Failed to load:", path, err.message);
-    // Return a dummy router that logs requests
     const dummyRouter = express.Router();
     dummyRouter.use((req, res) => {
-      console.log(`⚠️ Using dummy router for ${req.originalUrl} - route not properly loaded`);
       res.status(500).json({
         success: false,
         message: `Route ${req.originalUrl} not properly configured`
@@ -79,13 +77,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "🚀 Nepxall Backend API Running",
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      health: "/api/health",
-      auth: "/api/auth",
-      owner: "/api/owner",
-      payments: "/api/owner/payments"
-    }
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -100,6 +92,7 @@ app.get("/api/health", (req, res) => {
 /* ================= CORE ROUTES ================= */
 
 console.log("\n📦 Loading Core Routes...");
+
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
 app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
@@ -109,7 +102,12 @@ app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 
-/* ================= PAYMENT ROUTES (UPI SYSTEM) ================= */
+/* ================= QR SCAN ROUTES ================= */
+
+console.log("\n📱 Loading QR Scan Routes...");
+app.use("/api/scan", safeLoad("./routes/qrScanRoutes"));
+
+/* ================= PAYMENT ROUTES ================= */
 
 console.log("\n💳 Loading Payment Routes...");
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
@@ -137,42 +135,22 @@ app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
 console.log("\n👤 Loading Owner Routes...");
 
-// IMPORTANT: Order matters - more specific routes first
-
-// 1. Load Payment Routes FIRST (most specific)
-console.log("📊 Loading Owner Payment Routes...");
 app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
-
-// 2. Load Bank Details Routes
-console.log("🏦 Loading Owner Bank Routes...");
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
-
-// 3. Load Verification Routes
-console.log("✅ Loading Owner Verification Routes...");
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
-
-// 4. Load Booking Routes (most general last)
-console.log("📅 Loading Owner Booking Routes...");
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 
-// Add a catch-all owner route for debugging
 app.use("/api/owner/test", (req, res) => {
   res.json({
     success: true,
-    message: "Owner test endpoint working",
-    availableRoutes: [
-      "/api/owner/payments",
-      "/api/owner/payments/debug",
-      "/api/owner/bookings",
-      "/api/owner/bank",
-      "/api/owner/verification"
-    ]
+    message: "Owner test endpoint working"
   });
 });
 
 /* ================= ADMIN ROUTES ================= */
 
 console.log("\n👑 Loading Admin Routes...");
+
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
@@ -180,68 +158,26 @@ app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
 /* ================= VENDOR ROUTES ================= */
 
 console.log("\n🏪 Loading Vendor Routes...");
+
 app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
-
-/* ================= DEBUG ENDPOINTS ================= */
-
-// List all registered routes (debug only - remove in production)
-if (process.env.NODE_ENV !== 'production') {
-  app.get("/api/debug/routes", (req, res) => {
-    const routes = [];
-    app._router.stack.forEach(middleware => {
-      if (middleware.route) {
-        routes.push({
-          path: middleware.route.path,
-          methods: Object.keys(middleware.route.methods)
-        });
-      } else if (middleware.name === 'router') {
-        middleware.handle.stack.forEach(handler => {
-          if (handler.route) {
-            routes.push({
-              path: handler.route.path,
-              methods: Object.keys(handler.route.methods)
-            });
-          }
-        });
-      }
-    });
-    res.json({
-      success: true,
-      totalRoutes: routes.length,
-      routes: routes
-    });
-  });
-}
 
 /* ================= 404 HANDLER ================= */
 
 app.use((req, res) => {
-  console.log(`❌ 404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
-    message: `❌ Route ${req.originalUrl} not found`,
-    availablePaths: {
-      owner: "/api/owner/payments, /api/owner/bookings, /api/owner/bank",
-      health: "/api/health",
-      auth: "/api/auth"
-    }
+    message: `Route ${req.originalUrl} not found`
   });
 });
 
-/* ================= GLOBAL ERROR HANDLER ================= */
+/* ================= ERROR HANDLER ================= */
 
 app.use((err, req, res, next) => {
-  console.error("🔥 GLOBAL ERROR:", {
-    message: err.message,
-    stack: err.stack,
-    url: req.originalUrl,
-    method: req.method
-  });
+  console.error("🔥 GLOBAL ERROR:", err);
 
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || "Internal Server Error",
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    message: err.message || "Internal Server Error"
   });
 });
 
@@ -249,18 +185,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Only start server if not in test environment
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log("\n" + "=".repeat(50));
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📝 Test endpoints:`);
-    console.log(`   - GET /api/health`);
-    console.log(`   - GET /api/owner/test`);
-    console.log(`   - GET /api/owner/payments-test (if configured)`);
-    console.log(`   - GET /api/debug/routes (development only)`);
-    console.log("=".repeat(50) + "\n");
+    console.log("🚀 Server running on port", PORT);
   });
 }
 
