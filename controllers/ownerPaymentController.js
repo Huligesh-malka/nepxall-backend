@@ -29,15 +29,15 @@ exports.getOwnerPayments = async (req, res) => {
       JOIN pgs pg
         ON pg.id = b.pg_id
 
-      WHERE b.owner_id = ?
+      WHERE p.owner_id = ?
       AND p.status = 'paid'
 
       ORDER BY p.created_at DESC
     `,[ownerId]);
 
     res.json({
-      success:true,
-      data:rows
+      success: true,
+      data: rows
     });
 
   } catch (err) {
@@ -45,7 +45,8 @@ exports.getOwnerPayments = async (req, res) => {
     console.error("OWNER PAYMENTS ERROR:", err);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: "Failed to load owner payments"
     });
 
   }
