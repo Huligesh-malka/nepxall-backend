@@ -12,12 +12,14 @@ exports.getOwnerPayments = async (req, res) => {
         b.phone AS tenant_phone,
         b.owner_amount,
         b.owner_settlement,
-
-        p.status AS payment_status,
-        p.amount AS paid_amount,
+        b.created_at,
 
         pg.pg_name,
-        b.created_at
+
+        p.amount,
+        p.status AS payment_status,
+        p.order_id,
+        p.utr
 
       FROM bookings b
 
@@ -39,7 +41,7 @@ exports.getOwnerPayments = async (req, res) => {
 
   } catch (err) {
 
-    console.error(err);
+    console.error("OWNER PAYMENTS ERROR:", err);
 
     res.status(500).json({
       success: false,
