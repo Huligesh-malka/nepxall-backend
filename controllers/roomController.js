@@ -3,6 +3,7 @@ const db = require("../db");
 /* ===============================
    ADD ROOM
 ================================ */
+
 exports.addRoom = (req, res) => {
   const { pg_id, room_no, total_seats } = req.body;
 
@@ -13,53 +14,71 @@ exports.addRoom = (req, res) => {
     });
   }
 
-  db.query(
-    `INSERT INTO pg_rooms
-     (pg_id, room_no, total_seats, occupied_seats, status)
-     VALUES (?, ?, ?, 0, 'empty')`,
-    [pg_id, room_no, total_seats],
-    (err) => {
-      if (err) {
-        console.error("ADD ROOM ERROR:", err);
-        return res.status(500).json({
-          success: false,
-          message: "Room add failed",
-        });
-      }
+  const sql = `
+    INSERT INTO pg_rooms
+    (pg_id, room_no, total_seats, occupied_seats, status)
+    VALUES (?, ?, ?, 0, 'empty')
+  `;
 
-      res.json({
-        success: true,
-        message: "Room added successfully",
+  db.query(sql, [pg_id, room_no, total_seats], (err, result) => {
+    if (err) {
+      console.error("ADD ROOM ERROR:", err);
+
+      return res.status(500).json({
+        success: false,
+        message: "Room add failed",
       });
     }
-  );
+
+    res.json({
+      success: true,
+      message: "Room added successfully",
+      roomId: result.insertId,
+    });
+  });
 };
+
+
 
 /* ===============================
    GET ROOMS BY PG
 ================================ */
+
 exports.getRoomsByPG = (req, res) => {
 
   const pgId = req.params.pgId;
 
-  db.query(
-    "SELECT * FROM pg_rooms WHERE pg_id = ?",
-    [pgId],
-    (err, rows) => {
+  console.log("Fetching rooms for PG:", pgId);
 
-      if (err) {
-        console.error("GET ROOMS ERROR:", err);
-        return res.status(500).json({
-          success:false,
-          message:"DB error"
-        });
-      }
+  const sql = `
+    SELECT 
+      id,
+      pg_id,
+      room_no,
+      total_seats,
+      occupied_seats,
+      status
+    FROM pg_rooms
+    WHERE pg_id = ?
+    ORDER BY room_no ASC
+  `;
 
-      res.json({
-        success:true,
-        data:rows
+  db.query(sql, [pgId], (err, rows) => {
+
+    if (err) {
+      console.error("GET ROOMS ERROR:", err);
+
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
       });
-
     }
-  );
+
+    return res.json({
+      success: true,
+      data: rows || [],
+    });
+
+  });
+
 };
