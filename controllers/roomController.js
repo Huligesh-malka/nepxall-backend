@@ -1,64 +1,53 @@
 const db = require("../db");
 
+/* ================= GET ROOMS BY PG ================= */
+exports.getRoomsByPG = async (req, res) => {
+  const pgId = req.params.pgId;
+  console.log(`⏱️ DB START: Fetching rooms for PG ${pgId}`);
+
+  try {
+    // 1. Using a promise-based query with a timeout race
+    const [rows] = await db.query(
+      "SELECT * FROM pg_rooms WHERE pg_id = ? ORDER BY room_no ASC",
+      [pgId]
+    );
+
+    console.log(`✅ DB SUCCESS: Found ${rows.length} rooms`);
+    
+    return res.json({
+      success: true,
+      data: rows || []
+    });
+
+  } catch (err) {
+    console.error("❌ ROOMS FETCH ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Database error occurred",
+      error: err.message
+    });
+  }
+};
+
 /* ================= ADD ROOM ================= */
-
-exports.addRoom = (req, res) => {
-
+exports.addRoom = async (req, res) => {
   const { pg_id, room_no, total_seats } = req.body;
 
   if (!pg_id || !room_no || !total_seats) {
-    return res.status(400).json({
-      success: false,
-      message: "pg_id, room_no and total_seats are required"
-    });
+    return res.status(400).json({ success: false, message: "Missing required fields" });
   }
 
-  const sql = `
-    INSERT INTO pg_rooms
-    (pg_id, room_no, total_seats, occupied_seats, status)
-    VALUES (?, ?, ?, 0, 'empty')
-  `;
+  try {
+    const sql = `
+      INSERT INTO pg_rooms (pg_id, room_no, total_seats, occupied_seats, status)
+      VALUES (?, ?, ?, 0, 'empty')
+    `;
+    
+    await db.query(sql, [pg_id, room_no, total_seats]);
 
-  db.query(sql, [pg_id, room_no, total_seats], (err, result) => {
-
-    if (err) {
-      console.error("ADD ROOM ERROR:", err);
-      return res.status(500).json({
-        success: false,
-        message: "Room add failed"
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Room added successfully"
-    });
-
-  });
-
-};
-
-
-/* ================= GET ROOMS ================= */
-
-exports.getRoomsByPG = (req, res) => {
-  const pgId = req.params.pgId;
-
-  // 1. Log this to see if the request reaches the server immediately
-  console.log(`⏱️ Request received for PG: ${pgId} at ${new Date().toISOString()}`);
-
-  const sql = `SELECT * FROM pg_rooms WHERE pg_id = ? ORDER BY room_no ASC`;
-
-  db.query(sql, [pgId], (err, rows) => {
-    if (err) {
-      console.error("❌ DB ERROR:", err);
-      return res.status(500).json({ success: false, message: "Database error" });
-    }
-
-    console.log(`✅ Query finished. Found ${rows.length} rooms.`);
-    res.json({
-      success: true,
-      data: rows
-    });
-  });
+    return res.json({ success: true, message: "Room added successfully" });
+  } catch (err) {
+    console.error("❌ ADD ROOM ERROR:", err);
+    return res.status(500).json({ success: false, message: "Room add failed" });
+  }
 };
