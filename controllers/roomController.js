@@ -42,33 +42,23 @@ exports.addRoom = (req, res) => {
 /* ================= GET ROOMS ================= */
 
 exports.getRoomsByPG = (req, res) => {
-
   const pgId = req.params.pgId;
 
-  console.log("Fetching rooms for PG:", pgId);
+  // 1. Log this to see if the request reaches the server immediately
+  console.log(`⏱️ Request received for PG: ${pgId} at ${new Date().toISOString()}`);
 
-  const sql = `
-    SELECT *
-    FROM pg_rooms
-    WHERE pg_id = ?
-    ORDER BY room_no ASC
-  `;
+  const sql = `SELECT * FROM pg_rooms WHERE pg_id = ? ORDER BY room_no ASC`;
 
   db.query(sql, [pgId], (err, rows) => {
-
     if (err) {
-      console.error("DB ERROR:", err);
-      return res.status(500).json({
-        success: false,
-        message: "Database error"
-      });
+      console.error("❌ DB ERROR:", err);
+      return res.status(500).json({ success: false, message: "Database error" });
     }
 
+    console.log(`✅ Query finished. Found ${rows.length} rooms.`);
     res.json({
       success: true,
-      data: rows || []
+      data: rows
     });
-
   });
-
 };
