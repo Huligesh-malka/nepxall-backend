@@ -1,45 +1,18 @@
 const db = require("../db");
 
-/* ================= SAFE PARSE PHOTOS HELPER ================= */
-const safeParsePhotos = (value) => {
-  if (!value) return [];
-  if (Buffer.isBuffer(value)) value = value.toString("utf8");
-  if (Array.isArray(value)) return value;
-
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-/* ================= GET PG DATA FOR QR SCAN ================= */
-/* ================= GET PG DATA FOR QR SCAN ================= */
 exports.getPGScanData = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Updated query to match your provided table schema
     const [pgRows] = await db.query(
       `SELECT 
-        id,
-        pg_name,
-        area,
-        city,
-        deposit_amount,
-        maintenance_amount,
-        single_sharing,
-        double_sharing,
-        triple_sharing,
-        four_sharing,
-        single_room,
-        double_room,
-        food_available,
-        wifi_available,
-        ac_available
+        id, pg_name, area, city, 
+        rent_amount, deposit_amount, maintenance_amount,
+        single_sharing, double_sharing, triple_sharing, four_sharing,
+        single_room, double_room,
+        price_1bhk, price_2bhk, price_3bhk,
+        food_available, wifi_available, ac_available
       FROM pgs
       WHERE id = ? AND is_deleted = 0`,
       [id]
@@ -53,13 +26,7 @@ exports.getPGScanData = async (req, res) => {
 
     const [roomRows] = await db.query(
       `SELECT 
-        id,
-        room_no,
-        room_type,
-        total_seats,
-        occupied_seats,
-        rent,
-        deposit
+        id, room_no, room_type, total_seats, occupied_seats, rent, deposit
       FROM pg_rooms
       WHERE pg_id = ? AND status != 'full'
       ORDER BY rent ASC`,
@@ -70,19 +37,19 @@ exports.getPGScanData = async (req, res) => {
       id: room.id,
       room_number: room.room_no,
       sharing_type: room.room_type,
-      available_beds: room.total_seats - room.occupied_seats
+      available_beds: room.total_seats - room.occupied_seats,
+      price: room.rent // Added price per room
     }));
 
-    res.json({
-      success: true,
-      data: pg
-    });
+    res.json({ success: true, data: pg });
 
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+// ... keep other functions (trackQRScan, getScanStatistics) as they were
 /* ================= TRACK QR SCAN ================= */
 exports.trackQRScan = async (req, res) => {
   try {
