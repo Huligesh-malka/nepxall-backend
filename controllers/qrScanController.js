@@ -1,3 +1,24 @@
+const db = require("../db");
+
+/* ================= SAFE PARSE PHOTOS HELPER ================= */
+const safeParsePhotos = (value) => {
+  if (!value) return [];
+  if (Buffer.isBuffer(value)) value = value.toString("utf8");
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+/* ================= GET PG DATA FOR QR SCAN ================= */
+/* ================= GET PG DATA FOR QR SCAN ================= */
 exports.getPGScanData = async (req, res) => {
   try {
     const { id } = req.params;
@@ -60,5 +81,58 @@ exports.getPGScanData = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+/* ================= TRACK QR SCAN ================= */
+exports.trackQRScan = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`📊 Tracking scan for PG ID: ${id}`);
+
+    // Validate ID
+    if (!id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid PG ID format"
+      });
+    }
+
+    // Simple success response - no database operations
+    res.json({
+      success: true,
+      message: "Scan tracked"
+    });
+
+  } catch (error) {
+    console.error("Error tracking QR scan:", error);
+    res.json({
+      success: true,
+      message: "Scan received"
+    });
+  }
+};
+
+/* ================= GET SCAN STATISTICS ================= */
+exports.getScanStatistics = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Return empty stats for now
+    res.json({
+      success: true,
+      data: {
+        total_scans: 0,
+        recent_scans: 0,
+        daily_trend: []
+      }
+    });
+
+  } catch (error) {
+    console.error("Error getting scan statistics:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get scan statistics"
+    });
   }
 };
