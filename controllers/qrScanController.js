@@ -26,53 +26,73 @@ exports.getPGScanData = async (req, res) => {
     console.log(`🔍 QR Code scanned for PG ID: ${id}`);
 
     if (!id || isNaN(id)) {
-      return res.status(400).json({ success: false, message: "Invalid PG ID format" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid PG ID format"
+      });
     }
 
-    // 1. Fetch PG Details
+    // Fetch PG basic details
     const [pgRows] = await db.query(
-      `SELECT id, pg_name, pg_type, city, area, address, landmark, 
-              rent_amount, deposit_amount, photos, status, description
-       FROM pgs WHERE id = ? AND is_deleted = 0`,
+      `SELECT 
+        id,
+        pg_name,
+        pg_type,
+        area,
+        city,
+        landmark,
+        address,
+        rent_amount,
+        deposit_amount,
+        photos,
+        status,
+        description
+      FROM pgs
+      WHERE id = ? AND is_deleted = 0`,
       [id]
     );
 
     if (pgRows.length === 0) {
-      return res.status(404).json({ success: false, message: "Property not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Property not found"
+      });
     }
 
     const pg = pgRows[0];
+
+    // Parse photos
     pg.photos = safeParsePhotos(pg.photos);
 
-    // 2. Fetch ALL Available Rooms for this PG
-    // We only want rooms where status is 'empty' or 'partial'
+    // ✅ Create small location
+    pg.small_location = `${pg.area || ""}, ${pg.city || ""}`;
+
+    // Fetch available rooms
     const [roomRows] = await db.query(
       `SELECT room_no, room_type, total_seats, occupied_seats, rent, deposit
-       FROM pg_rooms 
+       FROM pg_rooms
        WHERE pg_id = ? AND status != 'full'
        ORDER BY rent ASC`,
       [id]
     );
 
-    // 3. Attach room data to the PG object
     pg.available_room_details = roomRows.map(room => ({
       room_number: room.room_no,
-      sharing_type: room.room_type, // e.g., 'Double Sharing', 'Single'
+      sharing_type: room.room_type,
       available_beds: room.total_seats - room.occupied_seats,
       price: room.rent,
       security_deposit: room.deposit
     }));
 
-    // Optional: Create a summary of sharing types
+    // Sharing summary
     const summary = {};
     roomRows.forEach(room => {
-        const type = room.room_type || "Standard";
-        if (!summary[type]) summary[type] = 0;
-        summary[type] += (room.total_seats - room.occupied_seats);
+      const type = room.room_type || "Standard";
+      if (!summary[type]) summary[type] = 0;
+      summary[type] += (room.total_seats - room.occupied_seats);
     });
-    pg.availability_summary = summary;
 
-    console.log(`✅ QR scan successful. Found ${roomRows.length} available rooms.`);
+    pg.availability_summary = summary;
 
     res.json({
       success: true,
@@ -81,7 +101,10 @@ exports.getPGScanData = async (req, res) => {
 
   } catch (error) {
     console.error("❌ QR SCAN ERROR:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
 /* ================= TRACK QR SCAN ================= */
