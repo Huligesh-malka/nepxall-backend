@@ -54,4 +54,11 @@ router.put(
   paymentController.rejectPayment
 );
 
+
+
+
+// Add these routes
+router.post("/submit-screenshot", upload.single("screenshot"), paymentController.submitPaymentWithScreenshot);
+router.get("/status/:bookingId", paymentController.getUserPaymentStatus);
+
 module.exports = router;
