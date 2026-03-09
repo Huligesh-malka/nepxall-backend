@@ -7,7 +7,7 @@ exports.getOwnerPayments = async (req, res) => {
     
     console.log("🔍 Fetching payments for owner ID:", ownerId);
 
-    // Fixed SQL query - removed the stray 'a'
+    // Fixed SQL query - ONLY show payments with status = 'paid' (admin approved)
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -16,7 +16,7 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_amount,
         b.owner_settlement,
         b.settlement_date,
-        b.status AS booking_status,  /* Fixed: removed the 'a' */
+        b.status AS booking_status,
         pg.pg_name,
         p.status AS payment_status,
         p.order_id,
@@ -25,13 +25,14 @@ exports.getOwnerPayments = async (req, res) => {
         p.utr
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
-      LEFT JOIN payments p ON b.id = p.booking_id
+      INNER JOIN payments p ON b.id = p.booking_id  /* Changed from LEFT JOIN to INNER JOIN */
       WHERE b.owner_id = ? 
       AND b.status IN ('confirmed', 'approved', 'agreement_ready')
-      ORDER BY b.created_at DESC
+      AND p.status = 'paid'  /* ONLY show admin-approved payments */
+      ORDER BY p.created_at DESC  /* Order by payment date, not booking date */
     `, [ownerId]);
 
-    console.log(`📊 Found ${rows.length} records for owner ${ownerId}`);
+    console.log(`📊 Found ${rows.length} approved payments for owner ${ownerId}`);
 
     res.json({
       success: true,
@@ -50,30 +51,34 @@ exports.getOwnerPayments = async (req, res) => {
   }
 };
 
-// Optional: Add summary endpoint
+// Updated summary endpoint - only count approved payments
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
 
     const [rows] = await db.query(`
       SELECT 
-        COUNT(DISTINCT b.id) as total_bookings,
+        COUNT(DISTINCT b.id) as total_approved_bookings,
         COUNT(DISTINCT CASE WHEN p.status = 'paid' THEN b.id END) as verified_payments,
-        COUNT(DISTINCT CASE WHEN p.status = 'submitted' THEN b.id END) as pending_approval,
-        COALESCE(SUM(CASE WHEN p.status = 'paid' THEN b.owner_amount ELSE 0 END), 0) as total_earned
+        COALESCE(SUM(CASE WHEN p.status = 'paid' THEN b.owner_amount ELSE 0 END), 0) as total_earned,
+        COUNT(DISTINCT CASE WHEN b.owner_settlement = 'PENDING' AND p.status = 'paid' THEN b.id END) as pending_settlements,
+        COUNT(DISTINCT CASE WHEN b.owner_settlement = 'DONE' AND p.status = 'paid' THEN b.id END) as completed_settlements
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
-      LEFT JOIN payments p ON b.id = p.booking_id
+      INNER JOIN payments p ON b.id = p.booking_id
       WHERE b.owner_id = ?
+      AND p.status = 'paid'  /* Only count approved payments */
+      AND b.status IN ('confirmed', 'approved', 'agreement_ready')
     `, [ownerId]);
 
     res.json({
       success: true,
-      data: rows[0] || {
-        total_bookings: 0,
-        verified_payments: 0,
-        pending_approval: 0,
-        total_earned: 0
+      data: {
+        total_bookings: rows[0]?.total_approved_bookings || 0,
+        verified_payments: rows[0]?.verified_payments || 0,
+        total_earned: rows[0]?.total_earned || 0,
+        pending_settlements: rows[0]?.pending_settlements || 0,
+        completed_settlements: rows[0]?.completed_settlements || 0
       }
     });
 
