@@ -294,3 +294,183 @@ exports.matchBankTransaction = async (req, res) => {
 
   }
 };
+
+
+
+
+//////////////////////////////////////////////////////
+// SUBMIT PAYMENT WITH SCREENSHOT (NEW)
+//////////////////////////////////////////////////////
+exports.submitPaymentWithScreenshot = async (req, res) => {
+  try {
+    const { orderId, utr } = req.body;
+    const screenshot = req.file;
+
+    console.log("📸 Submitting payment with screenshot:", { orderId, utr, screenshot: !!screenshot });
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId required"
+      });
+    }
+
+    if (!screenshot) {
+      return res.status(400).json({
+        success: false,
+        message: "Screenshot is required"
+      });
+    }
+
+    // Check if payment exists
+    const [rows] = await db.query(
+      "SELECT * FROM payments WHERE order_id=?",
+      [orderId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+    }
+
+    // Save screenshot path and update status to 'submitted'
+    const screenshotPath = screenshot.path;
+    
+    await db.query(
+      `UPDATE payments 
+       SET status='submitted', 
+           utr=?, 
+           screenshot=?, 
+           submitted_at=NOW() 
+       WHERE order_id=?`,
+      [utr || null, screenshotPath, orderId]
+    );
+
+    res.json({
+      success: true,
+      message: "Payment submitted successfully. Waiting for admin verification."
+    });
+
+  } catch (err) {
+    console.error("❌ SUBMIT PAYMENT ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to submit payment"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET USER PAYMENT STATUS (NEW)
+//////////////////////////////////////////////////////
+exports.getUserPaymentStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const [rows] = await db.query(
+      `SELECT status, order_id, utr, created_at, submitted_at 
+       FROM payments 
+       WHERE booking_id = ?
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        success: true,
+        data: null,
+        message: "No payment found"
+      });
+    }
+
+    res.json({
+      success: true,
+      data: rows[0]
+    });
+
+  } catch (err) {
+    console.error("❌ PAYMENT STATUS ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch payment status"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// VIEW PAYMENT SCREENSHOT (ADMIN ONLY - NEW)
+//////////////////////////////////////////////////////
+exports.viewPaymentScreenshot = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    const { orderId } = req.params;
+
+    const [rows] = await db.query(
+      "SELECT screenshot FROM payments WHERE order_id=?",
+      [orderId]
+    );
+
+    if (rows.length === 0 || !rows[0].screenshot) {
+      return res.status(404).json({
+        success: false,
+        message: "Screenshot not found"
+      });
+    }
+
+    // Send the image file
+    res.sendFile(path.resolve(rows[0].screenshot));
+
+  } catch (err) {
+    console.error("❌ VIEW SCREENSHOT ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to view screenshot"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// UPDATE EXISTING getAdminPayments to include screenshot
+//////////////////////////////////////////////////////
+// Replace your existing getAdminPayments with this updated version
+exports.getAdminPayments = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        p.order_id,
+        p.amount,
+        p.status,
+        p.created_at,
+        p.submitted_at,
+        p.booking_id,
+        p.utr,
+        p.screenshot,
+        b.name AS tenant_name,
+        b.phone,
+        b.owner_id,
+        pg.pg_name
+      FROM payments p
+      LEFT JOIN bookings b ON b.id = p.booking_id
+      LEFT JOIN pgs pg ON pg.id = b.pg_id
+      ORDER BY p.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load payments"
+    });
+  }
+};
