@@ -1,19 +1,19 @@
 const db = require("../db");
 
 ////////////////////////////////////////////////////////////
-// GET OWNER PAYMENTS - FIXED FOR YOUR SCHEMA
+// GET OWNER PAYMENTS - FIXED VERSION
 ////////////////////////////////////////////////////////////
 exports.getOwnerPayments = async (req, res) => {
   try {
-    // Get owner ID from authenticated user
-    const ownerId = req.user.id;
+    // IMPORTANT: Get owner ID from the authenticated user
+    const ownerId = req.user.id;  // This should be 211
     
     console.log("🔍 Fetching payments for owner ID:", ownerId);
 
-    // First, get all PGs owned by this owner using correct column names
+    // First, get all PGs owned by this owner
     const [ownerPgs] = await db.query(
-      "SELECT id, pg_name FROM pgs WHERE owner_id = ? AND status = 'active'",
-      [ownerId]
+      "SELECT id, pg_name FROM pgs WHERE owner_id = ?",
+      [ownerId]  // This will now use 211
     );
     
     console.log("🏠 Owner's PGs:", ownerPgs);
@@ -24,16 +24,11 @@ exports.getOwnerPayments = async (req, res) => {
         success: true,
         data: [],
         count: 0,
-        debug: { 
-          ownerId, 
-          message: "No PGs found for this owner",
-          pgCount: 0 
-        }
+        debug: { ownerId, message: "No PGs found" }
       });
     }
 
     // Get all bookings for these PGs with payment details
-    // Using correct column names from your schema
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -65,22 +60,12 @@ exports.getOwnerPayments = async (req, res) => {
 
     console.log(`📊 Found ${rows.length} records for owner ${ownerId}`);
 
-    // Log payment status breakdown
-    const statusCount = {
-      paid: rows.filter(r => r.payment_status === 'paid').length,
-      submitted: rows.filter(r => r.payment_status === 'submitted').length,
-      pending: rows.filter(r => r.payment_status === 'pending').length,
-      rejected: rows.filter(r => r.payment_status === 'rejected').length,
-      no_payment: rows.filter(r => !r.payment_status).length
-    };
-    console.log("📊 Payment status breakdown:", statusCount);
-
-    // Format the data for frontend
+    // Format the data
     const formattedData = rows.map(row => ({
       booking_id: row.booking_id,
-      tenant_name: row.tenant_name || "N/A",
-      phone: row.phone || "N/A",
-      pg_name: row.pg_name || "N/A",
+      tenant_name: row.tenant_name,
+      phone: row.phone,
+      pg_name: row.pg_name,
       amount: Number(row.owner_amount || row.payment_amount || 0),
       payment_status: row.payment_status || 'no_payment',
       owner_settlement: row.owner_settlement || 'PENDING',
@@ -101,29 +86,25 @@ exports.getOwnerPayments = async (req, res) => {
       debug: {
         ownerId: ownerId,
         pgCount: ownerPgs.length,
-        pgNames: ownerPgs.map(pg => pg.pg_name),
-        statusBreakdown: statusCount
+        pgNames: ownerPgs.map(pg => pg.pg_name)
       }
     });
 
   } catch (err) {
     console.error("❌ OWNER PAYMENTS ERROR:", err);
-    console.error("❌ Error stack:", err.stack);
     res.status(500).json({
       success: false,
       message: "Failed to load owner payments",
-      error: err.message,
-      stack: err.stack
+      error: err.message
     });
   }
 };
 
-////////////////////////////////////////////////////////////
-// GET SETTLEMENT SUMMARY - FIXED
-////////////////////////////////////////////////////////////
+
+
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
-    const ownerId = req.user.id;
+    const ownerId = req.user.id;  // FIXED: Use req.user.id
 
     console.log("📊 Fetching summary for owner:", ownerId);
 
@@ -142,21 +123,17 @@ exports.getOwnerSettlementSummary = async (req, res) => {
       WHERE pg.owner_id = ?
     `, [ownerId]);
 
-    const summary = {
-      total_bookings: Number(rows[0]?.total_bookings) || 0,
-      verified_payments: Number(rows[0]?.verified_payments) || 0,
-      pending_approval: Number(rows[0]?.pending_approval) || 0,
-      rejected_payments: Number(rows[0]?.rejected_payments) || 0,
-      total_earned: Number(rows[0]?.total_earned) || 0,
-      pending_settlement: Number(rows[0]?.pending_settlement) || 0,
-      completed_settlement: Number(rows[0]?.completed_settlement) || 0
-    };
-
-    console.log("📊 Summary result:", summary);
-
     res.json({
       success: true,
-      data: summary
+      data: rows[0] || {
+        total_bookings: 0,
+        verified_payments: 0,
+        pending_approval: 0,
+        rejected_payments: 0,
+        total_earned: 0,
+        pending_settlement: 0,
+        completed_settlement: 0
+      }
     });
 
   } catch (err) {
