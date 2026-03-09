@@ -3,8 +3,19 @@ const db = require("../db");
 exports.getOwnerPayments = async (req, res) => {
   try {
     const ownerId = req.user.id;
+    
+    console.log("Fetching payments for owner:", ownerId);
 
-    // Fixed query - removed the p.status = 'paid' condition temporarily to see all data
+    // First, let's check what bookings exist for this owner
+    const [bookings] = await db.query(`
+      SELECT b.id, b.status, b.owner_amount 
+      FROM bookings b 
+      WHERE b.owner_id = ?
+    `, [ownerId]);
+    
+    console.log("Owner bookings:", bookings);
+
+    // Now get payments with all details
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -16,6 +27,7 @@ exports.getOwnerPayments = async (req, res) => {
         b.status AS booking_status,
         b.created_at AS booking_date,
         pg.pg_name,
+        pg.id AS pg_id,
         p.id AS payment_id,
         p.status AS payment_status,
         p.order_id,
@@ -23,32 +35,19 @@ exports.getOwnerPayments = async (req, res) => {
         p.created_at AS payment_date,
         p.utr
       FROM bookings b
-      JOIN pgs pg ON pg.id = b.pg_id
+      INNER JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN payments p ON b.id = p.booking_id
       WHERE b.owner_id = ? 
-      AND b.status IN ('confirmed', 'approved', 'agreement_ready')
       ORDER BY COALESCE(p.created_at, b.created_at) DESC
     `, [ownerId]);
 
-    // Format the data
-    const formattedData = rows.map(row => ({
-      booking_id: row.booking_id,
-      tenant_name: row.tenant_name,
-      phone: row.phone,
-      pg_name: row.pg_name,
-      amount: row.owner_amount || row.payment_amount || 0,
-      payment_status: row.payment_status || 'no_payment',
-      owner_settlement: row.owner_settlement || 'PENDING',
-      settlement_date: row.settlement_date,
-      booking_date: row.booking_date,
-      payment_date: row.payment_date,
-      order_id: row.order_id
-    }));
+    console.log(`Found ${rows.length} records for owner ${ownerId}`);
+    console.log("First few records:", rows.slice(0, 3));
 
     res.json({
       success: true,
-      data: formattedData,
-      count: formattedData.length
+      data: rows,
+      count: rows.length
     });
 
   } catch (err) {
