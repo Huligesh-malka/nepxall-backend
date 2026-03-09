@@ -301,12 +301,20 @@ exports.matchBankTransaction = async (req, res) => {
 //////////////////////////////////////////////////////
 // SUBMIT PAYMENT WITH SCREENSHOT (NEW)
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// SUBMIT PAYMENT WITH SCREENSHOT (Cloudinary)
+//////////////////////////////////////////////////////
 exports.submitPaymentWithScreenshot = async (req, res) => {
   try {
     const { orderId, utr } = req.body;
-    const screenshot = req.file;
+    const file = req.file;
 
-    console.log("📸 Submitting payment with screenshot:", { orderId, utr, screenshot: !!screenshot });
+    console.log("📸 Submitting payment with screenshot:", { 
+      orderId, 
+      utr, 
+      fileExists: !!file,
+      fileUrl: file?.path // Cloudinary returns URL in path
+    });
 
     if (!orderId) {
       return res.status(400).json({
@@ -315,7 +323,7 @@ exports.submitPaymentWithScreenshot = async (req, res) => {
       });
     }
 
-    if (!screenshot) {
+    if (!file) {
       return res.status(400).json({
         success: false,
         message: "Screenshot is required"
@@ -335,29 +343,34 @@ exports.submitPaymentWithScreenshot = async (req, res) => {
       });
     }
 
-    // Save screenshot path and update status to 'submitted'
-    const screenshotPath = screenshot.path;
-    
+    // Get the Cloudinary URL (file.path contains the URL)
+    const screenshotUrl = file.path;
+
+    // Update payment with screenshot URL and status
     await db.query(
       `UPDATE payments 
        SET status='submitted', 
            utr=?, 
-           screenshot=?, 
+           screenshot=?,
            submitted_at=NOW() 
        WHERE order_id=?`,
-      [utr || null, screenshotPath, orderId]
+      [utr || null, screenshotUrl, orderId]
     );
+
+    console.log("✅ Payment submitted successfully. Screenshot URL:", screenshotUrl);
 
     res.json({
       success: true,
-      message: "Payment submitted successfully. Waiting for admin verification."
+      message: "Payment submitted successfully. Waiting for admin verification.",
+      screenshotUrl
     });
 
   } catch (err) {
     console.error("❌ SUBMIT PAYMENT ERROR:", err);
     res.status(500).json({
       success: false,
-      message: "Failed to submit payment"
+      message: "Failed to submit payment",
+      error: err.message
     });
   }
 };
@@ -439,6 +452,9 @@ exports.viewPaymentScreenshot = async (req, res) => {
 // UPDATE EXISTING getAdminPayments to include screenshot
 //////////////////////////////////////////////////////
 // Replace your existing getAdminPayments with this updated version
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (with screenshot URLs)
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -467,7 +483,7 @@ exports.getAdminPayments = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ ADMIN PAYMENTS ERROR:", err);
     res.status(500).json({
       success: false,
       message: "Failed to load payments"

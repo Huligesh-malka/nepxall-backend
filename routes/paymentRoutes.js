@@ -1,53 +1,58 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 
 const paymentController = require("../controllers/paymentController");
 const webhookController = require("../controllers/paymentWebhookController");
 const verifyFirebaseToken = require("../middlewares/auth");
 
 //////////////////////////////////////////////////////
-// MULTER CONFIGURATION FOR SCREENSHOT UPLOADS
+// CLOUDINARY CONFIGURATION (using your existing setup)
 //////////////////////////////////////////////////////
-
-// Ensure upload directory exists
-const uploadDir = "uploads/screenshots";
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configure storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `screenshot-${uniqueSuffix}${ext}`);
-  }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// File filter - only accept images
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
+//////////////////////////////////////////////////////
+// PAYMENT SCREENSHOT STORAGE
+//////////////////////////////////////////////////////
+const screenshotStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    const ext = file.mimetype.split("/")[1];
+    
+    return {
+      folder: "payment-screenshots",
+      public_id: `payment-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "image",
+      format: ext,
+      transformation: [
+        {
+          width: 800,
+          height: 600,
+          crop: "limit",
+          quality: "auto",
+          fetch_format: "auto",
+        },
+      ],
+    };
+  },
+});
 
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed (jpeg, jpg, png, gif, webp)"));
-  }
-};
-
-// Configure multer
-const upload = multer({
-  storage: storage,
+// Configure multer with Cloudinary storage
+const uploadScreenshot = multer({
+  storage: screenshotStorage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: fileFilter
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"), false);
+    }
+    cb(null, true);
+  },
 });
 
 //////////////////////////////////////////////////////
@@ -68,15 +73,15 @@ router.post(
   paymentController.confirmPayment
 );
 
-// NEW: Submit payment with screenshot
+// Submit payment with screenshot (using Cloudinary)
 router.post(
   "/submit-screenshot",
   verifyFirebaseToken,
-  upload.single("screenshot"),
+  uploadScreenshot.single("screenshot"),
   paymentController.submitPaymentWithScreenshot
 );
 
-// NEW: Get payment status for a booking
+// Get payment status for a booking
 router.get(
   "/status/:bookingId",
   verifyFirebaseToken,
@@ -119,13 +124,6 @@ router.put(
   "/admin/payments/:orderId/reject",
   verifyFirebaseToken,
   paymentController.rejectPayment
-);
-
-// NEW: View payment screenshot (admin only)
-router.get(
-  "/admin/screenshot/:orderId",
-  verifyFirebaseToken,
-  paymentController.viewPaymentScreenshot
 );
 
 module.exports = router;
