@@ -5,101 +5,48 @@ const db = require("../db");
 ////////////////////////////////////////////////////////////
 exports.getOwnerPayments = async (req, res) => {
   try {
-    // IMPORTANT: Get owner ID from the authenticated user
-    const ownerId = req.user.id;  // This should be 211
-    
-    console.log("🔍 Fetching payments for owner ID:", ownerId);
+    const ownerId = req.user.id;
+    console.log("🔍 Owner ID:", ownerId);
 
-    // First, get all PGs owned by this owner
-    const [ownerPgs] = await db.query(
-      "SELECT id, pg_name FROM pgs WHERE owner_id = ?",
-      [ownerId]  // This will now use 211
+    // Simple query first
+    const [pgs] = await db.query(
+      "SELECT id, name as pg_name FROM pgs WHERE owner_id = ?",
+      [ownerId]
     );
     
-    console.log("🏠 Owner's PGs:", ownerPgs);
+    console.log("🏠 PGs found:", pgs);
 
-    if (ownerPgs.length === 0) {
-      console.log("⚠️ No PGs found for this owner");
-      return res.json({
-        success: true,
-        data: [],
-        count: 0,
-        debug: { ownerId, message: "No PGs found" }
-      });
-    }
-
-    // Get all bookings for these PGs with payment details
-    const [rows] = await db.query(`
+    // Simple bookings query
+    const [bookings] = await db.query(`
       SELECT 
-        b.id AS booking_id,
-        b.name AS tenant_name,
+        b.id as booking_id,
+        b.name as tenant_name,
         b.phone,
         b.owner_amount,
-        b.owner_settlement,
-        b.settlement_date,
-        b.status AS booking_status,
-        b.created_at AS booking_date,
-        b.check_in_date,
-        b.duration,
-        b.room_type,
-        pg.pg_name,
-        pg.id AS pg_id,
-        p.id AS payment_id,
-        p.status AS payment_status,
-        p.order_id,
-        p.amount AS payment_amount,
-        p.created_at AS payment_date,
-        p.utr,
-        p.verified_by_admin
+        b.status as booking_status,
+        p.status as payment_status
       FROM bookings b
-      INNER JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN payments p ON b.id = p.booking_id
-      WHERE pg.owner_id = ? 
-      ORDER BY COALESCE(p.created_at, b.created_at) DESC
+      WHERE b.pg_id IN (SELECT id FROM pgs WHERE owner_id = ?)
     `, [ownerId]);
 
-    console.log(`📊 Found ${rows.length} records for owner ${ownerId}`);
-
-    // Format the data
-    const formattedData = rows.map(row => ({
-      booking_id: row.booking_id,
-      tenant_name: row.tenant_name,
-      phone: row.phone,
-      pg_name: row.pg_name,
-      amount: Number(row.owner_amount || row.payment_amount || 0),
-      payment_status: row.payment_status || 'no_payment',
-      owner_settlement: row.owner_settlement || 'PENDING',
-      settlement_date: row.settlement_date,
-      booking_date: row.booking_date,
-      payment_date: row.payment_date,
-      order_id: row.order_id,
-      check_in_date: row.check_in_date,
-      duration: row.duration,
-      room_type: row.room_type,
-      verified_by_admin: row.verified_by_admin
-    }));
+    console.log("📊 Bookings found:", bookings);
 
     res.json({
       success: true,
-      data: formattedData,
-      count: formattedData.length,
-      debug: {
-        ownerId: ownerId,
-        pgCount: ownerPgs.length,
-        pgNames: ownerPgs.map(pg => pg.pg_name)
-      }
+      data: bookings,
+      debug: { ownerId, pgCount: pgs.length }
     });
 
   } catch (err) {
-    console.error("❌ OWNER PAYMENTS ERROR:", err);
+    console.error("❌ ERROR:", err);
     res.status(500).json({
       success: false,
-      message: "Failed to load owner payments",
-      error: err.message
+      message: err.message,
+      stack: err.stack
     });
   }
 };
-
 
 
 exports.getOwnerSettlementSummary = async (req, res) => {
