@@ -5,26 +5,26 @@ const db = require("../db");
 ////////////////////////////////////////////////////////////
 exports.getOwnerPayments = async (req, res) => {
   try {
-    const ownerId = req.user.id;
+    // IMPORTANT: Get owner ID from the authenticated user
+    const ownerId = req.user.id;  // This should be 211
     
     console.log("🔍 Fetching payments for owner ID:", ownerId);
 
     // First, get all PGs owned by this owner
     const [ownerPgs] = await db.query(
-      "SELECT id FROM pgs WHERE owner_id = ?",
-      [ownerId]
+      "SELECT id, pg_name FROM pgs WHERE owner_id = ?",
+      [ownerId]  // This will now use 211
     );
     
-    const pgIds = ownerPgs.map(pg => pg.id);
-    console.log("🏠 Owner's PG IDs:", pgIds);
+    console.log("🏠 Owner's PGs:", ownerPgs);
 
-    if (pgIds.length === 0) {
+    if (ownerPgs.length === 0) {
       console.log("⚠️ No PGs found for this owner");
       return res.json({
         success: true,
         data: [],
         count: 0,
-        message: "No PGs found for this owner"
+        debug: { ownerId, message: "No PGs found" }
       });
     }
 
@@ -59,23 +59,13 @@ exports.getOwnerPayments = async (req, res) => {
     `, [ownerId]);
 
     console.log(`📊 Found ${rows.length} records for owner ${ownerId}`);
-    
-    // Log payment status breakdown
-    const statusCount = {
-      paid: rows.filter(r => r.payment_status === 'paid').length,
-      submitted: rows.filter(r => r.payment_status === 'submitted').length,
-      pending: rows.filter(r => r.payment_status === 'pending').length,
-      rejected: rows.filter(r => r.payment_status === 'rejected').length,
-      no_payment: rows.filter(r => !r.payment_status).length
-    };
-    console.log("📊 Payment status breakdown:", statusCount);
 
-    // Format the data for frontend
+    // Format the data
     const formattedData = rows.map(row => ({
       booking_id: row.booking_id,
-      tenant_name: row.tenant_name || "N/A",
-      phone: row.phone || "N/A",
-      pg_name: row.pg_name || "N/A",
+      tenant_name: row.tenant_name,
+      phone: row.phone,
+      pg_name: row.pg_name,
       amount: Number(row.owner_amount || row.payment_amount || 0),
       payment_status: row.payment_status || 'no_payment',
       owner_settlement: row.owner_settlement || 'PENDING',
@@ -95,8 +85,8 @@ exports.getOwnerPayments = async (req, res) => {
       count: formattedData.length,
       debug: {
         ownerId: ownerId,
-        pgCount: pgIds.length,
-        statusBreakdown: statusCount
+        pgCount: ownerPgs.length,
+        pgNames: ownerPgs.map(pg => pg.pg_name)
       }
     });
 
@@ -110,12 +100,11 @@ exports.getOwnerPayments = async (req, res) => {
   }
 };
 
-////////////////////////////////////////////////////////////
-// GET SETTLEMENT SUMMARY - FIXED VERSION
-////////////////////////////////////////////////////////////
+
+
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
-    const ownerId = req.user.id;
+    const ownerId = req.user.id;  // FIXED: Use req.user.id
 
     console.log("📊 Fetching summary for owner:", ownerId);
 
@@ -134,21 +123,17 @@ exports.getOwnerSettlementSummary = async (req, res) => {
       WHERE pg.owner_id = ?
     `, [ownerId]);
 
-    const summary = {
-      total_bookings: Number(rows[0]?.total_bookings) || 0,
-      verified_payments: Number(rows[0]?.verified_payments) || 0,
-      pending_approval: Number(rows[0]?.pending_approval) || 0,
-      rejected_payments: Number(rows[0]?.rejected_payments) || 0,
-      total_earned: Number(rows[0]?.total_earned) || 0,
-      pending_settlement: Number(rows[0]?.pending_settlement) || 0,
-      completed_settlement: Number(rows[0]?.completed_settlement) || 0
-    };
-
-    console.log("📊 Summary result:", summary);
-
     res.json({
       success: true,
-      data: summary
+      data: rows[0] || {
+        total_bookings: 0,
+        verified_payments: 0,
+        pending_approval: 0,
+        rejected_payments: 0,
+        total_earned: 0,
+        pending_settlement: 0,
+        completed_settlement: 0
+      }
     });
 
   } catch (err) {
@@ -157,66 +142,6 @@ exports.getOwnerSettlementSummary = async (req, res) => {
       success: false,
       message: "Failed to load summary",
       error: err.message
-    });
-  }
-};
-
-////////////////////////////////////////////////////////////
-// GET SINGLE PAYMENT DETAILS
-////////////////////////////////////////////////////////////
-exports.getOwnerPaymentDetails = async (req, res) => {
-  try {
-    const ownerId = req.user.id;
-    const { bookingId } = req.params;
-
-    const [rows] = await db.query(`
-      SELECT 
-        b.id AS booking_id,
-        b.name AS tenant_name,
-        b.phone,
-        b.email,
-        b.owner_amount,
-        b.owner_settlement,
-        b.settlement_date,
-        b.status AS booking_status,
-        b.created_at AS booking_date,
-        b.check_in_date,
-        b.duration,
-        b.room_type,
-        pg.pg_name,
-        pg.address,
-        pg.city,
-        pg.pincode,
-        p.id AS payment_id,
-        p.status AS payment_status,
-        p.order_id,
-        p.amount AS payment_amount,
-        p.created_at AS payment_date,
-        p.utr,
-        p.screenshot
-      FROM bookings b
-      INNER JOIN pgs pg ON pg.id = b.pg_id
-      LEFT JOIN payments p ON b.id = p.booking_id
-      WHERE pg.owner_id = ? AND b.id = ?
-    `, [ownerId, bookingId]);
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found or you don't have permission"
-      });
-    }
-
-    res.json({
-      success: true,
-      data: rows[0]
-    });
-
-  } catch (err) {
-    console.error("❌ PAYMENT DETAILS ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to load payment details"
     });
   }
 };
