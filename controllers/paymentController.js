@@ -297,12 +297,8 @@ exports.matchBankTransaction = async (req, res) => {
 
 
 
-
 //////////////////////////////////////////////////////
-// SUBMIT PAYMENT WITH SCREENSHOT (NEW)
-//////////////////////////////////////////////////////
-//////////////////////////////////////////////////////
-// SUBMIT PAYMENT WITH SCREENSHOT (Cloudinary)
+// SUBMIT PAYMENT WITH SCREENSHOT (Matches your table)
 //////////////////////////////////////////////////////
 exports.submitPaymentWithScreenshot = async (req, res) => {
   try {
@@ -313,7 +309,7 @@ exports.submitPaymentWithScreenshot = async (req, res) => {
       orderId, 
       utr, 
       fileExists: !!file,
-      fileUrl: file?.path // Cloudinary returns URL in path
+      fileUrl: file?.path
     });
 
     if (!orderId) {
@@ -343,10 +339,10 @@ exports.submitPaymentWithScreenshot = async (req, res) => {
       });
     }
 
-    // Get the Cloudinary URL (file.path contains the URL)
+    // Get the Cloudinary URL
     const screenshotUrl = file.path;
 
-    // Update payment with screenshot URL and status
+    // Update payment - ALL columns exist in your table now!
     await db.query(
       `UPDATE payments 
        SET status='submitted', 
@@ -449,11 +445,7 @@ exports.viewPaymentScreenshot = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// UPDATE EXISTING getAdminPayments to include screenshot
-//////////////////////////////////////////////////////
-// Replace your existing getAdminPayments with this updated version
-//////////////////////////////////////////////////////
-// GET ADMIN PAYMENTS (with screenshot URLs)
+// GET ADMIN PAYMENTS (UPDATED for your table)
 //////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
@@ -467,6 +459,7 @@ exports.getAdminPayments = async (req, res) => {
         p.booking_id,
         p.utr,
         p.screenshot,
+        p.verified_by_admin,
         b.name AS tenant_name,
         b.phone,
         b.owner_id,
