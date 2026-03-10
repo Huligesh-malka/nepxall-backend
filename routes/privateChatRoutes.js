@@ -4,28 +4,31 @@ const router = express.Router();
 const auth = require("../middlewares/auth");
 const privateChat = require("../controllers/privateChatController");
 
-/* AUTH + USER LOAD */
+/* 🔐 APPLY MIDDLEWARE ONCE */
 router.use(auth, privateChat.loadMe);
 
-/* CURRENT USER */
+/* 👤 CURRENT USER */
 router.get("/me", privateChat.getMe);
 
-/* CHAT LIST */
+/* 📃 CHAT LIST */
 router.get("/list", privateChat.getMyChatList);
 
-/* GET USER + PG */
-router.get("/user/:id/:pgId", privateChat.getUserById);
+/* 👤 GET OTHER USER */
+router.get("/user/:id", privateChat.getUserById);
 
-/* GET MESSAGES */
-router.get("/messages/:userId/:pgId", privateChat.getPrivateMessages);
+/* 💬 GET MESSAGES */
+router.get("/messages/:userId", privateChat.getPrivateMessages);
 
-/* SEND MESSAGE */
+/* 📤 SEND MESSAGE */
 router.post("/send", privateChat.sendPrivateMessage);
 
-/* UPDATE MESSAGE */
+/* ✏️ UPDATE MESSAGE */
 router.put("/message/:id", privateChat.updatePrivateMessage);
 
-/* DELETE MESSAGE */
+
 router.delete("/message/:id", privateChat.deletePrivateMessage);
+
+/* 🗑 PERMANENT DELETE MESSAGE */
+
 
 module.exports = router;
