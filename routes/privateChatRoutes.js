@@ -4,31 +4,44 @@ const router = express.Router();
 const auth = require("../middlewares/auth");
 const privateChat = require("../controllers/privateChatController");
 
-/* 🔐 APPLY MIDDLEWARE ONCE */
+/* 🔐 APPLY AUTH + LOAD USER */
 router.use(auth, privateChat.loadMe);
 
-/* 👤 CURRENT USER */
+/* =========================================================
+   👤 CURRENT USER
+========================================================= */
 router.get("/me", privateChat.getMe);
 
-/* 📃 CHAT LIST */
+/* =========================================================
+   📃 CHAT LIST
+========================================================= */
 router.get("/list", privateChat.getMyChatList);
 
-/* 👤 GET OTHER USER */
-router.get("/user/:id", privateChat.getUserById);
+/* =========================================================
+   👤 GET OTHER USER + PG INFO
+   NOW SUPPORTS pgId
+========================================================= */
+router.get("/user/:id/:pgId", privateChat.getUserById);
 
-/* 💬 GET MESSAGES */
-router.get("/messages/:userId", privateChat.getPrivateMessages);
+/* =========================================================
+   💬 GET PRIVATE MESSAGES
+   NOW SUPPORTS pgId
+========================================================= */
+router.get("/messages/:userId/:pgId", privateChat.getPrivateMessages);
 
-/* 📤 SEND MESSAGE */
+/* =========================================================
+   📤 SEND MESSAGE
+========================================================= */
 router.post("/send", privateChat.sendPrivateMessage);
 
-/* ✏️ UPDATE MESSAGE */
+/* =========================================================
+   ✏️ UPDATE MESSAGE
+========================================================= */
 router.put("/message/:id", privateChat.updatePrivateMessage);
 
-
+/* =========================================================
+   🗑 DELETE MESSAGE
+========================================================= */
 router.delete("/message/:id", privateChat.deletePrivateMessage);
-
-/* 🗑 PERMANENT DELETE MESSAGE */
-
 
 module.exports = router;
