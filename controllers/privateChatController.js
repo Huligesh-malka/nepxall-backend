@@ -202,50 +202,61 @@ res.status(500).json({message:"Server error"});
 /* =========================================================
    📥 GET PRIVATE MESSAGES (PG BASED)
 ========================================================= */
-exports.getPrivateMessages = async (req,res)=>{
-try{
+exports.getMyChatList = async (req, res) => {
+  try {
 
-const me = req.me;
-const otherId = Number(req.params.userId);
-const pgId = Number(req.params.pgId);
+    const me = req.me;
 
-const [rows] = await db.query(
+    const [rows] = await db.query(
 `
-SELECT *
+SELECT 
+u.id,
+u.name,
+u.firebase_uid,
+
+pm.message AS last_message,
+pm.created_at AS last_time,
+
+CASE 
+ WHEN pm.sender_id=? THEN 'me'
+ ELSE 'other'
+END AS last_sender
+
+FROM private_messages pm
+
+JOIN users u 
+ON u.id = CASE
+  WHEN pm.sender_id=? THEN pm.receiver_id
+  ELSE pm.sender_id
+END
+
+WHERE pm.id IN (
+
+SELECT MAX(id)
 FROM private_messages
+WHERE sender_id=? OR receiver_id=?
+GROUP BY 
+LEAST(sender_id,receiver_id),
+GREATEST(sender_id,receiver_id)
 
-WHERE
-(
- sender_id=? AND receiver_id=?
- OR
- sender_id=? AND receiver_id=?
 )
-AND pg_id=?
 
-ORDER BY created_at ASC
+ORDER BY last_time DESC
 `,
 [
-me.id,otherId,
-otherId,me.id,
-pgId
+me.id,
+me.id,
+me.id,
+me.id
 ]
-);
-
-await db.query(
-`
-UPDATE private_messages
-SET is_read=1
-WHERE sender_id=? AND receiver_id=? AND pg_id=?
-`,
-[otherId,me.id,pgId]
 );
 
 res.json(rows);
 
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+  } catch (err) {
+    console.error("Chat list error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
