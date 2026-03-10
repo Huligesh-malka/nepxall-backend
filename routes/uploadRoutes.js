@@ -5,40 +5,40 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("cloudinary").v2;
 const controller = require("../controllers/uploadController");
 
-// Configure Cloudinary storage for photos
+// Cloudinary storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: "pg-photos",
     allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
     transformation: [{ width: 1200, height: 800, crop: "limit" }],
-    public_id: (req, file) => {
-      // Generate unique filename with PG ID for better organization
-      const { pgId } = req.params;
-      return `pg-${pgId}-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    public_id: () => {
+      return `pg-photo-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     },
   },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-// Upload multiple photos for a specific PG
-router.post("/:pgId/upload-photos", upload.array("photos", 10), controller.uploadPGPhotos);
+/* ===============================
+   UPLOAD MULTIPLE PHOTOS
+================================ */
 
-// Get all photos for a PG
-router.get("/:pgId/photos", controller.getPGPhotos);
+router.post("/:id/upload-photos", upload.array("photos", 15), controller.uploadPGPhotos);
 
-// Delete a specific photo
-router.delete("/:pgId/photo", controller.deletePGPhoto);
+/* ===============================
+   GET PHOTOS
+================================ */
 
-// Reorder photos
-router.put("/:pgId/photos/order", controller.reorderPGPhotos);
+router.get("/:id/photos", controller.getPGPhotos);
 
-// Legacy single photo endpoints (keeping for backward compatibility)
-router.post("/:pgId/photo", upload.single("photo"), controller.uploadPGPhoto);
-router.get("/:pgId/photo", controller.getPGPhoto);
+/* ===============================
+   DELETE PHOTO
+================================ */
+
+router.delete("/:id/photo", controller.deletePGPhoto);
 
 module.exports = router;
