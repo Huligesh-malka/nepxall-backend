@@ -2,46 +2,20 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../middlewares/auth");
-const privateChat = require("../controllers/privateChatController");
+const chat = require("../controllers/privateChatController");
 
-/* 🔐 APPLY AUTH + LOAD USER */
-router.use(auth, privateChat.loadMe);
+router.use(auth, chat.loadMe);
 
-/* =========================================================
-   👤 CURRENT USER
-========================================================= */
-router.get("/me", privateChat.getMe);
+/* CURRENT USER */
+router.get("/me", chat.getMe);
 
-/* =========================================================
-   📃 CHAT LIST
-========================================================= */
-router.get("/list", privateChat.getMyChatList);
+/* CHAT LIST */
+router.get("/list", chat.getMyChatList);
 
-/* =========================================================
-   👤 GET OTHER USER + PG INFO
-   NOW SUPPORTS pgId
-========================================================= */
-router.get("/user/:id/:pgId", privateChat.getUserById);
+/* SEND MESSAGE */
+router.post("/send", chat.sendPrivateMessage);
 
-/* =========================================================
-   💬 GET PRIVATE MESSAGES
-   NOW SUPPORTS pgId
-========================================================= */
-router.get("/messages/:userId/:pgId", privateChat.getPrivateMessages);
-
-/* =========================================================
-   📤 SEND MESSAGE
-========================================================= */
-router.post("/send", privateChat.sendPrivateMessage);
-
-/* =========================================================
-   ✏️ UPDATE MESSAGE
-========================================================= */
-router.put("/message/:id", privateChat.updatePrivateMessage);
-
-/* =========================================================
-   🗑 DELETE MESSAGE
-========================================================= */
-router.delete("/message/:id", privateChat.deletePrivateMessage);
+/* DELETE MESSAGE */
+router.delete("/message/:id", chat.deletePrivateMessage);
 
 module.exports = router;
