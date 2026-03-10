@@ -61,7 +61,7 @@ exports.loadMe = async (req, res, next) => {
     if (!req.me) req.me = await getMe(req.user);
     next();
   } catch (err) {
-    console.error(err);
+    console.error("Load me error:", err);
     res.status(500).json({ message: "Auth error" });
   }
 };
@@ -91,7 +91,7 @@ exports.getMyChatList = async (req, res) => {
         (
           SELECT message 
           FROM private_messages 
-          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          WHERE ((sender_id = ? AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = ?))
           AND pg_id = p.id
           ORDER BY created_at DESC 
           LIMIT 1
@@ -99,7 +99,7 @@ exports.getMyChatList = async (req, res) => {
         (
           SELECT created_at 
           FROM private_messages 
-          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          WHERE ((sender_id = ? AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = ?))
           AND pg_id = p.id
           ORDER BY created_at DESC 
           LIMIT 1
@@ -115,7 +115,7 @@ exports.getMyChatList = async (req, res) => {
         (
           SELECT sender_id 
           FROM private_messages 
-          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          WHERE ((sender_id = ? AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = ?))
           AND pg_id = p.id
           ORDER BY created_at DESC 
           LIMIT 1
@@ -123,9 +123,9 @@ exports.getMyChatList = async (req, res) => {
       FROM users u
       JOIN bookings b ON (b.user_id = u.id OR b.owner_id = u.id)
       JOIN pgs p ON p.id = b.pg_id
-      WHERE b.user_id = ? OR b.owner_id = ?
+      WHERE (b.user_id = ? OR b.owner_id = ?)
       AND u.id != ?
-      AND b.status IN ('confirmed', 'active')
+      AND b.status IN ('confirmed', 'active', 'completed')
       ORDER BY last_time DESC
       `,
       [me.role, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id]
@@ -145,7 +145,7 @@ exports.getMyChatList = async (req, res) => {
 
     res.json(formattedRows);
   } catch (err) {
-    console.error(err);
+    console.error("Chat list error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -158,6 +158,8 @@ exports.getUserById = async (req, res) => {
     const me = req.me;
     const otherId = Number(req.params.id);
     const pgId = req.query.pgId ? Number(req.query.pgId) : null;
+
+    console.log("Getting user by ID:", { meId: me.id, otherId, pgId });
 
     let query = `
       SELECT 
@@ -179,18 +181,39 @@ exports.getUserById = async (req, res) => {
       params.push(pgId);
     }
     
-    query += ` AND (b.user_id = ? OR b.owner_id = ?) AND b.status IN ('confirmed', 'active') LIMIT 1`;
+    query += ` AND (b.user_id = ? OR b.owner_id = ?) AND b.status IN ('confirmed', 'active', 'completed') LIMIT 1`;
     params.push(me.id, me.id);
+
+    console.log("User query:", query, params);
 
     const [rows] = await db.query(query, params);
 
     if (!rows.length) {
-      return res.status(404).json({ message: "User not found or no active booking" });
+      // Try a more general query if the specific one fails
+      const [fallbackRows] = await db.query(
+        `
+        SELECT 
+          u.id,
+          u.name,
+          u.role,
+          NULL AS pg_id,
+          NULL AS pg_name
+        FROM users u
+        WHERE u.id = ?
+        `,
+        [otherId]
+      );
+
+      if (fallbackRows.length) {
+        return res.json(fallbackRows[0]);
+      }
+
+      return res.status(404).json({ message: "User not found" });
     }
 
     res.json(rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error("Get user by ID error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -203,6 +226,8 @@ exports.getPrivateMessages = async (req, res) => {
     const me = req.me;
     const otherId = Number(req.params.userId);
     const pgId = req.query.pgId ? Number(req.query.pgId) : null;
+
+    console.log("Getting messages:", { meId: me.id, otherId, pgId });
 
     let query = `
       SELECT *
@@ -222,6 +247,8 @@ exports.getPrivateMessages = async (req, res) => {
     }
     
     query += ` ORDER BY created_at ASC`;
+
+    console.log("Messages query:", query, params);
 
     const [rows] = await db.query(query, params);
 
@@ -243,7 +270,7 @@ exports.getPrivateMessages = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error(err);
+    console.error("Get messages error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -277,7 +304,7 @@ exports.sendPrivateMessage = async (req, res) => {
       status: "sent"
     });
   } catch (err) {
-    console.error(err);
+    console.error("Send message error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -296,7 +323,7 @@ exports.updatePrivateMessage = async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error("Update message error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -326,7 +353,7 @@ exports.deletePrivateMessage = async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error("Delete message error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

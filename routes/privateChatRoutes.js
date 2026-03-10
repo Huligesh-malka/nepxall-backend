@@ -13,11 +13,11 @@ router.get("/me", privateChat.getMe);
 /* CHAT LIST */
 router.get("/list", privateChat.getMyChatList);
 
-/* GET USER + PG */
-router.get("/user/:id", privateChat.getUserById); // Optional pgId as query param
+/* GET USER BY ID - supports both with and without pgId */
+router.get("/user/:id", privateChat.getUserById);
 
-/* GET MESSAGES */
-router.get("/messages/:userId", privateChat.getPrivateMessages); // Optional pgId as query param
+/* GET MESSAGES - supports both with and without pgId */
+router.get("/messages/:userId", privateChat.getPrivateMessages);
 
 /* SEND MESSAGE */
 router.post("/send", privateChat.sendPrivateMessage);
