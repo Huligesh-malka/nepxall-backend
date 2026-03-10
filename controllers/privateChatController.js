@@ -161,81 +161,46 @@ ORDER BY last_time DESC
 /* =========================================================
    👤 GET OTHER USER + PG NAME
 ========================================================= */
-/* =========================================================
-   👤 GET OTHER USER + PG NAME (FIXED VERSION)
-========================================================= */
 exports.getUserById = async (req, res) => {
   try {
     const me = req.me;
     const otherId = Number(req.params.id);
-    const contextId = req.query.contextId; // Add this to pass PG ID from frontend
 
-    let query;
-    let params;
+    const [rows] = await db.query(
+      `
+SELECT 
+  u.id,
 
-    if (me.role === 'tenant') {
-      // TENANT chatting with OWNER - need specific PG context
-      query = `
-        SELECT 
-          u.id,
-          p.pg_name AS name,  // Show PG name for owner
-          p.pg_name,
-          p.id AS property_id
-        FROM bookings b
-        JOIN pgs p ON p.id = b.pg_id
-        JOIN users u ON u.id = b.owner_id
-        WHERE b.user_id = ? 
-          AND b.owner_id = ?
-          ${contextId ? 'AND b.pg_id = ?' : ''}
-        ORDER BY b.created_at DESC
-        LIMIT 1
-      `;
-      
-      params = contextId 
-        ? [me.id, otherId, contextId]
-        : [me.id, otherId];
-        
-    } else {
-      // OWNER chatting with TENANT
-      query = `
-        SELECT 
-          u.id,
-          b.name AS name,  // Show tenant name from booking
-          p.pg_name
-        FROM bookings b
-        JOIN pgs p ON p.id = b.pg_id
-        JOIN users u ON u.id = b.user_id
-        WHERE b.owner_id = ? 
-          AND b.user_id = ?
-          ${contextId ? 'AND b.pg_id = ?' : ''}
-        ORDER BY b.created_at DESC
-        LIMIT 1
-      `;
-      
-      params = contextId 
-        ? [me.id, otherId, contextId]
-        : [me.id, otherId];
-    }
+  /* 🎯 ROLE BASED NAME */
+  CASE 
+    WHEN ? = 'tenant' THEN p.pg_name      -- tenant sees PG name
+    ELSE b.name                           -- owner sees tenant name
+  END AS name,
 
-    const [rows] = await db.query(query, params);
+  p.pg_name
 
-    if (!rows.length) {
+FROM bookings b
+JOIN pgs p ON p.id = b.pg_id
+JOIN users u 
+  ON (
+    (u.id = b.owner_id AND b.user_id = ?)
+    OR
+    (u.id = b.user_id AND b.owner_id = ?)
+  )
+
+WHERE u.id = ?
+LIMIT 1
+      `,
+      [me.role, me.id, me.id, otherId]
+    );
+
+    if (!rows.length)
       return res.status(404).json({ message: "User not found" });
-    }
 
-    // Add conversation context
-    const result = {
-      ...rows[0],
-      conversation_context: {
-        property_id: rows[0].property_id,
-        property_name: rows[0].pg_name
-      }
-    };
-
-    res.json(result);
+    res.json(rows[0]);
 
   } catch (err) {
-    console.error("getUserById error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
