@@ -4,7 +4,6 @@ const db = require("../db");
    🧠 GET OR CREATE MYSQL USER FROM FIREBASE
 ========================================================= */
 async function getMe(firebaseUser) {
-
   const uid = firebaseUser.uid || firebaseUser.firebaseUid;
   const name = firebaseUser.name || "User";
   const email = firebaseUser.email || null;
@@ -22,7 +21,7 @@ async function getMe(firebaseUser) {
   if (!uid) throw new Error("Firebase UID missing");
 
   let [rows] = await db.query(
-    "SELECT id,name,email,role FROM users WHERE firebase_uid=? LIMIT 1",
+    "SELECT id, name, email, role FROM users WHERE firebase_uid = ? LIMIT 1",
     [uid]
   );
 
@@ -30,13 +29,13 @@ async function getMe(firebaseUser) {
 
   if (phone_number) {
     [rows] = await db.query(
-      "SELECT id,name,email,role FROM users WHERE phone=? LIMIT 1",
+      "SELECT id, name, email, role FROM users WHERE phone = ? LIMIT 1",
       [phone_number]
     );
 
     if (rows.length) {
       await db.query(
-        "UPDATE users SET firebase_uid=? WHERE id=?",
+        "UPDATE users SET firebase_uid = ? WHERE id = ?",
         [uid, rows[0].id]
       );
       return rows[0];
@@ -44,8 +43,8 @@ async function getMe(firebaseUser) {
   }
 
   const [result] = await db.query(
-    `INSERT INTO users (firebase_uid,name,email,phone,role)
-     VALUES (?,?,?,?, 'tenant')`,
+    `INSERT INTO users (firebase_uid, name, email, phone, role)
+     VALUES (?, ?, ?, ?, 'tenant')`,
     [uid, name, email, phone_number]
   );
 
@@ -57,284 +56,277 @@ async function getMe(firebaseUser) {
 }
 
 /* ========================================================= */
-exports.loadMe = async (req,res,next)=>{
-  try{
-    if(!req.me) req.me = await getMe(req.user);
+exports.loadMe = async (req, res, next) => {
+  try {
+    if (!req.me) req.me = await getMe(req.user);
     next();
-  }catch(err){
+  } catch (err) {
     console.error(err);
-    res.status(500).json({message:"Auth error"});
+    res.status(500).json({ message: "Auth error" });
   }
 };
 
 /* ========================================================= */
-exports.getMe = (req,res)=> res.json(req.me);
+exports.getMe = (req, res) => res.json(req.me);
 
 /* =========================================================
    📃 CHAT LIST (PG BASED)
 ========================================================= */
-exports.getMyChatList = async (req,res)=>{
-  try{
-
+exports.getMyChatList = async (req, res) => {
+  try {
     const me = req.me;
 
     const [rows] = await db.query(
-`
-SELECT 
-u.id,
+      `
+      SELECT DISTINCT
+        u.id,
+        u.firebase_uid,
+        u.name as user_name,
+        p.id AS pg_id,
+        p.pg_name,
+        CASE
+          WHEN ? = 'owner' THEN u.name
+          ELSE p.pg_name
+        END AS display_name,
+        (
+          SELECT message 
+          FROM private_messages 
+          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          AND pg_id = p.id
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_message,
+        (
+          SELECT created_at 
+          FROM private_messages 
+          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          AND pg_id = p.id
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_time,
+        (
+          SELECT COUNT(*) 
+          FROM private_messages 
+          WHERE sender_id = u.id 
+          AND receiver_id = ? 
+          AND pg_id = p.id 
+          AND is_read = 0
+        ) AS unread_count,
+        (
+          SELECT sender_id 
+          FROM private_messages 
+          WHERE (sender_id = ? AND receiver_id = u.id OR sender_id = u.id AND receiver_id = ?)
+          AND pg_id = p.id
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_sender_id
+      FROM users u
+      JOIN bookings b ON (b.user_id = u.id OR b.owner_id = u.id)
+      JOIN pgs p ON p.id = b.pg_id
+      WHERE b.user_id = ? OR b.owner_id = ?
+      AND u.id != ?
+      AND b.status IN ('confirmed', 'active')
+      ORDER BY last_time DESC
+      `,
+      [me.role, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id, me.id]
+    );
 
-CASE
- WHEN ?='owner' THEN COALESCE(b.name,u.name,'User')
- ELSE p.pg_name
-END AS name,
+    const formattedRows = rows.map(row => ({
+      id: row.id,
+      firebase_uid: row.firebase_uid,
+      name: row.display_name,
+      pg_id: row.pg_id,
+      pg_name: row.pg_name,
+      last_message: row.last_message || "No messages yet",
+      last_time: row.last_time,
+      unread: row.unread_count || 0,
+      last_sender: row.last_sender_id === me.id ? "me" : "other"
+    }));
 
-p.pg_name,
-p.id AS pg_id,
-
-pm.message AS last_message,
-pm.created_at AS last_time,
-
-CASE
- WHEN pm.sender_id=? THEN 'me'
- ELSE 'other'
-END AS last_sender
-
-FROM private_messages pm
-
-JOIN users u 
- ON u.id = CASE
-  WHEN pm.sender_id=? THEN pm.receiver_id
-  ELSE pm.sender_id
- END
-
-JOIN bookings b
- ON (
-  (b.user_id=u.id AND b.owner_id=?)
-  OR
-  (b.owner_id=u.id AND b.user_id=?)
- )
-
-JOIN pgs p ON p.id=b.pg_id
-
-WHERE pm.id IN (
-
- SELECT MAX(id)
- FROM private_messages
- WHERE sender_id=? OR receiver_id=?
-
- GROUP BY 
- LEAST(sender_id,receiver_id),
- GREATEST(sender_id,receiver_id),
- pg_id
-
-)
-
-ORDER BY last_time DESC
-`,
-[
-me.role,
-me.id,
-me.id,
-me.id,
-me.id,
-me.id
-]
-);
-
-res.json(rows);
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json(formattedRows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
    👤 GET USER + PG INFO
 ========================================================= */
-exports.getUserById = async (req,res)=>{
-try{
+exports.getUserById = async (req, res) => {
+  try {
+    const me = req.me;
+    const otherId = Number(req.params.id);
+    const pgId = req.query.pgId ? Number(req.query.pgId) : null;
 
-const me = req.me;
-const otherId = Number(req.params.id);
-const pgId = Number(req.params.pgId);
+    let query = `
+      SELECT 
+        u.id,
+        u.name,
+        u.role,
+        p.id AS pg_id,
+        p.pg_name
+      FROM users u
+      JOIN bookings b ON (b.user_id = u.id OR b.owner_id = u.id)
+      JOIN pgs p ON p.id = b.pg_id
+      WHERE u.id = ?
+    `;
+    
+    const params = [otherId];
+    
+    if (pgId) {
+      query += ` AND p.id = ?`;
+      params.push(pgId);
+    }
+    
+    query += ` AND (b.user_id = ? OR b.owner_id = ?) AND b.status IN ('confirmed', 'active') LIMIT 1`;
+    params.push(me.id, me.id);
 
-const [rows] = await db.query(
-`
-SELECT 
-u.id,
+    const [rows] = await db.query(query, params);
 
-CASE
- WHEN ?='tenant' THEN p.pg_name
- ELSE b.name
-END AS name,
+    if (!rows.length) {
+      return res.status(404).json({ message: "User not found or no active booking" });
+    }
 
-p.pg_name,
-p.id AS pg_id
-
-FROM bookings b
-JOIN pgs p ON p.id=b.pg_id
-JOIN users u
-
-ON (
- (u.id=b.owner_id AND b.user_id=?)
- OR
- (u.id=b.user_id AND b.owner_id=?)
-)
-
-WHERE u.id=? AND p.id=?
-LIMIT 1
-`,
-[me.role,me.id,me.id,otherId,pgId]
-);
-
-if(!rows.length)
-return res.status(404).json({message:"User not found"});
-
-res.json(rows[0]);
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
    📥 GET PRIVATE MESSAGES (PG BASED)
 ========================================================= */
-exports.getPrivateMessages = async (req,res)=>{
-try{
+exports.getPrivateMessages = async (req, res) => {
+  try {
+    const me = req.me;
+    const otherId = Number(req.params.userId);
+    const pgId = req.query.pgId ? Number(req.query.pgId) : null;
 
-const me = req.me;
-const otherId = Number(req.params.userId);
-const pgId = Number(req.params.pgId);
+    let query = `
+      SELECT *
+      FROM private_messages
+      WHERE (
+        (sender_id = ? AND receiver_id = ?)
+        OR
+        (sender_id = ? AND receiver_id = ?)
+      )
+    `;
+    
+    const params = [me.id, otherId, otherId, me.id];
+    
+    if (pgId) {
+      query += ` AND pg_id = ?`;
+      params.push(pgId);
+    }
+    
+    query += ` ORDER BY created_at ASC`;
 
-const [rows] = await db.query(
-`
-SELECT *
-FROM private_messages
+    const [rows] = await db.query(query, params);
 
-WHERE
-(
- sender_id=? AND receiver_id=?
- OR
- sender_id=? AND receiver_id=?
-)
-AND pg_id=?
+    // Mark messages as read
+    let updateQuery = `
+      UPDATE private_messages
+      SET is_read = 1
+      WHERE sender_id = ? AND receiver_id = ?
+    `;
+    
+    const updateParams = [otherId, me.id];
+    
+    if (pgId) {
+      updateQuery += ` AND pg_id = ?`;
+      updateParams.push(pgId);
+    }
+    
+    await db.query(updateQuery, updateParams);
 
-ORDER BY created_at ASC
-`,
-[
-me.id,otherId,
-otherId,me.id,
-pgId
-]
-);
-
-await db.query(
-`
-UPDATE private_messages
-SET is_read=1
-WHERE sender_id=? AND receiver_id=? AND pg_id=?
-`,
-[otherId,me.id,pgId]
-);
-
-res.json(rows);
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
    📤 SEND MESSAGE
 ========================================================= */
-exports.sendPrivateMessage = async (req,res)=>{
-try{
+exports.sendPrivateMessage = async (req, res) => {
+  try {
+    const me = req.me;
+    const { receiver_id, message, pg_id } = req.body;
 
-const me = req.me;
-const {receiver_id,message,pg_id} = req.body;
+    if (!receiver_id || !message?.trim() || !pg_id) {
+      return res.status(400).json({ message: "Missing fields" });
+    }
 
-if(!receiver_id || !message?.trim() || !pg_id)
-return res.status(400).json({message:"Missing fields"});
+    const [result] = await db.query(
+      `INSERT INTO private_messages
+       (sender_id, receiver_id, pg_id, message, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [me.id, receiver_id, pg_id, message]
+    );
 
-const [result] = await db.query(
-`
-INSERT INTO private_messages
-(sender_id,receiver_id,pg_id,message,is_read)
-VALUES (?,?,?,?,0)
-`,
-[me.id,receiver_id,pg_id,message]
-);
+    const [newMessage] = await db.query(
+      `SELECT * FROM private_messages WHERE id = ?`,
+      [result.insertId]
+    );
 
-res.json({
-id:result.insertId,
-sender_id:me.id,
-receiver_id,
-pg_id,
-message,
-created_at:new Date(),
-status:"sent"
-});
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json({
+      ...newMessage[0],
+      status: "sent"
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
    ✏️ UPDATE MESSAGE
 ========================================================= */
-exports.updatePrivateMessage = async (req,res)=>{
-try{
+exports.updatePrivateMessage = async (req, res) => {
+  try {
+    const me = req.me;
 
-const me = req.me;
+    await db.query(
+      "UPDATE private_messages SET message = ?, updated_at = NOW() WHERE id = ? AND sender_id = ?",
+      [req.body.message, req.params.id, me.id]
+    );
 
-await db.query(
-"UPDATE private_messages SET message=? WHERE id=? AND sender_id=?",
-[req.body.message,req.params.id,me.id]
-);
-
-res.json({success:true});
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* =========================================================
    🗑 DELETE MESSAGE
 ========================================================= */
-exports.deletePrivateMessage = async (req,res)=>{
-try{
+exports.deletePrivateMessage = async (req, res) => {
+  try {
+    const me = req.me;
+    const messageId = req.params.id;
 
-const me = req.me;
-const messageId = req.params.id;
+    const [[msg]] = await db.query(
+      "SELECT sender_id, receiver_id FROM private_messages WHERE id = ?",
+      [messageId]
+    );
 
-const [[msg]] = await db.query(
-"SELECT sender_id,receiver_id FROM private_messages WHERE id=?",
-[messageId]
-);
+    if (!msg) {
+      return res.status(404).json({ message: "Message not found" });
+    }
 
-if(!msg)
-return res.status(404).json({message:"Message not found"});
+    if (msg.sender_id !== me.id && msg.receiver_id !== me.id) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
 
-if(msg.sender_id!==me.id && msg.receiver_id!==me.id)
-return res.status(403).json({message:"Not allowed"});
+    await db.query("DELETE FROM private_messages WHERE id = ?", [messageId]);
 
-await db.query(
-"DELETE FROM private_messages WHERE id=?",
-[messageId]
-);
-
-res.json({success:true});
-
-}catch(err){
-console.error(err);
-res.status(500).json({message:"Server error"});
-}
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };

@@ -14,10 +14,10 @@ router.get("/me", privateChat.getMe);
 router.get("/list", privateChat.getMyChatList);
 
 /* GET USER + PG */
-router.get("/user/:id/:pgId", privateChat.getUserById);
+router.get("/user/:id", privateChat.getUserById); // Optional pgId as query param
 
 /* GET MESSAGES */
-router.get("/messages/:userId/:pgId", privateChat.getPrivateMessages);
+router.get("/messages/:userId", privateChat.getPrivateMessages); // Optional pgId as query param
 
 /* SEND MESSAGE */
 router.post("/send", privateChat.sendPrivateMessage);

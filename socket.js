@@ -4,21 +4,21 @@ let io;
 const onlineUsers = new Map();
 
 /* =========================================================
-   PRIVATE ROOM HELPER (PG BASED)
+   🏠 ROOM HELPER
 ========================================================= */
-const getPrivateRoom = (a, b, pgId) => {
+const getPrivateRoom = (a, b) => {
   const ids = [String(a), String(b)].sort();
-  return `private_${ids[0]}_${ids[1]}_pg_${pgId}`;
+  return `private_${ids[0]}_${ids[1]}`;
 };
 
 /* =========================================================
-   INIT SOCKET SERVER
+   🚀 INIT SOCKET
 ========================================================= */
 const initSocket = (server) => {
 
   io = new Server(server, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => callback(null, true),
       credentials: true,
       methods: ["GET", "POST"],
     },
@@ -28,9 +28,7 @@ const initSocket = (server) => {
 
     console.log("🟢 Socket connected:", socket.id);
 
-    /* =========================================================
-       REGISTER USER
-    ========================================================= */
+    /* ================= REGISTER ================= */
     socket.on("register", (firebaseUid) => {
 
       if (!firebaseUid) return;
@@ -42,52 +40,34 @@ const initSocket = (server) => {
       onlineUsers.get(firebaseUid).add(socket.id);
       socket.firebaseUid = firebaseUid;
 
-      console.log("👤 Registered:", firebaseUid);
-
       io.emit("user_online", firebaseUid);
 
     });
 
     /* =========================================================
-       JOIN PRIVATE ROOM
+       💬 PRIVATE CHAT
     ========================================================= */
-    socket.on("join_private_room", ({ userA, userB, pg_id }) => {
 
-      if (!userA || !userB || !pg_id) return;
-
-      const room = getPrivateRoom(userA, userB, pg_id);
-
-      socket.join(room);
-
-      console.log("💬 Joined room:", room);
-
+    socket.on("join_private_room", ({ userA, userB }) => {
+      if (!userA || !userB) return;
+      socket.join(getPrivateRoom(userA, userB));
     });
 
-    socket.on("leave_private_room", ({ userA, userB, pg_id }) => {
-
-      if (!userA || !userB || !pg_id) return;
-
-      const room = getPrivateRoom(userA, userB, pg_id);
-
-      socket.leave(room);
-
-      console.log("🚪 Left room:", room);
-
+    socket.on("leave_private_room", ({ userA, userB }) => {
+      if (!userA || !userB) return;
+      socket.leave(getPrivateRoom(userA, userB));
     });
 
-    /* =========================================================
-       SEND PRIVATE MESSAGE
-    ========================================================= */
+    /* ================= SEND MESSAGE ================= */
     socket.on("send_private_message", (data) => {
 
       try {
 
-        if (!data?.sender_id || !data?.receiver_id || !data?.pg_id) return;
+        if (!data?.sender_id || !data?.receiver_id) return;
 
         const room = getPrivateRoom(
           data.sender_id,
-          data.receiver_id,
-          data.pg_id
+          data.receiver_id
         );
 
         const message = {
@@ -95,10 +75,10 @@ const initSocket = (server) => {
           created_at: data.created_at || new Date(),
         };
 
-        console.log("📨 Message →", room);
-
+        /* 📩 SEND TO RECEIVER */
         socket.to(room).emit("receive_private_message", message);
 
+        /* ✅ CONFIRM TO SENDER */
         socket.emit("message_sent_confirmation", {
           ...message,
           status: "delivered",
@@ -114,25 +94,28 @@ const initSocket = (server) => {
     });
 
     /* =========================================================
-       DELETE MESSAGE
+       🗑 DELETE MESSAGE
     ========================================================= */
     socket.on("delete_private_message", (data) => {
 
       try {
 
-        const { sender_id, receiver_id, messageId, pg_id } = data;
+        const { sender_id, receiver_id, messageId } = data;
 
-        if (!sender_id || !receiver_id || !messageId || !pg_id) return;
+        if (!sender_id || !receiver_id || !messageId) return;
 
-        const room = getPrivateRoom(sender_id, receiver_id, pg_id);
+        const room = getPrivateRoom(sender_id, receiver_id);
 
+        /* 🔥 REMOVE FOR RECEIVER */
         socket.to(room).emit("message_deleted", { messageId });
+
+        /* 🔥 REMOVE FOR SENDER OTHER TABS */
         socket.emit("message_deleted", { messageId });
 
         emitChatListUpdate(data.sender_firebase_uid);
         emitChatListUpdate(data.receiver_firebase_uid);
 
-        console.log("🗑 Message deleted:", messageId);
+        console.log("🗑 Message deleted →", room);
 
       } catch (err) {
         console.error("❌ Delete message error", err);
@@ -140,36 +123,30 @@ const initSocket = (server) => {
 
     });
 
-    /* =========================================================
-       TYPING EVENT
-    ========================================================= */
-    socket.on("typing", ({ userA, userB, pg_id, isTyping }) => {
+    /* ================= TYPING ================= */
+    socket.on("typing", ({ userA, userB, isTyping }) => {
 
-      const room = getPrivateRoom(userA, userB, pg_id);
-
-      socket.to(room).emit("user_typing", {
-        userId: userA,
-        isTyping,
-      });
+      socket
+        .to(getPrivateRoom(userA, userB))
+        .emit("user_typing", { userId: userA, isTyping });
 
     });
 
     /* =========================================================
-       READ RECEIPTS
+       🚦 READ RECEIPT
     ========================================================= */
-    socket.on("mark_messages_read", ({ userA, userB, pg_id }) => {
+    socket.on("mark_messages_read", ({ userA, userB, messageIds }) => {
 
-      const room = getPrivateRoom(userA, userB, pg_id);
+      const room = getPrivateRoom(userA, userB);
 
       io.to(room).emit("messages_read", {
         readerId: userA,
+        messageIds: messageIds || [],
       });
 
     });
 
-    /* =========================================================
-       DISCONNECT
-    ========================================================= */
+    /* ================= DISCONNECT ================= */
     socket.on("disconnect", () => {
 
       const uid = socket.firebaseUid;
@@ -182,7 +159,6 @@ const initSocket = (server) => {
           onlineUsers.delete(uid);
           io.emit("user_offline", uid);
         }
-
       }
 
       console.log("🔴 Disconnected:", socket.id);
@@ -195,7 +171,7 @@ const initSocket = (server) => {
 };
 
 /* =========================================================
-   EMIT CHAT LIST UPDATE
+   🎯 EMIT CHAT LIST UPDATE
 ========================================================= */
 const emitChatListUpdate = (firebaseUid) => {
 
@@ -211,16 +187,16 @@ const emitChatListUpdate = (firebaseUid) => {
 };
 
 /* =========================================================
-   HELPERS
+   🧠 HELPERS
 ========================================================= */
 
 const getIO = () => io;
 
-const isUserOnline = (uid) =>
-  onlineUsers.has(uid) && onlineUsers.get(uid).size > 0;
+const isUserOnline = (userId) =>
+  onlineUsers.has(userId) && onlineUsers.get(userId).size > 0;
 
-const getUserSockets = (uid) =>
-  onlineUsers.get(uid) || new Set();
+const getUserSockets = (userId) =>
+  onlineUsers.get(userId) || new Set();
 
 module.exports = {
   initSocket,
