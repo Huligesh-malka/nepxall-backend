@@ -1,5 +1,5 @@
 const db = require("../db");
-const cloudinary = require("cloudinary").v2;
+const { cloudinary } = require("../middleware/upload");
 
 /* ===============================
    UPLOAD MULTIPLE PG PHOTOS
@@ -8,12 +8,15 @@ exports.uploadPGPhotos = (req, res) => {
   const { pgId } = req.params;
   const { replaceFirst } = req.body; // Get the replaceFirst flag
 
+  console.log("📸 Upload request received:", { pgId, replaceFirst, fileCount: req.files?.length });
+
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ success: false, message: "No files uploaded" });
   }
 
   // Extract Cloudinary URLs from uploaded files
   const newPhotoUrls = req.files.map(file => file.path); // Cloudinary URL is in file.path
+  console.log("🆕 New photo URLs:", newPhotoUrls);
 
   // First, get existing photos from database
   db.query(
@@ -38,10 +41,15 @@ exports.uploadPGPhotos = (req, res) => {
         }
       }
 
+      console.log("📸 Existing photos:", existingPhotos);
+      console.log("🔄 Replace first:", replaceFirst);
+
       let updatedPhotos = [];
 
       // Check if replaceFirst is 'true' (form data sends strings)
       if (replaceFirst === 'true' && existingPhotos.length > 0) {
+        console.log("🔄 Replacing first image only");
+        
         // Replace first image with the first uploaded image
         // Keep the rest of the existing photos (except first)
         const remainingExisting = existingPhotos.slice(1);
@@ -54,21 +62,26 @@ exports.uploadPGPhotos = (req, res) => {
           ...newPhotoUrls.slice(1)  // Remaining new images appended
         ];
 
+        console.log("🔄 Updated photos after replace:", updatedPhotos);
+
         // Delete the old first image from Cloudinary (optional)
         if (existingPhotos.length > 0 && existingPhotos[0]) {
           const oldPhotoUrl = existingPhotos[0];
           // Extract public_id from Cloudinary URL
           const publicId = extractPublicIdFromUrl(oldPhotoUrl);
           if (publicId) {
+            console.log("🗑️ Deleting old first image from Cloudinary:", publicId);
             cloudinary.uploader.destroy(publicId, (err, result) => {
               if (err) console.error("Error deleting old photo from Cloudinary:", err);
-              else console.log("Old photo deleted from Cloudinary:", result);
+              else console.log("✅ Old photo deleted from Cloudinary:", result);
             });
           }
         }
       } else {
+        console.log("➕ Appending all new photos");
         // Normal behavior: append all new photos
         updatedPhotos = [...existingPhotos, ...newPhotoUrls];
+        console.log("➕ Updated photos after append:", updatedPhotos);
       }
 
       // Store as JSON in the database
@@ -80,6 +93,8 @@ exports.uploadPGPhotos = (req, res) => {
             console.error("Error updating photos:", err);
             return res.status(500).json({ success: false, message: "Failed to save photos" });
           }
+
+          console.log("✅ Photos saved successfully:", updatedPhotos);
 
           res.json({
             success: true,
@@ -120,6 +135,8 @@ exports.getPGPhotos = (req, res) => {
         }
       }
 
+      console.log("📸 Returning photos:", photos);
+
       res.json({
         success: true,
         photos: photos
@@ -134,6 +151,8 @@ exports.getPGPhotos = (req, res) => {
 exports.deletePGPhoto = (req, res) => {
   const { pgId } = req.params;
   const { photo } = req.body; // The Cloudinary URL or path
+
+  console.log("🗑️ Delete request:", { pgId, photo });
 
   if (!photo) {
     return res.status(400).json({ success: false, message: "Photo URL required" });
@@ -165,16 +184,18 @@ exports.deletePGPhoto = (req, res) => {
 
       // Filter out the deleted photo
       const updatedPhotos = photos.filter(p => p !== photo);
+      console.log("🗑️ Updated photos after delete:", updatedPhotos);
 
       // Try to delete the file from Cloudinary
       const publicId = extractPublicIdFromUrl(photo);
       if (publicId) {
+        console.log("🗑️ Deleting from Cloudinary:", publicId);
         cloudinary.uploader.destroy(publicId, (err, result) => {
           if (err) {
             console.error("Error deleting from Cloudinary:", err);
             // Continue even if Cloudinary delete fails
           } else {
-            console.log("Deleted from Cloudinary:", result);
+            console.log("✅ Deleted from Cloudinary:", result);
           }
         });
       }
@@ -207,6 +228,8 @@ exports.reorderPGPhotos = (req, res) => {
   const { pgId } = req.params;
   const { photos } = req.body;
 
+  console.log("🔄 Reorder request:", { pgId, photos });
+
   if (!photos || !Array.isArray(photos)) {
     return res.status(400).json({ success: false, message: "Invalid photos data" });
   }
@@ -219,6 +242,8 @@ exports.reorderPGPhotos = (req, res) => {
         console.error("Error reordering photos:", err);
         return res.status(500).json({ success: false, message: "Failed to reorder photos" });
       }
+
+      console.log("✅ Photos reordered successfully");
 
       res.json({
         success: true,
@@ -240,6 +265,7 @@ exports.uploadPGPhoto = (req, res) => {
   }
 
   const photoUrl = req.file.path; // Cloudinary URL
+  console.log("📸 Legacy single photo upload:", photoUrl);
 
   // For backward compatibility, also update the old photo column
   // and append to the photos array
@@ -316,10 +342,15 @@ function extractPublicIdFromUrl(url) {
   
   try {
     // Cloudinary URL format: https://res.cloudinary.com/cloud_name/image/upload/v1234567890/folder/public_id.jpg
-    const matches = url.match(/\/upload\/(?:v\d+\/)?(.+?)\.(jpg|jpeg|png|gif|webp)$/i);
+    // Or: https://res.cloudinary.com/cloud_name/image/upload/folder/public_id.jpg
+    const matches = url.match(/\/upload\/(?:v\d+\/)?(.+?)\.(jpg|jpeg|png|gif|webp|jfif|bmp)$/i);
     if (matches && matches[1]) {
-      return matches[1];
+      // Remove folder prefix if present
+      const publicId = matches[1];
+      console.log("✅ Extracted public_id:", publicId);
+      return publicId;
     }
+    console.log("❌ Could not extract public_id from URL:", url);
     return null;
   } catch (e) {
     console.error("Error extracting public_id:", e);
