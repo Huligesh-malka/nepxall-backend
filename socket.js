@@ -4,11 +4,11 @@ let io;
 const onlineUsers = new Map();
 
 /* =========================================================
-   🏠 ROOM HELPER
+   🏠 ROOM HELPER (UPDATED WITH PG ID)
 ========================================================= */
-const getPrivateRoom = (a, b) => {
+const getPrivateRoom = (a, b, pg_id) => {
   const ids = [String(a), String(b)].sort();
-  return `private_${ids[0]}_${ids[1]}`;
+  return `private_${ids[0]}_${ids[1]}_pg${pg_id}`;
 };
 
 /* =========================================================
@@ -45,30 +45,42 @@ const initSocket = (server) => {
     });
 
     /* =========================================================
-       💬 PRIVATE CHAT
+       💬 JOIN PRIVATE CHAT ROOM
     ========================================================= */
+    socket.on("join_private_room", ({ userA, userB, pg_id }) => {
 
-    socket.on("join_private_room", ({ userA, userB }) => {
-      if (!userA || !userB) return;
-      socket.join(getPrivateRoom(userA, userB));
+      if (!userA || !userB || !pg_id) return;
+
+      const room = getPrivateRoom(userA, userB, pg_id);
+
+      socket.join(room);
+
+      console.log("📥 Joined room:", room);
+
     });
 
-    socket.on("leave_private_room", ({ userA, userB }) => {
-      if (!userA || !userB) return;
-      socket.leave(getPrivateRoom(userA, userB));
+    socket.on("leave_private_room", ({ userA, userB, pg_id }) => {
+
+      if (!userA || !userB || !pg_id) return;
+
+      const room = getPrivateRoom(userA, userB, pg_id);
+
+      socket.leave(room);
+
     });
 
-    /* ================= SEND MESSAGE ================= */
+    /* =========================================================
+       📤 SEND PRIVATE MESSAGE
+    ========================================================= */
     socket.on("send_private_message", (data) => {
 
       try {
 
-        if (!data?.sender_id || !data?.receiver_id) return;
+        const { sender_id, receiver_id, pg_id } = data;
 
-        const room = getPrivateRoom(
-          data.sender_id,
-          data.receiver_id
-        );
+        if (!sender_id || !receiver_id || !pg_id) return;
+
+        const room = getPrivateRoom(sender_id, receiver_id, pg_id);
 
         const message = {
           ...data,
@@ -78,7 +90,7 @@ const initSocket = (server) => {
         /* 📩 SEND TO RECEIVER */
         socket.to(room).emit("receive_private_message", message);
 
-        /* ✅ CONFIRM TO SENDER */
+        /* ✅ CONFIRM DELIVERY */
         socket.emit("message_sent_confirmation", {
           ...message,
           status: "delivered",
@@ -88,7 +100,9 @@ const initSocket = (server) => {
         emitChatListUpdate(data.receiver_firebase_uid);
 
       } catch (err) {
+
         console.error("❌ Private message error", err);
+
       }
 
     });
@@ -100,16 +114,14 @@ const initSocket = (server) => {
 
       try {
 
-        const { sender_id, receiver_id, messageId } = data;
+        const { sender_id, receiver_id, pg_id, messageId } = data;
 
-        if (!sender_id || !receiver_id || !messageId) return;
+        if (!sender_id || !receiver_id || !pg_id || !messageId) return;
 
-        const room = getPrivateRoom(sender_id, receiver_id);
+        const room = getPrivateRoom(sender_id, receiver_id, pg_id);
 
-        /* 🔥 REMOVE FOR RECEIVER */
         socket.to(room).emit("message_deleted", { messageId });
 
-        /* 🔥 REMOVE FOR SENDER OTHER TABS */
         socket.emit("message_deleted", { messageId });
 
         emitChatListUpdate(data.sender_firebase_uid);
@@ -118,26 +130,32 @@ const initSocket = (server) => {
         console.log("🗑 Message deleted →", room);
 
       } catch (err) {
+
         console.error("❌ Delete message error", err);
+
       }
 
     });
 
-    /* ================= TYPING ================= */
-    socket.on("typing", ({ userA, userB, isTyping }) => {
+    /* =========================================================
+       ✍️ TYPING
+    ========================================================= */
+    socket.on("typing", ({ userA, userB, pg_id, isTyping }) => {
+
+      const room = getPrivateRoom(userA, userB, pg_id);
 
       socket
-        .to(getPrivateRoom(userA, userB))
+        .to(room)
         .emit("user_typing", { userId: userA, isTyping });
 
     });
 
     /* =========================================================
-       🚦 READ RECEIPT
+       👀 READ RECEIPT
     ========================================================= */
-    socket.on("mark_messages_read", ({ userA, userB, messageIds }) => {
+    socket.on("mark_messages_read", ({ userA, userB, pg_id, messageIds }) => {
 
-      const room = getPrivateRoom(userA, userB);
+      const room = getPrivateRoom(userA, userB, pg_id);
 
       io.to(room).emit("messages_read", {
         readerId: userA,
@@ -146,7 +164,9 @@ const initSocket = (server) => {
 
     });
 
-    /* ================= DISCONNECT ================= */
+    /* =========================================================
+       🔴 DISCONNECT
+    ========================================================= */
     socket.on("disconnect", () => {
 
       const uid = socket.firebaseUid;
@@ -156,9 +176,13 @@ const initSocket = (server) => {
         onlineUsers.get(uid).delete(socket.id);
 
         if (onlineUsers.get(uid).size === 0) {
+
           onlineUsers.delete(uid);
+
           io.emit("user_offline", uid);
+
         }
+
       }
 
       console.log("🔴 Disconnected:", socket.id);

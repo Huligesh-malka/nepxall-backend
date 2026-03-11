@@ -1,7 +1,7 @@
 const db = require("../db");
 
 /* =========================================================
-   🧠 GET OR CREATE MYSQL USER FROM FIREBASE (SAFE)
+   🧠 GET OR CREATE MYSQL USER FROM FIREBASE
 ========================================================= */
 async function getMe(firebaseUser) {
 
@@ -71,78 +71,62 @@ exports.loadMe = async (req, res, next) => {
 exports.getMe = (req, res) => res.json(req.me);
 
 /* =========================================================
-   📃 CHAT LIST (UNCHANGED)
+   📃 CHAT LIST (FIXED FOR MULTIPLE PG)
 ========================================================= */
 exports.getMyChatList = async (req, res) => {
   try {
+
     const me = req.me;
 
     const [rows] = await db.query(
-      `
-SELECT 
+`
+SELECT
   u.id,
-
-  /* 🎯 OWNER → booking.name | TENANT → pg_name */
-  CASE 
-    WHEN ? = 'owner' THEN COALESCE(b.name, u.name, 'User')
-    ELSE p.pg_name
-  END AS name,
-
   p.pg_name,
   u.firebase_uid,
 
   pm.message AS last_message,
   pm.created_at AS last_time,
 
-  CASE 
-    WHEN pm.sender_id=? THEN 'me' 
-    ELSE 'other' 
+  CASE
+    WHEN pm.sender_id=? THEN 'me'
+    ELSE 'other'
   END AS last_sender,
 
   (
     SELECT COUNT(*)
     FROM private_messages
     WHERE sender_id = u.id
-      AND receiver_id = ?
-      AND is_read = 0
+    AND receiver_id = ?
+    AND is_read = 0
+    AND pg_id = pm.pg_id
   ) AS unread
 
 FROM private_messages pm
 
-JOIN users u 
-  ON u.id = CASE 
-      WHEN pm.sender_id=? THEN pm.receiver_id 
-      ELSE pm.sender_id 
-    END
+JOIN users u
+ON u.id =
+CASE
+  WHEN pm.sender_id=? THEN pm.receiver_id
+  ELSE pm.sender_id
+END
 
-/* ✅ THIS PART FIXES DUPLICATE CHATS */
-JOIN (
-    SELECT user_id, owner_id, pg_id, MAX(name) AS name
-    FROM bookings
-    GROUP BY user_id, owner_id, pg_id
-) b
-ON (
-    (b.user_id = u.id AND b.owner_id = ?)
-    OR
-    (b.owner_id = u.id AND b.user_id = ?)
-)
-
-JOIN pgs p ON p.id = b.pg_id
+JOIN pgs p
+ON p.id = pm.pg_id
 
 WHERE pm.id IN (
   SELECT MAX(id)
   FROM private_messages
   WHERE sender_id=? OR receiver_id=?
-  GROUP BY LEAST(sender_id,receiver_id),
-           GREATEST(sender_id,receiver_id)
+  GROUP BY
+    LEAST(sender_id,receiver_id),
+    GREATEST(sender_id,receiver_id),
+    pg_id
 )
 
 ORDER BY last_time DESC
 `,
       [
-        me.role,
-        me.id,
-        me.id,
         me.id,
         me.id,
         me.id,
@@ -158,40 +142,30 @@ ORDER BY last_time DESC
     res.status(500).json({ message: "Server error" });
   }
 };
+
 /* =========================================================
-   👤 GET OTHER USER + PG NAME
+   👤 GET USER + PG NAME
 ========================================================= */
 exports.getUserById = async (req, res) => {
   try {
-    const me = req.me;
+
     const otherId = Number(req.params.id);
+    const pg_id = Number(req.query.pg_id);
 
     const [rows] = await db.query(
-      `
-SELECT 
-  u.id,
+`
+SELECT
+u.id,
+p.pg_name AS name,
+p.pg_name
 
-  /* 🎯 ROLE BASED NAME */
-  CASE 
-    WHEN ? = 'tenant' THEN p.pg_name      -- tenant sees PG name
-    ELSE b.name                           -- owner sees tenant name
-  END AS name,
+FROM users u
+JOIN pgs p ON p.id=?
 
-  p.pg_name
-
-FROM bookings b
-JOIN pgs p ON p.id = b.pg_id
-JOIN users u 
-  ON (
-    (u.id = b.owner_id AND b.user_id = ?)
-    OR
-    (u.id = b.user_id AND b.owner_id = ?)
-  )
-
-WHERE u.id = ?
+WHERE u.id=?
 LIMIT 1
-      `,
-      [me.role, me.id, me.id, otherId]
+`,
+      [pg_id, otherId]
     );
 
     if (!rows.length)
@@ -204,92 +178,102 @@ LIMIT 1
     res.status(500).json({ message: "Server error" });
   }
 };
+
 /* =========================================================
-   📥 GET MESSAGES + 🔒 ACCESS PROTECTION
+   📥 GET MESSAGES (FIXED FOR PG)
 ========================================================= */
 exports.getPrivateMessages = async (req, res) => {
+
   try {
+
     const me = req.me;
     const otherId = Number(req.params.userId);
-
-    /* 🔒 BOOKING RELATION CHECK */
-    const [access] = await db.query(
-      `
-      SELECT 1
-      FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
-      WHERE 
-      (b.user_id=? AND p.owner_id=?)
-      OR
-      (b.user_id=? AND p.owner_id=?)
-      LIMIT 1
-      `,
-      [me.id, otherId, otherId, me.id]
-    );
-
-    if (!access.length)
-      return res.status(403).json({ message: "Not allowed to chat" });
+    const pg_id = Number(req.query.pg_id);
 
     const [rows] = await db.query(
-      `
-      SELECT *
-      FROM private_messages
-      WHERE 
-        (sender_id=? AND receiver_id=?)
-        OR
-        (sender_id=? AND receiver_id=?)
-      ORDER BY created_at ASC
-      `,
-      [me.id, otherId, otherId, me.id]
+`
+SELECT *
+FROM private_messages
+WHERE
+(
+  sender_id=? AND receiver_id=?
+  OR
+  sender_id=? AND receiver_id=?
+)
+AND pg_id=?
+ORDER BY created_at ASC
+`,
+      [me.id, otherId, otherId, me.id, pg_id]
     );
 
     await db.query(
-      `UPDATE private_messages 
-       SET is_read = 1 
-       WHERE sender_id=? AND receiver_id=?`,
-      [otherId, me.id]
+`
+UPDATE private_messages
+SET is_read=1
+WHERE sender_id=? AND receiver_id=? AND pg_id=?
+`,
+      [otherId, me.id, pg_id]
     );
 
     res.json(rows);
 
-  } catch {
+  } catch (err) {
+
+    console.error(err);
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
 
-/* ========================================================= */
+/* =========================================================
+   📤 SEND MESSAGE (FIXED)
+========================================================= */
 exports.sendPrivateMessage = async (req, res) => {
-  try {
-    const me = req.me;
-    const { receiver_id, message } = req.body;
 
-    if (!receiver_id || !message?.trim())
+  try {
+
+    const me = req.me;
+    const { receiver_id, message, pg_id } = req.body;
+
+    if (!receiver_id || !message?.trim() || !pg_id)
       return res.status(400).json({ message: "Missing fields" });
 
     const [result] = await db.query(
-      `INSERT INTO private_messages 
-       (sender_id, receiver_id, message, is_read)
-       VALUES (?, ?, ?, 0)`,
-      [me.id, receiver_id, message]
+`
+INSERT INTO private_messages
+(pg_id, sender_id, receiver_id, message, is_read)
+VALUES (?, ?, ?, ?, 0)
+`,
+      [pg_id, me.id, receiver_id, message]
     );
 
     res.json({
       id: result.insertId,
       sender_id: me.id,
       receiver_id,
+      pg_id,
       message,
       created_at: new Date(),
       status: "sent",
     });
 
-  } catch {
+  } catch (err) {
+
+    console.error(err);
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
 
-/* ========================================================= */
+/* =========================================================
+   ✏️ UPDATE MESSAGE
+========================================================= */
 exports.updatePrivateMessage = async (req, res) => {
+
   try {
+
     const me = req.me;
 
     await db.query(
@@ -300,43 +284,50 @@ exports.updatePrivateMessage = async (req, res) => {
     res.json({ success: true });
 
   } catch {
+
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
 
-/* ========================================================= */
+/* =========================================================
+   🗑 DELETE MESSAGE
+========================================================= */
 exports.deletePrivateMessage = async (req, res) => {
+
   try {
+
     const me = req.me;
     const messageId = req.params.id;
 
-    /* 🔍 Check message belongs to this user */
     const [[msg]] = await db.query(
-      `SELECT sender_id, receiver_id 
-       FROM private_messages 
-       WHERE id=?`,
+`
+SELECT sender_id, receiver_id
+FROM private_messages
+WHERE id=?
+`,
       [messageId]
     );
 
-    if (!msg) {
+    if (!msg)
       return res.status(404).json({ message: "Message not found" });
-    }
 
-    /* ❌ Not your message */
-    if (msg.sender_id !== me.id && msg.receiver_id !== me.id) {
+    if (msg.sender_id !== me.id && msg.receiver_id !== me.id)
       return res.status(403).json({ message: "Not allowed" });
-    }
 
-    /* 🗑 PERMANENT DELETE */
     await db.query(
       `DELETE FROM private_messages WHERE id=?`,
       [messageId]
     );
 
-    res.json({ success: true, type: "permanent" });
+    res.json({ success: true });
 
   } catch (err) {
-    console.error("DELETE MESSAGE ERROR:", err);
+
+    console.error(err);
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
