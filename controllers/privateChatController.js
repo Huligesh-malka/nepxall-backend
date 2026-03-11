@@ -29,23 +29,26 @@ async function getMe(firebaseUser) {
   if (rows.length) return rows[0];
 
   if (phone_number) {
+
     [rows] = await db.query(
       "SELECT id, name, email, role FROM users WHERE phone=? LIMIT 1",
       [phone_number]
     );
 
     if (rows.length) {
+
       await db.query(
         "UPDATE users SET firebase_uid=? WHERE id=?",
         [uid, rows[0].id]
       );
+
       return rows[0];
     }
   }
 
   const [result] = await db.query(
-    `INSERT INTO users (firebase_uid, name, email, phone, role)
-     VALUES (?, ?, ?, ?, 'tenant')`,
+    `INSERT INTO users (firebase_uid,name,email,phone,role)
+     VALUES (?,?,?,?, 'tenant')`,
     [uid, name, email, phone_number]
   );
 
@@ -58,22 +61,31 @@ async function getMe(firebaseUser) {
 
 /* ========================================================= */
 exports.loadMe = async (req, res, next) => {
+
   try {
+
     if (!req.me) req.me = await getMe(req.user);
+
     next();
+
   } catch (err) {
+
     console.error("loadMe error:", err);
+
     res.status(500).json({ message: "Auth error" });
+
   }
+
 };
 
 /* ========================================================= */
 exports.getMe = (req, res) => res.json(req.me);
 
 /* =========================================================
-   📃 CHAT LIST (FIXED FOR MULTIPLE PG)
+   📃 CHAT LIST
 ========================================================= */
 exports.getMyChatList = async (req, res) => {
+
   try {
 
     const me = req.me;
@@ -82,6 +94,7 @@ exports.getMyChatList = async (req, res) => {
 `
 SELECT
   u.id,
+  pm.pg_id,
   p.pg_name,
   u.firebase_uid,
 
@@ -126,42 +139,45 @@ WHERE pm.id IN (
 
 ORDER BY last_time DESC
 `,
-      [
-        me.id,
-        me.id,
-        me.id,
-        me.id,
-        me.id
-      ]
+      [me.id, me.id, me.id, me.id, me.id]
     );
 
     res.json(rows);
 
   } catch (err) {
+
     console.error(err);
+
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
 
 /* =========================================================
-   👤 GET USER + PG NAME
+   👤 GET USER + PG
 ========================================================= */
 exports.getUserById = async (req, res) => {
+
   try {
 
     const otherId = Number(req.params.id);
     const pg_id = Number(req.query.pg_id);
 
+    if (!pg_id) {
+      return res.status(400).json({
+        message: "pg_id required"
+      });
+    }
+
     const [rows] = await db.query(
 `
 SELECT
-u.id,
-p.pg_name AS name,
-p.pg_name
-
+  u.id,
+  u.name,
+  p.pg_name
 FROM users u
 JOIN pgs p ON p.id=?
-
 WHERE u.id=?
 LIMIT 1
 `,
@@ -174,13 +190,17 @@ LIMIT 1
     res.json(rows[0]);
 
   } catch (err) {
+
     console.error(err);
+
     res.status(500).json({ message: "Server error" });
+
   }
+
 };
 
 /* =========================================================
-   📥 GET MESSAGES (FIXED FOR PG)
+   📥 GET MESSAGES
 ========================================================= */
 exports.getPrivateMessages = async (req, res) => {
 
@@ -189,6 +209,12 @@ exports.getPrivateMessages = async (req, res) => {
     const me = req.me;
     const otherId = Number(req.params.userId);
     const pg_id = Number(req.query.pg_id);
+
+    if (!pg_id) {
+      return res.status(400).json({
+        message: "pg_id required"
+      });
+    }
 
     const [rows] = await db.query(
 `
@@ -220,6 +246,7 @@ WHERE sender_id=? AND receiver_id=? AND pg_id=?
   } catch (err) {
 
     console.error(err);
+
     res.status(500).json({ message: "Server error" });
 
   }
@@ -227,23 +254,27 @@ WHERE sender_id=? AND receiver_id=? AND pg_id=?
 };
 
 /* =========================================================
-   📤 SEND MESSAGE (FIXED)
+   📤 SEND MESSAGE
 ========================================================= */
 exports.sendPrivateMessage = async (req, res) => {
 
   try {
 
     const me = req.me;
+
     const { receiver_id, message, pg_id } = req.body;
 
-    if (!receiver_id || !message?.trim() || !pg_id)
-      return res.status(400).json({ message: "Missing fields" });
+    if (!receiver_id || !message?.trim() || !pg_id) {
+      return res.status(400).json({
+        message: "Missing fields"
+      });
+    }
 
     const [result] = await db.query(
 `
 INSERT INTO private_messages
-(pg_id, sender_id, receiver_id, message, is_read)
-VALUES (?, ?, ?, ?, 0)
+(pg_id,sender_id,receiver_id,message,is_read)
+VALUES (?,?,?,?,0)
 `,
       [pg_id, me.id, receiver_id, message]
     );
@@ -255,12 +286,13 @@ VALUES (?, ?, ?, ?, 0)
       pg_id,
       message,
       created_at: new Date(),
-      status: "sent",
+      status: "sent"
     });
 
   } catch (err) {
 
     console.error(err);
+
     res.status(500).json({ message: "Server error" });
 
   }
@@ -303,7 +335,7 @@ exports.deletePrivateMessage = async (req, res) => {
 
     const [[msg]] = await db.query(
 `
-SELECT sender_id, receiver_id
+SELECT sender_id,receiver_id
 FROM private_messages
 WHERE id=?
 `,
@@ -326,6 +358,7 @@ WHERE id=?
   } catch (err) {
 
     console.error(err);
+
     res.status(500).json({ message: "Server error" });
 
   }
