@@ -94,6 +94,7 @@ exports.getMyChatList = async (req, res) => {
 `
 SELECT
   u.id,
+  u.name,
   pm.pg_id,
   p.pg_name,
   u.firebase_uid,
@@ -120,7 +121,7 @@ FROM private_messages pm
 JOIN users u
 ON u.id =
 CASE
-  WHEN pm.sender_id=? THEN pm.receiver_id
+  WHEN pm.sender_id = ? THEN pm.receiver_id
   ELSE pm.sender_id
 END
 
