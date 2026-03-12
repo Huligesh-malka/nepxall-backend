@@ -1,44 +1,34 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
 
+/* CONTROLLER */
 const agreementsFormController = require("../controllers/agreementsFormController");
 
-const storage = multer.diskStorage({
+/* CLOUDINARY UPLOAD MIDDLEWARE */
+const uploadAgreement = require("../middlewares/agreementUpload");
 
-destination: function (req, file, cb) {
-
-if (file.fieldname === "aadhaar_front" || file.fieldname === "aadhaar_back") {
-cb(null, "uploads/aadhaar/");
-}
-
-else if (file.fieldname === "pan_card") {
-cb(null, "uploads/pan/");
-}
-
-else if (file.fieldname === "signature") {
-cb(null, "uploads/signature/");
-}
-
-},
-
-filename: function (req, file, cb) {
-cb(null, Date.now() + "-" + file.originalname);
-}
-
-});
-
-const upload = multer({ storage });
+/* ================= SUBMIT AGREEMENT FORM ================= */
 
 router.post(
-"/submit",
-upload.fields([
-{ name: "aadhaar_front", maxCount: 1 },
-{ name: "aadhaar_back", maxCount: 1 },
-{ name: "pan_card", maxCount: 1 },
-{ name: "signature", maxCount: 1 }
-]),
-agreementsFormController.submitAgreementForm
+  "/submit",
+
+  uploadAgreement.fields([
+    { name: "aadhaar_front", maxCount: 1 },
+    { name: "aadhaar_back", maxCount: 1 },
+    { name: "pan_card", maxCount: 1 },
+    { name: "signature", maxCount: 1 }
+  ]),
+
+  agreementsFormController.submitAgreementForm
 );
+
+/* ================= TEST ROUTE ================= */
+
+router.get("/test", (req, res) => {
+  res.json({
+    success: true,
+    message: "Agreement form route working"
+  });
+});
 
 module.exports = router;
