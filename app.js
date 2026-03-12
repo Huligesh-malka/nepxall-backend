@@ -9,7 +9,7 @@ app.set("trust proxy", 1);
 
 /* ================= SECURITY ================= */
 app.use(helmet({
-  crossOriginResourcePolicy: false, // Allows images to be loaded from other domains
+  crossOriginResourcePolicy: false, // Essential for loading Cloudinary images in the frontend
 }));
 
 /* ================= LOGGER ================= */
@@ -19,7 +19,6 @@ app.use((req, res, next) => {
 });
 
 /* ================= BODY PARSER ================= */
-// Increased limits to handle multi-file uploads
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -28,7 +27,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "https://nepxall.vercel.app",
-  "https://nepxall-app.vercel.app", // Added based on your screenshot
+  "https://nepxall-app.vercel.app",
   "https://nepxall-frontend.vercel.app",
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL
@@ -36,26 +35,27 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
+    // Allow requests with no origin (like mobile apps or local scripts)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.some(domain => origin.startsWith(domain)) || origin.includes("vercel.app");
+    // Check if origin is in allowed list OR is a vercel.app subdomain
+    const isAllowed = allowedOrigins.includes(origin) || origin.endsWith(".vercel.app");
     
     if (isAllowed) {
       callback(null, true);
     } else {
       console.log("❌ Blocked by CORS:", origin);
-      callback(new Error("Not allowed by CORS"));
+      callback(null, false); // Send false instead of error to prevent server crash
     }
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
-// Handle preflight requests for all routes
+// Handle preflight requests for all routes explicitly
 app.options("*", cors(corsOptions));
 
 /* ================= SAFE ROUTE LOADER ================= */
@@ -64,10 +64,10 @@ const safeLoad = (path) => {
     const route = require(path);
     return route;
   } catch (err) {
-    console.error("❌ Failed to load:", path, err.message);
+    console.error(`❌ Failed to load route at ${path}:`, err.message);
     const dummyRouter = express.Router();
     dummyRouter.use((req, res) => {
-      res.status(500).json({ success: false, message: "Route not configured" });
+      res.status(500).json({ success: false, message: "This feature is temporarily unavailable." });
     });
     return dummyRouter;
   }
@@ -77,15 +77,16 @@ const safeLoad = (path) => {
 app.get("/", (req, res) => res.json({ success: true, message: "🚀 Nepxall Backend API Running" }));
 app.get("/api/health", (req, res) => res.json({ success: true, status: "healthy" }));
 
-// Core Routes
+// Feature Routes
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
+app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
 app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
-app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes")); // The form you are working on
+app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/kyc-movein", safeLoad("./routes/kycMoveinRoutes"));
-
-/* Add all your other app.use routes here following the pattern above... */
+app.use("/api/services", safeLoad("./routes/serviceRoutes"));
+app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
 /* ================= ERROR HANDLER ================= */
 app.use((err, req, res, next) => {
@@ -96,9 +97,13 @@ app.use((err, req, res, next) => {
   });
 });
 
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 5000;
 if (require.main === module) {
-  app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`✅ Allowed Origins:`, allowedOrigins);
+  });
 }
 
 module.exports = app;
