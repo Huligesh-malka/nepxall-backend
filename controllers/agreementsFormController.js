@@ -1,4 +1,5 @@
-const db = require("../database/db");
+const db = require("../db");
+
 
 exports.submitAgreementForm = (req, res) => {
   try {
