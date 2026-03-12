@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+require("dotenv").config();
 
 const app = express();
 
@@ -108,11 +109,7 @@ app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 console.log("\n📄 Loading Agreement Routes...");
 
 app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
-
-/* NEW AGREEMENT FORM ROUTE */
-
 app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
-
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 
@@ -139,6 +136,12 @@ app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 console.log("\n🛠️ Loading Service Routes...");
 
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
+
+/* ================= DIGILOCKER (NEW) ================= */
+
+console.log("\n🔐 Loading DigiLocker Routes...");
+
+app.use("/api/digilocker", safeLoad("./routes/digilockerRoutes"));
 
 /* ================= CHAT & SOCIAL ================= */
 
