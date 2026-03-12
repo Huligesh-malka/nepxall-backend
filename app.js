@@ -40,6 +40,7 @@ const corsOptions = {
     if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+
     console.log("❌ Blocked by CORS:", origin);
     return callback(null, true);
   },
@@ -60,13 +61,16 @@ const safeLoad = (path) => {
     return route;
   } catch (err) {
     console.error("❌ Failed to load:", path, err.message);
+
     const dummyRouter = express.Router();
+
     dummyRouter.use((req, res) => {
       res.status(500).json({
         success: false,
         message: `Route ${req.originalUrl} not properly configured`
       });
     });
+
     return dummyRouter;
   }
 };
@@ -98,33 +102,48 @@ app.use("/api/pg", safeLoad("./routes/pgRoutes"));
 app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
 app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
 app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
+
+/* ================= AGREEMENT ROUTES ================= */
+
+console.log("\n📄 Loading Agreement Routes...");
+
 app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
+
+/* NEW AGREEMENT FORM ROUTE */
+
+app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
+
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 
 /* ================= QR SCAN ROUTES ================= */
 
 console.log("\n📱 Loading QR Scan Routes...");
+
 app.use("/api/scan", safeLoad("./routes/qrScanRoutes"));
 
 /* ================= PAYMENT ROUTES ================= */
 
 console.log("\n💳 Loading Payment Routes...");
+
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 
 /* ================= MOVE-IN / KYC ================= */
 
 console.log("\n📋 Loading Move-in/KYC Routes...");
+
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
 
 /* ================= SERVICES ================= */
 
 console.log("\n🛠️ Loading Service Routes...");
+
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
 /* ================= CHAT & SOCIAL ================= */
 
 console.log("\n💬 Loading Chat & Social Routes...");
+
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
 app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
