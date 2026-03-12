@@ -1,10 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-/* CONTROLLER */
 const agreementsFormController = require("../controllers/agreementsFormController");
-
-/* CLOUDINARY UPLOAD MIDDLEWARE */
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= SUBMIT AGREEMENT FORM ================= */
