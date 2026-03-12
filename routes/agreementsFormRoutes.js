@@ -4,12 +4,13 @@ const agreementsFormController = require("../controllers/agreementsFormControlle
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= SUBMIT AGREEMENT FORM ================= */
+// uploadAgreement.fields handles the file parsing from Multi-part form data
 router.post(
   "/submit",
   uploadAgreement.fields([
     { name: "aadhaar_front", maxCount: 1 },
     { name: "aadhaar_back", maxCount: 1 },
-    { name: "pan_card", maxCount: 1 }, // Ensure this matches frontend key
+    { name: "pan_card", maxCount: 1 },
     { name: "signature", maxCount: 1 }
   ]),
   agreementsFormController.submitAgreementForm
