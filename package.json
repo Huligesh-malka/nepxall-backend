@@ -16,6 +16,7 @@
   "author": "Huligesh",
   "license": "ISC",
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.13.5",
     "cashfree-pg": "^5.1.0",
     "cloudinary": "^1.41.3",
@@ -30,6 +31,7 @@
     "mysql2": "^3.18.2",
     "pdfkit": "^0.17.2",
     "qrcode": "^1.5.4",
+    "redis": "^5.11.0",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
