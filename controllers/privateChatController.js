@@ -94,7 +94,9 @@ exports.getMyChatList = async (req, res) => {
 `
 SELECT
   u.id,
-  u.name,
+
+  COALESCE(b.name, u.name, u.phone) AS name,
+
   pm.pg_id,
   p.pg_name,
   u.firebase_uid,
@@ -127,6 +129,10 @@ END
 
 JOIN pgs p
 ON p.id = pm.pg_id
+
+LEFT JOIN bookings b
+ON b.user_id = u.id
+AND b.pg_id = pm.pg_id
 
 WHERE pm.id IN (
   SELECT MAX(id)
