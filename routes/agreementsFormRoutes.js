@@ -8,14 +8,12 @@ const uploadAgreement = require("../middlewares/agreementUpload");
 
 router.post(
   "/submit",
-
   uploadAgreement.fields([
     { name: "aadhaar_front", maxCount: 1 },
     { name: "aadhaar_back", maxCount: 1 },
     { name: "pan_card", maxCount: 1 },
     { name: "signature", maxCount: 1 }
   ]),
-
   agreementsFormController.submitAgreementForm
 );
 

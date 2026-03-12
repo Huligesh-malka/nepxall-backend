@@ -24,43 +24,53 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-/* ================= CORS ================= */
+/* ================= CORS CONFIG ================= */
 
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "https://nepxall.vercel.app",
   "https://nepxall-frontend.vercel.app",
-  process.env.CLIENT_URL,
-  process.env.FRONTEND_URL
-].filter(Boolean);
+  "https://nepxall-app.vercel.app"
+];
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
+  origin: function (origin, callback) {
+
+    // Allow mobile apps / Postman
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.includes("vercel.app")
+    ) {
       return callback(null, true);
     }
 
-    console.log("❌ Blocked by CORS:", origin);
-    return callback(null, true);
+    console.log("❌ CORS BLOCKED:", origin);
+
+    return callback(new Error("Not allowed by CORS"));
   },
+
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* ================= SAFE ROUTE LOADER ================= */
 
 const safeLoad = (path) => {
   try {
-    console.log(`📂 Attempting to load: ${path}`);
+    console.log(`📂 Loading route: ${path}`);
     const route = require(path);
-    console.log("✅ Successfully loaded:", path);
+    console.log(`✅ Loaded: ${path}`);
     return route;
   } catch (err) {
-    console.error("❌ Failed to load:", path, err.message);
+    console.error(`❌ Failed to load ${path}`, err.message);
 
     const dummyRouter = express.Router();
 
@@ -109,20 +119,22 @@ console.log("\n📄 Loading Agreement Routes...");
 
 app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
 
-/* NEW AGREEMENT FORM ROUTE */
+/* AGREEMENT FORM */
 
 app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
+
+/* ================= DEPOSIT / VACATE ================= */
 
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 
-/* ================= QR SCAN ROUTES ================= */
+/* ================= QR SCAN ================= */
 
 console.log("\n📱 Loading QR Scan Routes...");
 
 app.use("/api/scan", safeLoad("./routes/qrScanRoutes"));
 
-/* ================= PAYMENT ROUTES ================= */
+/* ================= PAYMENTS ================= */
 
 console.log("\n💳 Loading Payment Routes...");
 
@@ -140,9 +152,9 @@ console.log("\n🛠️ Loading Service Routes...");
 
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
 
-/* ================= CHAT & SOCIAL ================= */
+/* ================= CHAT ================= */
 
-console.log("\n💬 Loading Chat & Social Routes...");
+console.log("\n💬 Loading Chat Routes...");
 
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
@@ -159,7 +171,7 @@ app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 
-app.use("/api/owner/test", (req, res) => {
+app.get("/api/owner/test", (req, res) => {
   res.json({
     success: true,
     message: "Owner test endpoint working"
@@ -192,12 +204,14 @@ app.use((req, res) => {
 /* ================= ERROR HANDLER ================= */
 
 app.use((err, req, res, next) => {
+
   console.error("🔥 GLOBAL ERROR:", err);
 
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error"
   });
+
 });
 
 /* ================= START SERVER ================= */
@@ -205,9 +219,11 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 if (require.main === module) {
+
   app.listen(PORT, () => {
-    console.log("🚀 Server running on port", PORT);
+    console.log("🚀 Nepxall backend running on port", PORT);
   });
+
 }
 
 module.exports = app;
