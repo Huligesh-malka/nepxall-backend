@@ -4,82 +4,41 @@ const router = express.Router();
 const auth = require("../middlewares/auth");
 const privateChat = require("../controllers/privateChatController");
 
-/* =========================================================
-   🔐 APPLY AUTH + LOAD USER
-========================================================= */
+/* 🔐 APPLY AUTH + USER LOAD */
 router.use(auth, privateChat.loadMe);
 
-/* =========================================================
-   👤 CURRENT USER
-========================================================= */
+/* 👤 CURRENT USER */
 router.get("/me", privateChat.getMe);
 
-/* =========================================================
-   📃 CHAT LIST (FROM chat_rooms)
-========================================================= */
+/* 📃 CHAT LIST */
 router.get("/list", privateChat.getMyChatList);
 
-/*
-Example:
-GET /private-chat/list
-*/
-
-/* =========================================================
-   👤 GET OTHER USER + PG
-========================================================= */
+/* 👤 GET OTHER USER + PG */
 router.get("/user/:id", privateChat.getUserById);
-
-/*
-Example:
-GET /private-chat/user/214?pg_id=7
+/* example:
+   /user/214?pg_id=7
 */
 
-/* =========================================================
-   💬 GET MESSAGES (WITH PAGINATION)
-========================================================= */
+/* 💬 GET MESSAGES (IMPORTANT: PG ID REQUIRED) */
 router.get("/messages/:userId", privateChat.getPrivateMessages);
-
-/*
-Example:
-GET /private-chat/messages/214?pg_id=7&limit=50&before=200
+/* example:
+   /messages/214?pg_id=7
 */
 
-/* =========================================================
-   📤 SEND MESSAGE
-========================================================= */
+/* 📤 SEND MESSAGE */
 router.post("/send", privateChat.sendPrivateMessage);
-
-/*
-Body Example:
-
+/* body:
 {
-  "receiver_id": 214,
-  "pg_id": 7,
-  "message": "Hello"
+  receiver_id: 214,
+  pg_id: 7,
+  message: "Hello"
 }
 */
 
-/* =========================================================
-   ✏️ UPDATE MESSAGE
-========================================================= */
+/* ✏️ UPDATE MESSAGE */
 router.put("/message/:id", privateChat.updatePrivateMessage);
 
-/*
-Example:
-PUT /private-chat/message/99
-{
-  "message":"Edited text"
-}
-*/
-
-/* =========================================================
-   🗑 DELETE MESSAGE
-========================================================= */
+/* 🗑 DELETE MESSAGE */
 router.delete("/message/:id", privateChat.deletePrivateMessage);
-
-/*
-Example:
-DELETE /private-chat/message/99
-*/
 
 module.exports = router;
