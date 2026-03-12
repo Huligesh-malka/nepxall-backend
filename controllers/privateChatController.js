@@ -181,11 +181,21 @@ exports.getUserById = async (req, res) => {
 `
 SELECT
   u.id,
-  u.name,
+  COALESCE(
+    b.name,
+    (SELECT name FROM bookings 
+     WHERE owner_id = u.id 
+     LIMIT 1),
+    u.name,
+    u.phone
+  ) AS name,
   p.pg_name
 FROM users u
-JOIN pgs p ON p.id=?
-WHERE u.id=?
+JOIN pgs p ON p.id = ?
+LEFT JOIN bookings b
+  ON b.user_id = u.id
+  AND b.pg_id = p.id
+WHERE u.id = ?
 LIMIT 1
 `,
       [pg_id, otherId]
