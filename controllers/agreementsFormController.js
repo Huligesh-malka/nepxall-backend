@@ -1,7 +1,8 @@
 const db = require("../db");
 
 /* ======================================================
-   SUBMIT AGREEMENT FORM (SAVE CLOUDINARY URLS)
+   SUBMIT AGREEMENT FORM
+   Save Cloudinary URLs coming from frontend
 ====================================================== */
 
 exports.submitAgreementForm = async (req, res) => {
@@ -33,7 +34,7 @@ exports.submitAgreementForm = async (req, res) => {
       deposit,
       maintenance,
 
-      /* URLs coming from frontend */
+      /* Document URLs */
       aadhaar_front,
       aadhaar_back,
       pan_card,
@@ -41,10 +42,25 @@ exports.submitAgreementForm = async (req, res) => {
 
     } = req.body;
 
+    /* ================= VALIDATION ================= */
+
+    if (!full_name || !mobile) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Full name and mobile are required"
+      });
+
+    }
+
+    /* ================= BOOKING FIX ================= */
+
     const final_booking_id =
       booking_id && booking_id !== "undefined"
         ? parseInt(booking_id)
         : null;
+
+    /* ================= LOG FILE URLS ================= */
 
     console.log("📄 Received document URLs:", {
       aadhaar_front,
@@ -53,7 +69,7 @@ exports.submitAgreementForm = async (req, res) => {
       signature
     });
 
-    /* ================= DATABASE INSERT ================= */
+    /* ================= DATABASE QUERY ================= */
 
     const sql = `
       INSERT INTO agreements_form (
@@ -114,11 +130,13 @@ exports.submitAgreementForm = async (req, res) => {
       signature || null
     ];
 
+    /* ================= INSERT DATA ================= */
+
     db.query(sql, values, (err, result) => {
 
       if (err) {
 
-        console.error("❌ SQL ERROR:", err.sqlMessage || err);
+        console.error("❌ SQL ERROR:", err);
 
         return res.status(500).json({
           success: false,
@@ -127,6 +145,8 @@ exports.submitAgreementForm = async (req, res) => {
         });
 
       }
+
+      console.log("✅ Agreement saved with ID:", result.insertId);
 
       res.status(200).json({
         success: true,
@@ -142,7 +162,7 @@ exports.submitAgreementForm = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Server crash prevented."
+      message: "Server error"
     });
 
   }
