@@ -1,13 +1,10 @@
 const express = require("express");
 const router = express.Router();
-
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
-/* ===================================================
-   SUBMIT AGREEMENT FORM
-=================================================== */
-
+/* ================= SUBMIT AGREEMENT FORM ================= */
+// uploadAgreement.fields handles the file parsing from Multi-part form data
 router.post(
   "/submit",
   uploadAgreement.fields([
@@ -16,38 +13,12 @@ router.post(
     { name: "pan_card", maxCount: 1 },
     { name: "signature", maxCount: 1 }
   ]),
-  async (req, res) => {
-    try {
-
-      console.log("📥 Agreement submission received");
-      console.log("BODY:", req.body);
-      console.log("FILES:", req.files);
-
-      await agreementsFormController.submitAgreementForm(req, res);
-
-    } catch (error) {
-
-      console.error("❌ Agreement route error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Agreement form route failed",
-        error: error.message
-      });
-
-    }
-  }
+  agreementsFormController.submitAgreementForm
 );
 
-/* ===================================================
-   TEST ROUTE
-=================================================== */
-
+/* ================= TEST ROUTE ================= */
 router.get("/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "Agreement form route working"
-  });
+  res.json({ success: true, message: "Agreement form route working" });
 });
 
 module.exports = router;
