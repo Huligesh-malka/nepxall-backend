@@ -132,37 +132,36 @@ exports.submitAgreementForm = async (req, res) => {
 
     /* ================= INSERT DATA ================= */
 
-    db.query(sql, values, (err, result) => {
+    const result = await new Promise((resolve, reject) => {
 
-      if (err) {
+      db.query(sql, values, (err, result) => {
 
-        console.error("❌ SQL ERROR:", err);
+        if (err) {
+          return reject(err);
+        }
 
-        return res.status(500).json({
-          success: false,
-          message: "Database error",
-          details: err.sqlMessage
-        });
+        resolve(result);
 
-      }
-
-      console.log("✅ Agreement saved with ID:", result.insertId);
-
-      res.status(200).json({
-        success: true,
-        message: "Agreement submitted successfully",
-        agreement_id: result.insertId
       });
 
+    });
+
+    console.log("✅ Agreement saved with ID:", result.insertId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Agreement submitted successfully",
+      agreement_id: result.insertId
     });
 
   } catch (error) {
 
     console.error("❌ CRITICAL ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Server error",
+      error: error.message
     });
 
   }
