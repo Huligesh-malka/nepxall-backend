@@ -2,7 +2,6 @@ const db = require("../db");
 
 /* ======================================================
    SUBMIT AGREEMENT FORM
-   Save Cloudinary URLs coming from frontend
 ====================================================== */
 
 exports.submitAgreementForm = async (req, res) => {
@@ -33,34 +32,23 @@ exports.submitAgreementForm = async (req, res) => {
       rent,
       deposit,
       maintenance,
-
-      /* Document URLs */
       aadhaar_front,
       aadhaar_back,
       pan_card,
       signature
-
     } = req.body;
 
-    /* ================= VALIDATION ================= */
-
     if (!full_name || !mobile) {
-
       return res.status(400).json({
         success: false,
-        message: "Full name and mobile are required"
+        message: "Full name and mobile required"
       });
-
     }
-
-    /* ================= BOOKING FIX ================= */
 
     const final_booking_id =
       booking_id && booking_id !== "undefined"
         ? parseInt(booking_id)
         : null;
-
-    /* ================= LOG FILE URLS ================= */
 
     console.log("📄 Received document URLs:", {
       aadhaar_front,
@@ -68,8 +56,6 @@ exports.submitAgreementForm = async (req, res) => {
       pan_card,
       signature
     });
-
-    /* ================= DATABASE QUERY ================= */
 
     const sql = `
       INSERT INTO agreements_form (
@@ -130,28 +116,28 @@ exports.submitAgreementForm = async (req, res) => {
       signature || null
     ];
 
-    /* ================= INSERT DATA ================= */
+    db.query(sql, values, (err, result) => {
 
-    const result = await new Promise((resolve, reject) => {
+      if (err) {
 
-      db.query(sql, values, (err, result) => {
+        console.error("❌ SQL ERROR:", err);
 
-        if (err) {
-          return reject(err);
-        }
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.sqlMessage
+        });
 
-        resolve(result);
+      }
 
+      console.log("✅ Agreement saved with ID:", result.insertId);
+
+      return res.status(200).json({
+        success: true,
+        message: "Agreement submitted successfully",
+        agreement_id: result.insertId
       });
 
-    });
-
-    console.log("✅ Agreement saved with ID:", result.insertId);
-
-    return res.status(200).json({
-      success: true,
-      message: "Agreement submitted successfully",
-      agreement_id: result.insertId
     });
 
   } catch (error) {
