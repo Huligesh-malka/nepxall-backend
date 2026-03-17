@@ -1,15 +1,13 @@
 const db = require("../db");
 
 /* ======================================================
-   SUBMIT AGREEMENT FORM
+   SUBMIT AGREEMENT FORM (FIXED)
 ====================================================== */
 
-exports.submitAgreementForm = async (req, res) => {
-
+exports.submitAgreementForm = async (req) => {
   console.log("📥 --- New Agreement Submission ---");
 
   try {
-
     const {
       user_id,
       booking_id,
@@ -38,11 +36,9 @@ exports.submitAgreementForm = async (req, res) => {
       signature
     } = req.body;
 
+    // ✅ Validation
     if (!full_name || !mobile) {
-      return res.status(400).json({
-        success: false,
-        message: "Full name and mobile required"
-      });
+      throw new Error("Full name and mobile required");
     }
 
     const final_booking_id =
@@ -116,40 +112,25 @@ exports.submitAgreementForm = async (req, res) => {
       signature || null
     ];
 
-    db.query(sql, values, (err, result) => {
-
-      if (err) {
-
-        console.error("❌ SQL ERROR:", err);
-
-        return res.status(500).json({
-          success: false,
-          message: "Database error",
-          error: err.sqlMessage
-        });
-
-      }
-
-      console.log("✅ Agreement saved with ID:", result.insertId);
-
-      return res.status(200).json({
-        success: true,
-        message: "Agreement submitted successfully",
-        agreement_id: result.insertId
+    // ✅ Convert DB to Promise (VERY IMPORTANT)
+    const result = await new Promise((resolve, reject) => {
+      db.query(sql, values, (err, result) => {
+        if (err) {
+          console.error("❌ SQL ERROR:", err);
+          return reject(err);
+        }
+        resolve(result);
       });
-
     });
+
+    console.log("✅ Agreement saved with ID:", result.insertId);
+
+    return {
+      agreement_id: result.insertId
+    };
 
   } catch (error) {
-
-    console.error("❌ CRITICAL ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message
-    });
-
+    console.error("❌ CONTROLLER ERROR:", error);
+    throw error; // VERY IMPORTANT
   }
-
 };

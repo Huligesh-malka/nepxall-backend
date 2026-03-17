@@ -5,8 +5,7 @@ const agreementsFormController = require("../controllers/agreementsFormControlle
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ======================================================
-   SUBMIT AGREEMENT FORM
-   Handles multipart/form-data file uploads
+   SUBMIT AGREEMENT FORM (FIXED)
 ====================================================== */
 
 router.post(
@@ -20,28 +19,33 @@ router.post(
   ]),
 
   async (req, res) => {
-
     try {
-
       console.log("📥 Agreement submission received");
 
       console.log("BODY:", req.body);
       console.log("FILES:", req.files);
 
-      await agreementsFormController.submitAgreementForm(req, res);
+      // ✅ Call controller WITHOUT res
+      const result = await agreementsFormController.submitAgreementForm(req);
+
+      console.log("✅ Controller finished");
+
+      // ✅ ALWAYS send response here
+      return res.status(200).json({
+        success: true,
+        message: "Agreement submitted successfully",
+        data: result || null
+      });
 
     } catch (error) {
-
       console.error("❌ Agreement route error:", error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: "Agreement submission failed",
         error: error.message
       });
-
     }
-
   }
 );
 
@@ -50,12 +54,10 @@ router.post(
 ====================================================== */
 
 router.get("/test", (req, res) => {
-
   res.json({
     success: true,
     message: "Agreement form route working"
   });
-
 });
 
 module.exports = router;
