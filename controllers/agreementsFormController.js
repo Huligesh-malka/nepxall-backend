@@ -2,76 +2,58 @@
 const db = require("../db");
 
 exports.submitAgreementForm = async (req) => {
-  console.log("📥 --- Processing Full Agreement Submission ---");
+  console.log("📥 --- Processing Simplified Agreement ---");
 
   try {
     const {
-      user_id, booking_id, full_name, father_name, dob, mobile, email,
-      occupation, company_name, address, city, state, pincode,
-      aadhaar_number, pan_number, checkin_date, agreement_months,
-      rent, deposit, maintenance
+      user_id, booking_id, full_name, father_name, mobile, email,
+      address, city, state, pincode, aadhaar_last4, pan_number,
+      checkin_date, agreement_months, rent, deposit, maintenance
     } = req.body;
 
     const files = req.files || {};
-
-    // Helper for integers
-    const toSafeInt = (val) => {
-      if (val === "undefined" || val === "" || val === null) return null;
-      const parsed = parseInt(val);
-      return isNaN(parsed) ? null : parsed;
-    };
-
-    // Extracting Cloudinary Paths
-    const aadhaar_front = files['aadhaar_front']?.[0]?.path || null;
-    const aadhaar_back = files['aadhaar_back']?.[0]?.path || null;
-    const pan_card = files['pan_card']?.[0]?.path || null;
     const signature = files['signature']?.[0]?.path || null;
+
+    const toSafeInt = (val) => {
+      if (val === "undefined" || val === "" || val === null) return 0;
+      return parseInt(val) || 0;
+    };
 
     const sql = `
       INSERT INTO agreements_form (
-        user_id, booking_id, full_name, father_name, dob, mobile, email,
-        occupation, company_name, address, city, state, pincode,
-        aadhaar_number, aadhaar_front, aadhaar_back, pan_number, pan_card,
+        user_id, booking_id, full_name, father_name, mobile, email,
+        address, city, state, pincode, aadhaar_last4, pan_number,
         checkin_date, agreement_months, rent, deposit, maintenance,
-        signature, agreement_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        signature
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
       toSafeInt(user_id),
       toSafeInt(booking_id),
-      full_name || null,
+      full_name,
       father_name || null,
-      dob || null, // Ensure YYYY-MM-DD format from frontend
-      mobile || null,
+      mobile,
       email || null,
-      occupation || null,
-      company_name || null,
-      address || null,
+      address,
       city || null,
       state || null,
       pincode || null,
-      aadhaar_number || null,
-      aadhaar_front,
-      aadhaar_back,
+      aadhaar_last4, // Stores only last 4 digits
       pan_number || null,
-      pan_card,
-      checkin_date || null,
+      checkin_date,
       toSafeInt(agreement_months),
       toSafeInt(rent),
       toSafeInt(deposit),
       toSafeInt(maintenance),
-      signature,
-      'form_submitted'
+      signature
     ];
 
     const [result] = await db.query(sql, values);
-    
-    console.log("✅ Full Agreement Saved. ID:", result.insertId);
     return { insertId: result.insertId };
 
   } catch (error) {
-    console.error("❌ Controller Error:", error.message);
-    throw error; 
+    console.error("❌ DB Error:", error.message);
+    throw error;
   }
 };
