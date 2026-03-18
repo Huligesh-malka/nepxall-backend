@@ -6,7 +6,7 @@ exports.submitAgreementForm = async (req) => {
   try {
     const { booking_id, full_name, mobile, email, pan_number } = req.body;
 
-    // Extract Cloudinary URLs from req.files (populated by uploadAgreement middleware)
+    // ✅ Get URLs from req.files (populated by Cloudinary Storage middleware)
     const aadhaar_front = req.files['aadhaar_front'] ? req.files['aadhaar_front'][0].path : null;
     const pan_card = req.files['pan_card'] ? req.files['pan_card'][0].path : null;
     const signature = req.files['signature'] ? req.files['signature'][0].path : null;
@@ -36,8 +36,8 @@ exports.submitAgreementForm = async (req) => {
 
     const result = await new Promise((resolve, reject) => {
       db.query(sql, values, (err, res) => {
-        if (err) reject(err);
-        else resolve(res);
+        if (err) return reject(err);
+        resolve(res);
       });
     });
 
