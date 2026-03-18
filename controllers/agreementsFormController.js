@@ -7,18 +7,22 @@ exports.submitAgreementForm = async (req) => {
     const body = req.body;
     const files = req.files || {};
 
-    // Map Cloudinary URLs from Multer-Cloudinary storage
-    const aadhaar_front = files['aadhaar_front'] ? files['aadhaar_front'][0].path : null;
-    const pan_card = files['pan_card'] ? files['pan_card'][0].path : null;
-    const signature = files['signature'] ? files['signature'][0].path : null;
-    // Handle optional aadhaar_back if you add it later
-    const aadhaar_back = files['aadhaar_back'] ? files['aadhaar_back'][0].path : null;
+    // 🛠️ HELPER: Convert "undefined" strings or empty strings to null
+    const cleanInt = (val) => {
+      if (val === "undefined" || val === "" || val === null || val === undefined) return null;
+      const parsed = parseInt(val);
+      return isNaN(parsed) ? null : parsed;
+    };
+
+    // Extracting URLs safely
+    const aadhaar_front = files['aadhaar_front']?.[0]?.path || null;
+    const pan_card = files['pan_card']?.[0]?.path || null;
+    const signature = files['signature']?.[0]?.path || null;
 
     if (!body.full_name || !body.mobile) {
       throw new Error("Full name and mobile are required");
     }
 
-    // SQL matched exactly to your table description
     const sql = `
       INSERT INTO agreements_form (
         user_id, booking_id, full_name, father_name, dob, 
@@ -32,8 +36,8 @@ exports.submitAgreementForm = async (req) => {
     `;
 
     const values = [
-      body.user_id || null,
-      body.booking_id || null,
+      cleanInt(body.user_id),       // ✅ Fix: Converts "" or "undefined" to NULL
+      cleanInt(body.booking_id),   // ✅ Fix: Converts "undefined" to NULL
       body.full_name || null,
       body.father_name || null,
       body.dob || null,
@@ -48,33 +52,29 @@ exports.submitAgreementForm = async (req) => {
       body.aadhaar_number || null,
       body.aadhaar_last4 || null,
       aadhaar_front,
-      aadhaar_back,
+      null, // aadhaar_back
       body.pan_number || null,
       pan_card,
       body.checkin_date || null,
-      body.agreement_months || null,
-      body.rent || null,
-      body.deposit || null,
-      body.maintenance || null,
+      cleanInt(body.agreement_months),
+      cleanInt(body.rent),
+      cleanInt(body.deposit),
+      cleanInt(body.maintenance),
       signature,
       'form_submitted'
     ];
 
     const result = await new Promise((resolve, reject) => {
       db.query(sql, values, (err, res) => {
-        if (err) {
-          console.error("❌ SQL Execution Error:", err.message);
-          return reject(err);
-        }
+        if (err) return reject(err);
         resolve(res);
       });
     });
 
-    console.log("✅ Database record created:", result.insertId);
     return { success: true, agreement_id: result.insertId };
 
   } catch (error) {
-    console.error("❌ Controller Error:", error.message);
+    console.error("❌ SQL ERROR:", error.sqlMessage || error.message);
     throw error; 
   }
 };
