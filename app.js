@@ -109,7 +109,7 @@ app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 console.log("\n📄 Loading Agreement Routes...");
 
 app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
-app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
+app.use("/api/x", safeLoad("./routes/agreementsFormRoutes"));
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 

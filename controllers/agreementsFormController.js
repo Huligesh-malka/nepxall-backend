@@ -1,136 +1,49 @@
 const db = require("../db");
 
-/* ======================================================
-   SUBMIT AGREEMENT FORM (FIXED)
-====================================================== */
-
 exports.submitAgreementForm = async (req) => {
-  console.log("📥 --- New Agreement Submission ---");
+  console.log("📥 --- Processing Agreement Submission ---");
 
   try {
-    const {
-      user_id,
-      booking_id,
-      full_name,
-      father_name,
-      dob,
-      mobile,
-      email,
-      occupation,
-      company_name,
-      address,
-      city,
-      state,
-      pincode,
-      aadhaar_number,
-      aadhaar_last4,
-      pan_number,
-      checkin_date,
-      agreement_months,
-      rent,
-      deposit,
-      maintenance,
-      aadhaar_front,
-      aadhaar_back,
-      pan_card,
-      signature
-    } = req.body;
+    const { booking_id, full_name, mobile, email, pan_number } = req.body;
 
-    // ✅ Validation
+    // Extract Cloudinary URLs from req.files (populated by uploadAgreement middleware)
+    const aadhaar_front = req.files['aadhaar_front'] ? req.files['aadhaar_front'][0].path : null;
+    const pan_card = req.files['pan_card'] ? req.files['pan_card'][0].path : null;
+    const signature = req.files['signature'] ? req.files['signature'][0].path : null;
+
     if (!full_name || !mobile) {
       throw new Error("Full name and mobile required");
     }
 
-    const final_booking_id =
-      booking_id && booking_id !== "undefined"
-        ? parseInt(booking_id)
-        : null;
-
-    console.log("📄 Received document URLs:", {
-      aadhaar_front,
-      aadhaar_back,
-      pan_card,
-      signature
-    });
-
     const sql = `
       INSERT INTO agreements_form (
-        user_id,
-        booking_id,
-        full_name,
-        father_name,
-        dob,
-        mobile,
-        email,
-        occupation,
-        company_name,
-        address,
-        city,
-        state,
-        pincode,
-        aadhaar_number,
-        aadhaar_last4,
-        aadhaar_front,
-        aadhaar_back,
-        pan_number,
-        pan_card,
-        checkin_date,
-        agreement_months,
-        rent,
-        deposit,
-        maintenance,
-        signature
+        booking_id, full_name, mobile, email, pan_number,
+        aadhaar_front, pan_card, signature
       )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
-      user_id || null,
-      final_booking_id,
-      full_name || null,
-      father_name || null,
-      dob || null,
-      mobile || null,
+      booking_id || null,
+      full_name,
+      mobile,
       email || null,
-      occupation || null,
-      company_name || null,
-      address || null,
-      city || null,
-      state || null,
-      pincode || null,
-      aadhaar_number || null,
-      aadhaar_last4 || null,
-      aadhaar_front || null,
-      aadhaar_back || null,
       pan_number || null,
-      pan_card || null,
-      checkin_date || null,
-      agreement_months || null,
-      rent || null,
-      deposit || null,
-      maintenance || null,
-      signature || null
+      aadhaar_front,
+      pan_card,
+      signature
     ];
 
-    // ✅ Convert DB to Promise (VERY IMPORTANT)
     const result = await new Promise((resolve, reject) => {
-      db.query(sql, values, (err, result) => {
-        if (err) {
-          console.error("❌ SQL ERROR:", err);
-          return reject(err);
-        }
-        resolve(result);
+      db.query(sql, values, (err, res) => {
+        if (err) reject(err);
+        else resolve(res);
       });
     });
 
-    console.log("✅ Agreement saved with ID:", result.insertId);
-
-    return {
-      agreement_id: result.insertId
-    };
-
+    return { agreement_id: result.insertId };
   } catch (error) {
-    console.error("❌ CONTROLLER ERROR:", error);
-    throw error; // VERY IMPORTANT
+    console.error("❌ Controller Error:", error);
+    throw error;
   }
 };
