@@ -1,10 +1,10 @@
-// routes/agreementRoutes.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
+// ================= USER SUBMIT (UNCHANGED) =================
 router.post("/submit", (req, res, next) => {
     uploadAgreement.fields([
       { name: "aadhaar_front", maxCount: 1 },
@@ -25,5 +25,16 @@ router.post("/submit", (req, res, next) => {
     }
   }
 );
+
+// ================= ADMIN ROUTES (ADDED) =================
+
+// ✅ Get all agreements
+router.get("/admin/all", agreementsFormController.getAllAgreements);
+
+// ✅ Get single agreement
+router.get("/admin/:id", agreementsFormController.getAgreementById);
+
+// ✅ Update agreement status
+router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
 module.exports = router;

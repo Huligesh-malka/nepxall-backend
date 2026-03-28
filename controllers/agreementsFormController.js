@@ -57,3 +57,89 @@ exports.submitAgreementForm = async (req) => {
     throw error;
   }
 };
+
+
+
+
+/////////////////////////////////////////////////////////
+// ✅ ADMIN: Get All Agreements
+/////////////////////////////////////////////////////////
+exports.getAllAgreements = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM agreements_form ORDER BY id DESC"
+    );
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching agreements:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
+
+/////////////////////////////////////////////////////////
+// ✅ ADMIN: Get Single Agreement
+/////////////////////////////////////////////////////////
+exports.getAgreementById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.query(
+      "SELECT * FROM agreements_form WHERE id = ?",
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Agreement not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      data: rows[0]
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching agreement:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
+
+/////////////////////////////////////////////////////////
+// ✅ ADMIN: Update Status (Optional but useful)
+/////////////////////////////////////////////////////////
+exports.updateAgreementStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    await db.query(
+      "UPDATE agreements_form SET status = ? WHERE id = ?",
+      [status, id]
+    );
+
+    res.json({
+      success: true,
+      message: "Status updated successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ Error updating status:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
