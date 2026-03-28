@@ -3,10 +3,20 @@ const router = express.Router();
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
+/**
+ * @route   GET /api/agreements/test
+ * @desc    Check if the route is registered and reachable
+ */
+router.get("/test", (req, res) => {
+  res.json({ success: true, message: "Agreement Route is Active" });
+});
+
 /* ================= USER SUBMIT ================= */
+// Route: POST /api/agreements/submit
 router.post(
   "/submit",
   (req, res, next) => {
+    // Handling multiple file uploads via Multer middleware
     uploadAgreement.fields([
       { name: "aadhaar_front", maxCount: 1 },
       { name: "aadhaar_back", maxCount: 1 },
@@ -14,11 +24,8 @@ router.post(
       { name: "signature", maxCount: 1 }
     ])(req, res, (err) => {
       if (err) {
-        console.error("❌ Upload error:", err.message);
-        return res.status(400).json({
-          success: false,
-          message: err.message
-        });
+        console.error("❌ Upload Middleware Error:", err.message);
+        return res.status(400).json({ success: false, message: err.message });
       }
       next();
     });
@@ -26,16 +33,12 @@ router.post(
   async (req, res) => {
     try {
       const result = await agreementsFormController.submitAgreementForm(req);
-
       return res.status(200).json({
         success: true,
         message: "Agreement submitted successfully",
         data: result
       });
-
     } catch (error) {
-      console.error("❌ Submit error:", error.message);
-
       return res.status(500).json({
         success: false,
         message: "Failed to submit agreement",
@@ -47,35 +50,23 @@ router.post(
 
 /* ================= ADMIN ROUTES ================= */
 
-// ✅ Get all agreements
-router.get("/admin/all", async (req, res) => {
-  try {
-    await agreementsFormController.getAllAgreements(req, res);
-  } catch (error) {
-    console.error("❌ Get all error:", error.message);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
+/**
+ * @route   GET /api/agreements/admin/all
+ * @desc    Fetch all agreement records for the admin dashboard
+ */
+router.get("/admin/all", agreementsFormController.getAllAgreements);
 
-// ✅ Get single agreement
-router.get("/admin/:id", async (req, res) => {
-  try {
-    await agreementsFormController.getAgreementById(req, res);
-  } catch (error) {
-    console.error("❌ Get by id error:", error.message);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
+/**
+ * @route   GET /api/agreements/admin/:id
+ * @desc    Fetch specific agreement details
+ */
+router.get("/admin/:id", agreementsFormController.getAgreementById);
 
-// ✅ Update agreement status
-router.put("/admin/:id/status", async (req, res) => {
-  try {
-    await agreementsFormController.updateAgreementStatus(req, res);
-  } catch (error) {
-    console.error("❌ Update status error:", error.message);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
+/**
+ * @route   PUT /api/agreements/admin/:id/status
+ * @desc    Approve or Reject an agreement
+ */
+router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
 /* ================= EXPORT ================= */
 module.exports = router;
