@@ -2,11 +2,12 @@ const db = require("../db");
 
 exports.getOwnerPayments = async (req, res) => {
   try {
+    // IMPORTANT: Use mysqlId from auth middleware, not id
     const ownerId = req.user.mysqlId || req.user.id;
     
-    console.log("🔍 Fetching payments & agreements for owner ID:", ownerId);
+    console.log("🔍 Fetching payments for owner ID:", ownerId);
 
-    // SQL query - Added b.final_pdf to show the agreement link
+    // Fixed SQL query - ONLY show payments with status = 'paid' (admin approved)
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -16,7 +17,6 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_settlement,
         b.settlement_date,
         b.status AS booking_status,
-        b.final_pdf,              /* CRITICAL: Fetches the PDF path */
         pg.pg_name,
         p.status AS payment_status,
         p.order_id,
@@ -25,12 +25,14 @@ exports.getOwnerPayments = async (req, res) => {
         p.utr
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
-      INNER JOIN payments p ON b.id = p.booking_id
+      INNER JOIN payments p ON b.id = p.booking_id  /* Changed from LEFT JOIN to INNER JOIN */
       WHERE b.owner_id = ? 
       AND b.status IN ('confirmed', 'approved', 'agreement_ready')
-      AND p.status = 'paid'
-      ORDER BY p.created_at DESC
+      AND p.status = 'paid'  /* ONLY show admin-approved payments */
+      ORDER BY p.created_at DESC  /* Order by payment date, not booking date */
     `, [ownerId]);
+
+    console.log(`📊 Found ${rows.length} approved payments for owner ${ownerId}`);
 
     res.json({
       success: true,
@@ -40,6 +42,7 @@ exports.getOwnerPayments = async (req, res) => {
 
   } catch (err) {
     console.error("❌ OWNER PAYMENTS ERROR:", err);
+    console.error("❌ Error stack:", err.stack);
     res.status(500).json({
       success: false,
       message: "Failed to load owner payments",
@@ -48,6 +51,7 @@ exports.getOwnerPayments = async (req, res) => {
   }
 };
 
+// Updated summary endpoint - only count approved payments
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
@@ -63,7 +67,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
       JOIN pgs pg ON pg.id = b.pg_id
       INNER JOIN payments p ON b.id = p.booking_id
       WHERE b.owner_id = ?
-      AND p.status = 'paid'
+      AND p.status = 'paid'  /* Only count approved payments */
       AND b.status IN ('confirmed', 'approved', 'agreement_ready')
     `, [ownerId]);
 

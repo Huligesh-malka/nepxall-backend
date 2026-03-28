@@ -3,17 +3,17 @@ const router = express.Router();
 
 const { 
   getOwnerPayments, 
-  getOwnerSettlementSummary 
+  getOwnerSettlementSummary  // Add this
 } = require("../controllers/ownerPaymentController");
 const auth = require("../middlewares/auth");
 
-// GET /api/owner/payments
+// Get all payments for owner
 router.get("/payments", auth, getOwnerPayments);
 
-// GET /api/owner/settlements/summary
+// Get settlement summary
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
 
-// Test endpoint
+// Test endpoint to verify routes
 router.get("/test", auth, (req, res) => {
   res.json({ 
     success: true, 
