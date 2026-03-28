@@ -117,56 +117,49 @@ exports.getAgreementById = async (req, res) => {
   }
 };
 
-/////////////////////////////////////////////////////////
-// ✅ ADMIN: Update Status (Optional but useful)
-/////////////////////////////////////////////////////////
-exports.updateAgreementStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    await db.query(
-      "UPDATE agreements_form SET status = ? WHERE id = ?",
-      [status, id]
-    );
-
-    res.json({
-      success: true,
-      message: "Status updated successfully"
-    });
-
-  } catch (error) {
-    console.error("❌ Error updating status:", error.message);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
-  }
-};
-
-
-
-
 // ✅ ADMIN: Upload Final Agreement PDF
 exports.uploadFinalPDF = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Cloudinary puts the URL in req.file.path
     const filePath = req.file ? req.file.path : null;
 
+    console.log("📥 Upload Request for ID:", id);
+    console.log("📄 File Path from Cloudinary:", filePath);
+
     if (!filePath) {
-      return res.status(400).json({ success: false, message: "No PDF file uploaded" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "File upload failed. Cloudinary did not return a URL." 
+      });
     }
 
+    // Update the database: Set the PDF link and change status to 'approved'
     const sql = "UPDATE agreements_form SET final_pdf = ?, status = 'approved' WHERE id = ?";
-    await db.query(sql, [filePath, id]);
+    const [result] = await db.query(sql, [filePath, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Agreement not found in database." 
+      });
+    }
+
+    console.log("✅ Database updated successfully");
 
     res.json({
       success: true,
-      message: "PDF uploaded and agreement approved successfully",
+      message: "Agreement approved and PDF uploaded!",
       pdf_url: filePath
     });
+
   } catch (error) {
-    console.error("❌ PDF Upload Error:", error.message);
-    res.status(500).json({ success: false, message: "Server error during upload" });
+    console.error("❌ SERVER ERROR:", error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error", 
+      error: error.message 
+    });
   }
 };
