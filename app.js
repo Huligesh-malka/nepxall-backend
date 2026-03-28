@@ -76,6 +76,15 @@ app.get("/", (req, res) => {
   });
 });
 
+/* ================= ✅ HEALTH (IMPORTANT FIX) ================= */
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "healthy",
+    message: "Backend is running"
+  });
+});
+
 /* ================= CORE ================= */
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
@@ -83,11 +92,10 @@ app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
 app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
 app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 
-/* ================= ✅ AGREEMENTS FIX ================= */
+/* ================= AGREEMENTS ================= */
 console.log("\n📄 Loading Agreement Routes...");
 
-/* 🔥 FIXED HERE */
-app.use("/api/agreements", safeLoad("./routes/agreementRoutes")); 
+app.use("/api/agreements", safeLoad("./routes/agreementRoutes"));
 app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
 
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
@@ -106,18 +114,18 @@ app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
-/* OWNER */
+/* ================= OWNER ================= */
 app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 
-/* ADMIN */
+/* ================= ADMIN ================= */
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
 
-/* VENDOR */
+/* ================= VENDOR ================= */
 app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
 
 /* ================= 404 ================= */
@@ -131,7 +139,7 @@ app.use((req, res) => {
 /* ================= ERROR ================= */
 app.use((err, req, res, next) => {
   console.error("🔥 ERROR:", err);
-  res.status(500).json({
+  res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error"
   });
