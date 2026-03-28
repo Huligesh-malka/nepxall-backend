@@ -18,13 +18,15 @@ const agreementStorage = new CloudinaryStorage({
 
     // Logic for PDFs
     if (isPDF) {
-      return {
-        folder: "agreements",
-        resource_type: "raw", // CRITICAL: Treat PDF as a document, not an image
-        public_id: publicId,
-        format: "pdf",
-      };
-    }
+  return {
+    folder: "agreements",
+    resource_type: "raw",
+    public_id: publicId,
+    format: "pdf",
+    type: "upload",        // ✅ ADD THIS
+    access_mode: "public"  // ✅ ADD THIS
+  };
+}
 
     // Logic for Images (Aadhaar, PAN, Signatures)
     return {
