@@ -4,6 +4,10 @@ const agreementsFormController = require("../controllers/agreementsFormControlle
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= USER ROUTES ================= */
+
+// Route to check if an agreement already exists for a booking
+router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
+
 router.post(
   "/submit",
   uploadAgreement.fields([
@@ -15,7 +19,7 @@ router.post(
   async (req, res) => {
     try {
       const result = await agreementsFormController.submitAgreementForm(req);
-      res.status(200).json({ success: true, message: "Submitted", data: result });
+      res.status(200).json({ success: true, message: "Submitted Successfully", data: result });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
