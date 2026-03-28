@@ -20,11 +20,11 @@ const agreementStorage = new CloudinaryStorage({
     if (isPDF) {
   return {
     folder: "agreements",
-    resource_type: "raw",
+    resource_type: "image", // 🔥 CHANGE THIS
     public_id: publicId,
     format: "pdf",
-    type: "upload",        // ✅ ADD THIS
-    access_mode: "public"  // ✅ ADD THIS
+    type: "upload",
+    access_mode: "public"
   };
 }
 
