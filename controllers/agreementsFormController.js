@@ -146,3 +146,27 @@ exports.uploadFinalImage = async (req, res) => {
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 };
+
+
+
+
+
+/* ================= USER: GET AGREEMENT BY BOOKING ID ================= */
+exports.getAgreementByBookingId = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const [rows] = await db.query(
+      "SELECT agreement_status, final_pdf FROM agreements_form WHERE booking_id = ?", 
+      [bookingId]
+    );
+
+    if (rows.length > 0) {
+      return res.json({ success: true, exists: true, data: rows[0] });
+    }
+    
+    res.json({ success: true, exists: false });
+  } catch (error) {
+    console.error("❌ Error checking agreement:", error.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
