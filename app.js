@@ -6,27 +6,22 @@ require("dotenv").config();
 const app = express();
 
 /* ================= TRUST PROXY ================= */
-
 app.set("trust proxy", 1);
 
 /* ================= SECURITY ================= */
-
 app.use(helmet());
 
 /* ================= LOGGER ================= */
-
 app.use((req, res, next) => {
   console.log(`➡️ ${req.method} ${req.originalUrl}`);
   next();
 });
 
 /* ================= BODY PARSER ================= */
-
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ================= CORS ================= */
-
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
@@ -41,7 +36,6 @@ const corsOptions = {
     if (!origin || origin.includes("vercel.app") || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-
     console.log("❌ Blocked by CORS:", origin);
     return callback(null, true);
   },
@@ -53,7 +47,6 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
 /* ================= SAFE ROUTE LOADER ================= */
-
 const safeLoad = (path) => {
   try {
     console.log(`📂 Attempting to load: ${path}`);
@@ -64,7 +57,6 @@ const safeLoad = (path) => {
     console.error("❌ Failed to load:", path, err.message);
 
     const dummyRouter = express.Router();
-
     dummyRouter.use((req, res) => {
       res.status(500).json({
         success: false,
@@ -76,76 +68,37 @@ const safeLoad = (path) => {
   }
 };
 
-/* ================= ROOT ROUTES ================= */
-
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 Nepxall Backend API Running",
-    timestamp: new Date().toISOString()
+    message: "🚀 Nepxall Backend API Running"
   });
 });
 
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "healthy",
-    timestamp: new Date().toISOString()
-  });
-});
-
-/* ================= CORE ROUTES ================= */
-
-console.log("\n📦 Loading Core Routes...");
-
+/* ================= CORE ================= */
 app.use("/api/auth", safeLoad("./routes/authRoutes"));
 app.use("/api/pg", safeLoad("./routes/pgRoutes"));
 app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
 app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
 app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 
-/* ================= AGREEMENT ROUTES ================= */
-
+/* ================= ✅ AGREEMENTS FIX ================= */
 console.log("\n📄 Loading Agreement Routes...");
 
-app.use("/api/agreement", safeLoad("./routes/agreementRoutes"));
+/* 🔥 FIXED HERE */
+app.use("/api/agreements", safeLoad("./routes/agreementRoutes")); 
 app.use("/api/agreements-form", safeLoad("./routes/agreementsFormRoutes"));
+
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
 
-/* ================= QR SCAN ROUTES ================= */
-
-console.log("\n📱 Loading QR Scan Routes...");
-
+/* ================= OTHER ROUTES ================= */
 app.use("/api/scan", safeLoad("./routes/qrScanRoutes"));
-
-/* ================= PAYMENT ROUTES ================= */
-
-console.log("\n💳 Loading Payment Routes...");
-
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
-
-/* ================= MOVE-IN / KYC ================= */
-
-console.log("\n📋 Loading Move-in/KYC Routes...");
-
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
-
-/* ================= SERVICES ================= */
-
-console.log("\n🛠️ Loading Service Routes...");
-
 app.use("/api/services", safeLoad("./routes/serviceRoutes"));
-
-/* ================= DIGILOCKER (NEW) ================= */
-
-console.log("\n🔐 Loading DigiLocker Routes...");
-
 app.use("/api/digilocker", safeLoad("./routes/digilockerRoutes"));
-
-/* ================= CHAT & SOCIAL ================= */
-
-console.log("\n💬 Loading Chat & Social Routes...");
 
 app.use("/api/pg-chat", safeLoad("./routes/pgChatRoutes"));
 app.use("/api/private-chat", safeLoad("./routes/privateChatRoutes"));
@@ -153,38 +106,21 @@ app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
 app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
 app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
-/* ================= OWNER ROUTES ================= */
-
-console.log("\n👤 Loading Owner Routes...");
-
+/* OWNER */
 app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 
-app.use("/api/owner/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "Owner test endpoint working"
-  });
-});
-
-/* ================= ADMIN ROUTES ================= */
-
-console.log("\n👑 Loading Admin Routes...");
-
+/* ADMIN */
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 app.use("/api/admin", safeLoad("./routes/adminServiceRoutes"));
 
-/* ================= VENDOR ROUTES ================= */
-
-console.log("\n🏪 Loading Vendor Routes...");
-
+/* VENDOR */
 app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
 
-/* ================= 404 HANDLER ================= */
-
+/* ================= 404 ================= */
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -192,19 +128,16 @@ app.use((req, res) => {
   });
 });
 
-/* ================= ERROR HANDLER ================= */
-
+/* ================= ERROR ================= */
 app.use((err, req, res, next) => {
-  console.error("🔥 GLOBAL ERROR:", err);
-
-  res.status(err.status || 500).json({
+  console.error("🔥 ERROR:", err);
+  res.status(500).json({
     success: false,
     message: err.message || "Internal Server Error"
   });
 });
 
-/* ================= START SERVER ================= */
-
+/* ================= START ================= */
 const PORT = process.env.PORT || 5000;
 
 if (require.main === module) {
