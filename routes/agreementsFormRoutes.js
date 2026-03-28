@@ -68,5 +68,16 @@ router.get("/admin/:id", agreementsFormController.getAgreementById);
  */
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
+
+
+
+
+// Add this route to your Admin section
+router.put(
+  "/admin/:id/upload-pdf",
+  uploadAgreement.single("final_pdf"), // Uses multer to catch the file
+  agreementsFormController.uploadFinalPDF
+);
+
 /* ================= EXPORT ================= */
 module.exports = router;
