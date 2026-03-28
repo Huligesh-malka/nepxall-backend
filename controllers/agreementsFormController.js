@@ -111,28 +111,26 @@ exports.updateAgreementStatus = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error updating status" });
   }
 };
+// controllers/agreementsFormController.js
 
-/* ================= ADMIN: UPLOAD FINAL PDF ================= */
 exports.uploadFinalPDF = async (req, res) => {
   try {
     const { id } = req.params;
-    const filePath = req.file ? req.file.path : null;
+    
+    // Cloudinary storage puts the URL in req.file.path
+    const pdfUrl = req.file ? req.file.path : null;
 
-    if (!filePath) {
+    if (!pdfUrl) {
       return res.status(400).json({ success: false, message: "No PDF file uploaded" });
     }
 
     const sql = "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?";
-    const [result] = await db.query(sql, [filePath, id]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: "Agreement not found" });
-    }
+    await db.query(sql, [pdfUrl, id]);
 
     res.json({
       success: true,
       message: "PDF uploaded and agreement approved",
-      pdf_url: filePath
+      pdf_url: pdfUrl // Send this back to the frontend
     });
   } catch (error) {
     console.error("❌ PDF Upload Error:", error.message);
