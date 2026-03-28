@@ -143,3 +143,30 @@ exports.updateAgreementStatus = async (req, res) => {
     });
   }
 };
+
+
+
+
+// ✅ ADMIN: Upload Final Agreement PDF
+exports.uploadFinalPDF = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const filePath = req.file ? req.file.path : null;
+
+    if (!filePath) {
+      return res.status(400).json({ success: false, message: "No PDF file uploaded" });
+    }
+
+    const sql = "UPDATE agreements_form SET final_pdf = ?, status = 'approved' WHERE id = ?";
+    await db.query(sql, [filePath, id]);
+
+    res.json({
+      success: true,
+      message: "PDF uploaded and agreement approved successfully",
+      pdf_url: filePath
+    });
+  } catch (error) {
+    console.error("❌ PDF Upload Error:", error.message);
+    res.status(500).json({ success: false, message: "Server error during upload" });
+  }
+};
