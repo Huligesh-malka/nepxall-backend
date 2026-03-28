@@ -11,8 +11,12 @@ exports.submitAgreementForm = async (req) => {
       checkin_date, agreement_months, rent, deposit, maintenance
     } = req.body;
 
+    // Safely extract file paths from Multer fields
     const files = req.files || {};
     const signature = files['signature']?.[0]?.path || null;
+    const aadhaar_front = files['aadhaar_front']?.[0]?.path || null;
+    const aadhaar_back = files['aadhaar_back']?.[0]?.path || null;
+    const pan_card = files['pan_card']?.[0]?.path || null;
 
     const toSafeInt = (val) => {
       if (val === "undefined" || val === "" || val === null) return 0;
@@ -24,8 +28,8 @@ exports.submitAgreementForm = async (req) => {
         user_id, booking_id, full_name, father_name, mobile, email,
         address, city, state, pincode, aadhaar_last4, pan_number,
         checkin_date, agreement_months, rent, deposit, maintenance,
-        signature, agreement_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        signature, aadhaar_front, aadhaar_back, pan_card, agreement_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `;
 
     const values = [
@@ -46,7 +50,10 @@ exports.submitAgreementForm = async (req) => {
       toSafeInt(rent),
       toSafeInt(deposit),
       toSafeInt(maintenance),
-      signature
+      signature,
+      aadhaar_front,
+      aadhaar_back,
+      pan_card
     ];
 
     const [result] = await db.query(sql, values);
@@ -61,16 +68,9 @@ exports.submitAgreementForm = async (req) => {
 /* ================= ADMIN: GET ALL ================= */
 exports.getAllAgreements = async (req, res) => {
   try {
-    const [rows] = await db.query(
-      "SELECT * FROM agreements_form ORDER BY id DESC"
-    );
-
-    res.json({
-      success: true,
-      data: rows
-    });
+    const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY id DESC");
+    res.json({ success: true, data: rows });
   } catch (error) {
-    console.error("❌ Error fetching agreements:", error.message);
     res.status(500).json({ success: false, message: "Server error fetching list" });
   }
 };
@@ -80,15 +80,10 @@ exports.getAgreementById = async (req, res) => {
   try {
     const { id } = req.params;
     const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
-
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Agreement not found" });
-    }
-
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Not found" });
     res.json({ success: true, data: rows[0] });
   } catch (error) {
-    console.error("❌ Error fetching agreement:", error.message);
-    res.status(500).json({ success: false, message: "Server error fetching details" });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
@@ -96,59 +91,29 @@ exports.getAgreementById = async (req, res) => {
 exports.updateAgreementStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // Expecting 'approved' or 'rejected'
-
-    const sql = "UPDATE agreements_form SET agreement_status = ? WHERE id = ?";
-    const [result] = await db.query(sql, [status, id]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: "Agreement not found" });
-    }
-
-    res.json({ success: true, message: `Agreement ${status} successfully` });
+    const { status } = req.body;
+    await db.query("UPDATE agreements_form SET agreement_status = ? WHERE id = ?", [status, id]);
+    res.json({ success: true, message: `Status updated to ${status}` });
   } catch (error) {
-    console.error("❌ Status Update Error:", error.message);
-    res.status(500).json({ success: false, message: "Server error updating status" });
+    res.status(500).json({ success: false, message: "Update failed" });
   }
 };
-// controllers/agreementsFormController.js
 
+/* ================= ADMIN: UPLOAD FINAL IMAGE ================= */
 exports.uploadFinalImage = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Check if file exists (Cloudinary or Multer storage)
-    // Cloudinary usually stores the URL in req.file.path
     const imageUrl = req.file ? req.file.path : null;
 
-    if (!imageUrl) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "No image file uploaded. Please upload a JPG, PNG, or WebP." 
-      });
-    }
+    if (!imageUrl) return res.status(400).json({ success: false, message: "No image uploaded" });
 
-    // We update the 'final_pdf' column (or you can rename it to final_image in DB)
-    // and automatically set status to 'approved'
     const sql = "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?";
-    
     const [result] = await db.query(sql, [imageUrl, id]);
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: "Agreement record not found" });
-    }
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Record not found" });
 
-    res.json({
-      success: true,
-      message: "Agreement image uploaded and status updated to approved!",
-      imageUrl: imageUrl // Send back for frontend display
-    });
-
+    res.json({ success: true, message: "Uploaded successfully!", imageUrl });
   } catch (error) {
-    console.error("❌ Image Upload Error:", error.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error during image upload" 
-    });
+    res.status(500).json({ success: false, message: "Upload failed" });
   }
 };

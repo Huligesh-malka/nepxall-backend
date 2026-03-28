@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const path = require("path"); // Added for static files
+const path = require("path"); 
 require("dotenv").config();
 
 const app = express();
@@ -10,7 +10,6 @@ const app = express();
 app.set("trust proxy", 1);
 
 /* ================= SECURITY ================= */
-// Modified helmet to allow loading images from your own server
 app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
@@ -26,7 +25,6 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ================= STATIC FILES ================= */
-// This allows the Admin panel to actually see the uploaded signatures
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 /* ================= CORS ================= */
@@ -99,16 +97,16 @@ app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
 
 /* ================= AGREEMENT ROUTES (FIXED) ================= */
 console.log("\n📄 Loading Agreement Routes...");
-
-// We load agreementsFormRoutes under the plural /api/agreements to match the frontend
 const agreementFormRouter = safeLoad("./routes/agreementsFormRoutes");
-app.use("/api/agreements", agreementFormRouter); 
-app.use("/api/agreement", agreementFormRouter); // Backward compatibility
 
+// This line solves your 404: It maps /api/agreements-form/submit to your router
+app.use("/api/agreements-form", agreementFormRouter); 
+app.use("/api/agreements", agreementFormRouter); 
+app.use("/api/agreement", agreementFormRouter); 
+
+/* ================= FINANCIAL & STAY ROUTES ================= */
 app.use("/api/deposit", safeLoad("./routes/depositRoutes"));
 app.use("/api/vacate", safeLoad("./routes/vacateRoutes"));
-
-/* ================= OTHER ROUTES ================= */
 app.use("/api/scan", safeLoad("./routes/qrScanRoutes"));
 app.use("/api/payments", safeLoad("./routes/paymentRoutes"));
 app.use("/api/movein", safeLoad("./routes/kycMoveinRoutes"));
