@@ -113,27 +113,42 @@ exports.updateAgreementStatus = async (req, res) => {
 };
 // controllers/agreementsFormController.js
 
-exports.uploadFinalPDF = async (req, res) => {
+exports.uploadFinalImage = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Cloudinary storage puts the URL in req.file.path
-    const pdfUrl = req.file ? req.file.path : null;
+    // Check if file exists (Cloudinary or Multer storage)
+    // Cloudinary usually stores the URL in req.file.path
+    const imageUrl = req.file ? req.file.path : null;
 
-    if (!pdfUrl) {
-      return res.status(400).json({ success: false, message: "No PDF file uploaded" });
+    if (!imageUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "No image file uploaded. Please upload a JPG, PNG, or WebP." 
+      });
     }
 
+    // We update the 'final_pdf' column (or you can rename it to final_image in DB)
+    // and automatically set status to 'approved'
     const sql = "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?";
-    await db.query(sql, [pdfUrl, id]);
+    
+    const [result] = await db.query(sql, [imageUrl, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Agreement record not found" });
+    }
 
     res.json({
       success: true,
-      message: "PDF uploaded and agreement approved",
-      pdf_url: pdfUrl // Send this back to the frontend
+      message: "Agreement image uploaded and status updated to approved!",
+      imageUrl: imageUrl // Send back for frontend display
     });
+
   } catch (error) {
-    console.error("❌ PDF Upload Error:", error.message);
-    res.status(500).json({ success: false, message: "Server error during PDF upload" });
+    console.error("❌ Image Upload Error:", error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error during image upload" 
+    });
   }
 };

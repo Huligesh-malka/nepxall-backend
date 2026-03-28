@@ -54,11 +54,14 @@ router.get("/admin/:id", agreementsFormController.getAgreementById);
 // Update status (Approve/Reject)
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
-// Upload final PDF
+/**
+ * UPDATED: Upload Final Image (Replaces PDF)
+ * This route matches the 'final_image' key used in the React Frontend
+ */
 router.put(
-  "/admin/:id/upload-pdf",
-  uploadAgreement.single("final_pdf"),
-  agreementsFormController.uploadFinalPDF
+  "/admin/:id/upload-image",
+  uploadAgreement.single("final_image"), // Multer looks for 'final_image' field
+  agreementsFormController.uploadFinalImage // Calls the updated controller function
 );
 
 module.exports = router;
