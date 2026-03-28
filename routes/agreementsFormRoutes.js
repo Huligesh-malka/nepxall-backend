@@ -3,20 +3,15 @@ const router = express.Router();
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
-/**
- * @route   GET /api/agreements/test
- * @desc    Check if the route is registered and reachable
- */
+/* ================= HEALTH CHECK ================= */
 router.get("/test", (req, res) => {
   res.json({ success: true, message: "Agreement Route is Active" });
 });
 
-/* ================= USER SUBMIT ================= */
-// Route: POST /api/agreements/submit
+/* ================= USER ROUTES ================= */
 router.post(
   "/submit",
   (req, res, next) => {
-    // Handling multiple file uploads via Multer middleware
     uploadAgreement.fields([
       { name: "aadhaar_front", maxCount: 1 },
       { name: "aadhaar_back", maxCount: 1 },
@@ -50,34 +45,20 @@ router.post(
 
 /* ================= ADMIN ROUTES ================= */
 
-/**
- * @route   GET /api/agreements/admin/all
- * @desc    Fetch all agreement records for the admin dashboard
- */
+// Fetch all agreements
 router.get("/admin/all", agreementsFormController.getAllAgreements);
 
-/**
- * @route   GET /api/agreements/admin/:id
- * @desc    Fetch specific agreement details
- */
+// Fetch single agreement
 router.get("/admin/:id", agreementsFormController.getAgreementById);
 
-/**
- * @route   PUT /api/agreements/admin/:id/status
- * @desc    Approve or Reject an agreement
- */
+// Update status (Approve/Reject)
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
-
-
-
-
-// Add this route to your Admin section
+// Upload final PDF
 router.put(
   "/admin/:id/upload-pdf",
-  uploadAgreement.single("final_pdf"), // Uses multer to catch the file
+  uploadAgreement.single("final_pdf"),
   agreementsFormController.uploadFinalPDF
 );
 
-/* ================= EXPORT ================= */
 module.exports = router;

@@ -1,6 +1,6 @@
-// controllers/agreementsFormController.js
 const db = require("../db");
 
+/* ================= USER: SUBMIT FORM ================= */
 exports.submitAgreementForm = async (req) => {
   console.log("📥 --- Processing Simplified Agreement ---");
 
@@ -24,8 +24,8 @@ exports.submitAgreementForm = async (req) => {
         user_id, booking_id, full_name, father_name, mobile, email,
         address, city, state, pincode, aadhaar_last4, pan_number,
         checkin_date, agreement_months, rent, deposit, maintenance,
-        signature
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        signature, agreement_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `;
 
     const values = [
@@ -39,7 +39,7 @@ exports.submitAgreementForm = async (req) => {
       city || null,
       state || null,
       pincode || null,
-      aadhaar_last4, // Stores only last 4 digits
+      aadhaar_last4,
       pan_number || null,
       checkin_date,
       toSafeInt(agreement_months),
@@ -58,12 +58,7 @@ exports.submitAgreementForm = async (req) => {
   }
 };
 
-
-
-
-/////////////////////////////////////////////////////////
-// ✅ ADMIN: Get All Agreements
-/////////////////////////////////////////////////////////
+/* ================= ADMIN: GET ALL ================= */
 exports.getAllAgreements = async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -74,50 +69,50 @@ exports.getAllAgreements = async (req, res) => {
       success: true,
       data: rows
     });
-
   } catch (error) {
     console.error("❌ Error fetching agreements:", error.message);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
+    res.status(500).json({ success: false, message: "Server error fetching list" });
   }
 };
 
-/////////////////////////////////////////////////////////
-// ✅ ADMIN: Get Single Agreement
-/////////////////////////////////////////////////////////
+/* ================= ADMIN: GET SINGLE ================= */
 exports.getAgreementById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const [rows] = await db.query(
-      "SELECT * FROM agreements_form WHERE id = ?",
-      [id]
-    );
+    const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
 
     if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Agreement not found"
-      });
+      return res.status(404).json({ success: false, message: "Agreement not found" });
     }
 
-    res.json({
-      success: true,
-      data: rows[0]
-    });
-
+    res.json({ success: true, data: rows[0] });
   } catch (error) {
     console.error("❌ Error fetching agreement:", error.message);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
+    res.status(500).json({ success: false, message: "Server error fetching details" });
   }
 };
 
-// ✅ ADMIN: Upload Final Agreement PDF
+/* ================= ADMIN: UPDATE STATUS ================= */
+exports.updateAgreementStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // Expecting 'approved' or 'rejected'
+
+    const sql = "UPDATE agreements_form SET agreement_status = ? WHERE id = ?";
+    const [result] = await db.query(sql, [status, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Agreement not found" });
+    }
+
+    res.json({ success: true, message: `Agreement ${status} successfully` });
+  } catch (error) {
+    console.error("❌ Status Update Error:", error.message);
+    res.status(500).json({ success: false, message: "Server error updating status" });
+  }
+};
+
+/* ================= ADMIN: UPLOAD FINAL PDF ================= */
 exports.uploadFinalPDF = async (req, res) => {
   try {
     const { id } = req.params;
@@ -127,22 +122,20 @@ exports.uploadFinalPDF = async (req, res) => {
       return res.status(400).json({ success: false, message: "No PDF file uploaded" });
     }
 
-    // 🟢 FIX: Changed 'status' to 'agreement_status' to match your DB schema
     const sql = "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?";
-    
     const [result] = await db.query(sql, [filePath, id]);
 
     if (result.affectedRows === 0) {
-        return res.status(404).json({ success: false, message: "Agreement not found" });
+      return res.status(404).json({ success: false, message: "Agreement not found" });
     }
 
     res.json({
       success: true,
-      message: "PDF uploaded and agreement approved successfully",
+      message: "PDF uploaded and agreement approved",
       pdf_url: filePath
     });
   } catch (error) {
     console.error("❌ PDF Upload Error:", error.message);
-    res.status(500).json({ success: false, message: "Server error during upload" });
+    res.status(500).json({ success: false, message: "Server error during PDF upload" });
   }
 };
