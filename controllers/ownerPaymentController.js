@@ -59,7 +59,7 @@ exports.getOwnerPayments = async (req, res) => {
 
     const updated = rows.map(r => ({
       ...r,
-      owner_signed: r.agreement_status === "approved" || !!r.signed_pdf
+      owner_signed: !!r.signed_pdf // ✅ FIXED
     }));
 
     res.json({ success: true, data: updated });
@@ -79,6 +79,16 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Terms & Signature required" });
     }
 
+    // 🔒 Prevent duplicate signing
+    const [existing] = await db.query(
+      `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
+      [booking_id]
+    );
+
+    if (existing.length && existing[0].signed_pdf) {
+      return res.status(400).json({ message: "Already signed ❌" });
+    }
+
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -88,20 +98,54 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(404).json({ message: "Original PDF not found" });
     }
 
-    const originalPdf = path.join(__dirname, "../", rows[0].final_pdf);
+    const finalPdfUrl = rows[0].final_pdf;
+
+    // 🔥 Handle Cloudinary or local file
+    let originalPdf;
+
+    if (finalPdfUrl.startsWith("http")) {
+      // Download from Cloudinary
+      const axios = require("axios");
+      const response = await axios.get(finalPdfUrl, { responseType: "arraybuffer" });
+      originalPdf = Buffer.from(response.data);
+    } else {
+      originalPdf = fs.readFileSync(path.join(__dirname, "../", finalPdfUrl));
+    }
+
+    const pdfDoc = await PDFDocument.load(originalPdf);
+
+    const base64Data = owner_signature.split(",")[1] || owner_signature;
+    const pngImage = await pdfDoc.embedPng(Buffer.from(base64Data, "base64"));
+
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1];
+    const { width } = page.getSize();
+
+    page.drawImage(pngImage, {
+      x: width - 180,
+      y: 80,
+      width: 120,
+      height: 50,
+    });
+
+    page.drawText(`Digitally Signed on ${new Date().toLocaleString()}`, {
+      x: width - 180,
+      y: 65,
+      size: 8,
+    });
+
+    const newPdfBytes = await pdfDoc.save();
 
     const fileName = `signed_${booking_id}_${Date.now()}.pdf`;
     const signedPdfPath = `uploads/signed_agreements/${fileName}`;
-    const absoluteOutputPath = path.join(__dirname, "../", signedPdfPath);
+    const absolutePath = path.join(__dirname, "../", signedPdfPath);
 
-    // create folder if not exists
-    const dir = path.dirname(absoluteOutputPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(path.dirname(absolutePath))) {
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    }
 
-    // embed signature
-    await embedSignatureIntoPDF(originalPdf, owner_signature, absoluteOutputPath);
+    fs.writeFileSync(absolutePath, newPdfBytes);
 
-    // audit data
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const device = req.headers["user-agent"];
 
@@ -128,7 +172,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Agreement Signed & Stored ✅",
+      message: "Agreement Signed Successfully ✅",
       signed_pdf: signedPdfPath
     });
 

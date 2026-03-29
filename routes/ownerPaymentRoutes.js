@@ -11,13 +11,8 @@ const {
 
 const auth = require("../middlewares/auth");
 
-/* ================= PAYMENTS ================= */
 router.get("/payments", auth, getOwnerPayments);
-
-/* ================= SUMMARY ================= */
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
-
-/* ================= SIGN ================= */
 router.post("/agreements/sign", auth, signOwnerAgreement);
 
 module.exports = router;
