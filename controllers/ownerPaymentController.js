@@ -77,7 +77,6 @@ exports.getOwnerPayments = async (req, res) => {
   }
 };
 
-/* ================= SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const {
     booking_id,
@@ -89,7 +88,6 @@ exports.signOwnerAgreement = async (req, res) => {
   const ownerId = req.user.mysqlId || req.user.id;
 
   try {
-    /* VALIDATION */
     if (!accepted_terms) {
       return res.status(400).json({ message: "Accept terms first" });
     }
@@ -98,7 +96,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    /* CHECK BOOKING + PDF */
+    /* GET ORIGINAL PDF */
     const [rows] = await db.query(`
       SELECT af.final_pdf 
       FROM bookings b
@@ -115,20 +113,20 @@ exports.signOwnerAgreement = async (req, res) => {
     }
 
     const originalPdf = path.join(__dirname, "../", rows[0].final_pdf);
+
     const signedPdfPath = `uploads/signed_${booking_id}.pdf`;
 
-    /* 🔥 EMBED SIGNATURE */
+    /* EMBED SIGNATURE */
     await embedSignatureIntoPDF(
       originalPdf,
       owner_signature,
       path.join(__dirname, "../", signedPdfPath)
     );
 
-    /* GET IP + DEVICE */
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const device = req.headers["user-agent"];
 
-    /* SAVE */
+    /* ✅ IMPORTANT FIX HERE */
     await db.query(`
       UPDATE agreements_form 
       SET 
@@ -139,7 +137,7 @@ exports.signOwnerAgreement = async (req, res) => {
         terms_accepted = 1,
         ip_address = ?,
         device_info = ?,
-        final_pdf = ?
+        signed_pdf = ?
       WHERE booking_id = ?
     `, [
       owner_signature,
@@ -152,7 +150,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Agreement signed & embedded in PDF ✅"
+      message: "Agreement signed successfully ✅"
     });
 
   } catch (err) {
