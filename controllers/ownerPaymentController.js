@@ -59,6 +59,7 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
+/* ================= SIGN OWNER AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -67,6 +68,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
+    // ================= CHECK ALREADY SIGNED =================
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -76,6 +78,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Already signed" });
     }
 
+    // ================= GET PDF IMAGE =================
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -101,6 +104,33 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
+    // ================= CLEAN IP =================
+    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+    let ip = "Unknown";
+
+    if (rawIp) {
+      const firstIp = rawIp.split(",")[0].trim();
+
+      if (
+        !firstIp.startsWith("127.") &&
+        !firstIp.startsWith("10.") &&
+        !firstIp.startsWith("192.168")
+      ) {
+        ip = firstIp;
+      }
+    }
+
+    // ================= CLEAN DEVICE =================
+    let device = req.headers["user-agent"] || "Unknown";
+
+    if (device.includes("Chrome")) device = "Chrome Browser";
+    else if (device.includes("Safari")) device = "Safari Browser";
+    else if (device.includes("Firefox")) device = "Firefox Browser";
+
+    // ================= DATE =================
+    const date = new Date().toLocaleString("en-IN");
+
     // ================= POSITION =================
     const metadata = await sharp(baseImage).metadata();
 
@@ -108,23 +138,13 @@ exports.signOwnerAgreement = async (req, res) => {
     const ownerY = Math.floor(metadata.height * 0.72);
 
     // ================= LEGAL TEXT =================
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-    const device = req.headers["user-agent"];
-    const date = new Date().toLocaleString();
-
-    const legalText = `
-      Digitally Signed by Owner
-      Mobile: ${owner_mobile}
-      Date: ${date}
-      IP: ${ip}
-    `;
-
     const svgText = `
-    <svg width="500" height="100">
+    <svg width="500" height="120">
       <text x="0" y="20" font-size="16" fill="black">Digitally Signed</text>
       <text x="0" y="40" font-size="14" fill="black">Mobile: ${owner_mobile}</text>
       <text x="0" y="60" font-size="14" fill="black">Date: ${date}</text>
       <text x="0" y="80" font-size="12" fill="black">IP: ${ip}</text>
+      <text x="0" y="100" font-size="12" fill="black">Device: ${device}</text>
     </svg>
     `;
 
@@ -135,7 +155,7 @@ exports.signOwnerAgreement = async (req, res) => {
       .composite([
         {
           input: textBuffer,
-          top: ownerY - 90,
+          top: ownerY - 110,
           left: ownerX
         },
         {
