@@ -86,3 +86,27 @@ exports.getOwnerSettlementSummary = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to load summary" });
   }
 };
+
+
+
+
+exports.signOwnerAgreement = async (req, res) => {
+  const { booking_id, owner_mobile, owner_signature } = req.body;
+  try {
+    // This updates the signature in the agreements_form table
+    // owner_signature is the Base64 image string from the canvas
+    await db.query(`
+      UPDATE agreements_form 
+      SET 
+        owner_signature = ?, 
+        mobile = ?, 
+        owner_signed_at = NOW(),
+        agreement_status = 'approved' 
+      WHERE booking_id = ?
+    `, [owner_signature, owner_mobile, booking_id]);
+
+    res.json({ success: true, message: "Signature saved!" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};

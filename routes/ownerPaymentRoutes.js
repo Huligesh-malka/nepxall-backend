@@ -10,4 +10,5 @@ const auth = require("../middlewares/auth");
 router.get("/payments", auth, getOwnerPayments);
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
 
+router.post("/sign-agreement", auth, signOwnerAgreement);
 module.exports = router;
