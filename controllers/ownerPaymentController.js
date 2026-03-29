@@ -60,7 +60,6 @@ exports.markAgreementViewed = async (req, res) => {
 };
 
 /* ================= SIGN OWNER AGREEMENT ================= */
-/* ================= SIGN OWNER AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -69,7 +68,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    // ================= CHECK ALREADY SIGNED =================
+    // CHECK ALREADY SIGNED
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -79,7 +78,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Already signed" });
     }
 
-    // ================= GET IMAGE =================
+    // GET IMAGE
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -93,7 +92,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const baseImage = Buffer.from(response.data);
 
-    // ================= SIGNATURE =================
+    // SIGNATURE
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
@@ -105,11 +104,10 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= CLEAN IP =================
+    // ================= STORE IP (NOT DISPLAY) =================
     const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
 
     let ip = "Unknown";
-
     if (rawIp) {
       const firstIp = rawIp.split(",")[0].trim();
 
@@ -122,17 +120,7 @@ exports.signOwnerAgreement = async (req, res) => {
       }
     }
 
-    // ================= LOCATION =================
-    let location = "Unknown";
-
-    try {
-      const geo = await axios.get(`http://ip-api.com/json/${ip}`);
-      location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
-    } catch (e) {
-      console.log("Location fetch failed");
-    }
-
-    // ================= DEVICE =================
+    // ================= STORE DEVICE (NOT DISPLAY) =================
     let ua = req.headers["user-agent"] || "";
     let device = "Unknown";
 
@@ -141,31 +129,43 @@ exports.signOwnerAgreement = async (req, res) => {
     else if (ua.includes("Firefox")) device = "Firefox Browser";
     else if (ua.includes("Mobile")) device = "Mobile Device";
 
-    // ================= POSITION =================
+    // ================= LOCATION (OPTIONAL DISPLAY) =================
+    let location = "Unknown";
+    try {
+      const geo = await axios.get(`http://ip-api.com/json/${ip}`);
+      location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
+    } catch (e) {}
+
+    // DATE & TIME
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString("en-IN");
+    const formattedTime = now.toLocaleTimeString("en-IN");
+
+    // POSITION
     const metadata = await sharp(baseImage).metadata();
 
     const ownerX = metadata.width - signatureWidth - 40;
     const ownerY = Math.floor(metadata.height * 0.72);
 
-    // ================= LEGAL TEXT =================
+    // ================= SAFE LEGAL TEXT =================
     const svgText = `
-    <svg width="600" height="120">
-      <text x="0" y="20" font-size="16" fill="black">Digitally Signed</text>
-      <text x="0" y="40" font-size="14" fill="black">Mobile: ${owner_mobile}</text>
-      <text x="0" y="60" font-size="14" fill="black">IP: ${ip}</text>
-      <text x="0" y="80" font-size="12" fill="black">Location: ${location}</text>
-      <text x="0" y="100" font-size="12" fill="black">Device: ${device}</text>
+    <svg width="650" height="140">
+      <text x="0" y="20" font-size="16">Digitally Signed</text>
+      <text x="0" y="40" font-size="14">Mobile: ${owner_mobile}</text>
+      <text x="0" y="60" font-size="14">Date: ${formattedDate}</text>
+      <text x="0" y="80" font-size="14">Time: ${formattedTime}</text>
+      <text x="0" y="100" font-size="12">Location: ${location}</text>
     </svg>
     `;
 
     const textBuffer = Buffer.from(svgText);
 
-    // ================= MERGE =================
+    // MERGE
     const finalImage = await sharp(baseImage)
       .composite([
         {
           input: textBuffer,
-          top: ownerY - 110,
+          top: ownerY - 120,
           left: ownerX
         },
         {
@@ -177,7 +177,7 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= UPLOAD =================
+    // UPLOAD
     const uploadResult = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
       {
@@ -188,7 +188,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const signedUrl = uploadResult.secure_url;
 
-    // ================= SAVE DB =================
+    // SAVE DB (IP + DEVICE STORED HERE)
     await db.query(`
       UPDATE agreements_form 
       SET 
@@ -218,6 +218,7 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ message: "Signing failed ❌" });
   }
 };
+
 /* ================= SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
