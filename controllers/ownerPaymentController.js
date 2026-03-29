@@ -62,8 +62,6 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    console.log("SIGN REQUEST:", booking_id);
-
     // prevent duplicate
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
@@ -85,8 +83,6 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const imageUrl = rows[0].final_pdf;
 
-    console.log("IMAGE URL:", imageUrl);
-
     // ================= LOAD IMAGE =================
     let baseImage;
 
@@ -100,10 +96,6 @@ exports.signOwnerAgreement = async (req, res) => {
     }
 
     // ================= SIGNATURE =================
-    if (!owner_signature.includes("base64")) {
-      return res.status(400).json({ message: "Invalid signature format" });
-    }
-
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
@@ -115,16 +107,22 @@ exports.signOwnerAgreement = async (req, res) => {
     // ================= IMAGE SIZE =================
     const metadata = await sharp(baseImage).metadata();
 
-    const posX = Math.max(metadata.width - 220, 10);
-    const posY = Math.max(metadata.height - 120, 10);
+    const signatureWidth = 200;
+    const signatureHeight = 80;
+
+    const margin = 30;
+
+    // 🔥 OWNER (RIGHT SIDE)
+    const ownerX = metadata.width - signatureWidth - margin;
+    const ownerY = metadata.height - signatureHeight - margin;
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
       .composite([
         {
           input: resizedSignature,
-          top: posY,
-          left: posX
+          top: ownerY,
+          left: ownerX
         }
       ])
       .png()
@@ -158,8 +156,6 @@ exports.signOwnerAgreement = async (req, res) => {
       outputPath,
       booking_id
     ]);
-
-    console.log("SIGN SUCCESS:", booking_id);
 
     res.json({
       success: true,
