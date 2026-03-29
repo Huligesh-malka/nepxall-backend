@@ -59,6 +59,7 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
+/* ================= SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -77,7 +78,6 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Already signed" });
     }
 
-    // get agreement image (Cloudinary URL)
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -89,7 +89,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const imageUrl = rows[0].final_pdf;
 
-    // ================= LOAD BASE IMAGE =================
+    // ================= LOAD IMAGE =================
     const response = await axios.get(imageUrl, {
       responseType: "arraybuffer"
     });
@@ -108,15 +108,13 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= POSITION FIX (🔥 IMPORTANT) =================
+    // ================= POSITION =================
     const metadata = await sharp(baseImage).metadata();
 
-    // 👉 move UP from bottom to align with signature line
-    const marginBottom = 110;   // 🔥 adjust here if needed
-    const marginRight = 40;
+    const margin = 30;
 
-    const ownerX = metadata.width - signatureWidth - marginRight;
-    const ownerY = metadata.height - signatureHeight - marginBottom;
+    const ownerX = metadata.width - signatureWidth - margin;
+    const ownerY = metadata.height - signatureHeight - margin;
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
@@ -171,6 +169,7 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ message: "Signing failed ❌" });
   }
 };
+
 /* ================= SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
