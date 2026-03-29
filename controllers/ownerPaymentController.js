@@ -60,6 +60,7 @@ exports.markAgreementViewed = async (req, res) => {
 };
 
 /* ================= SIGN OWNER AGREEMENT ================= */
+/* ================= SIGN OWNER AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -78,7 +79,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Already signed" });
     }
 
-    // ================= GET PDF IMAGE =================
+    // ================= GET IMAGE =================
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -121,15 +122,24 @@ exports.signOwnerAgreement = async (req, res) => {
       }
     }
 
-    // ================= CLEAN DEVICE =================
-    let device = req.headers["user-agent"] || "Unknown";
+    // ================= LOCATION =================
+    let location = "Unknown";
 
-    if (device.includes("Chrome")) device = "Chrome Browser";
-    else if (device.includes("Safari")) device = "Safari Browser";
-    else if (device.includes("Firefox")) device = "Firefox Browser";
+    try {
+      const geo = await axios.get(`http://ip-api.com/json/${ip}`);
+      location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
+    } catch (e) {
+      console.log("Location fetch failed");
+    }
 
-    // ================= DATE =================
-    const date = new Date().toLocaleString("en-IN");
+    // ================= DEVICE =================
+    let ua = req.headers["user-agent"] || "";
+    let device = "Unknown";
+
+    if (ua.includes("Chrome")) device = "Chrome Browser";
+    else if (ua.includes("Safari")) device = "Safari Browser";
+    else if (ua.includes("Firefox")) device = "Firefox Browser";
+    else if (ua.includes("Mobile")) device = "Mobile Device";
 
     // ================= POSITION =================
     const metadata = await sharp(baseImage).metadata();
@@ -139,11 +149,11 @@ exports.signOwnerAgreement = async (req, res) => {
 
     // ================= LEGAL TEXT =================
     const svgText = `
-    <svg width="500" height="120">
+    <svg width="600" height="120">
       <text x="0" y="20" font-size="16" fill="black">Digitally Signed</text>
       <text x="0" y="40" font-size="14" fill="black">Mobile: ${owner_mobile}</text>
-      <text x="0" y="60" font-size="14" fill="black">Date: ${date}</text>
-      <text x="0" y="80" font-size="12" fill="black">IP: ${ip}</text>
+      <text x="0" y="60" font-size="14" fill="black">IP: ${ip}</text>
+      <text x="0" y="80" font-size="12" fill="black">Location: ${location}</text>
       <text x="0" y="100" font-size="12" fill="black">Device: ${device}</text>
     </svg>
     `;
