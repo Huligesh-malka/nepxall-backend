@@ -108,13 +108,14 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= POSITION =================
+    // ================= POSITION FIX =================
     const metadata = await sharp(baseImage).metadata();
 
-    const margin = 30;
+    const marginBottom = 120;  // 🔥 FIXED (move UP)
+    const marginRight = 40;
 
-    const ownerX = metadata.width - signatureWidth - margin;
-    const ownerY = metadata.height - signatureHeight - margin;
+    const ownerX = metadata.width - signatureWidth - marginRight;
+    const ownerY = metadata.height - signatureHeight - marginBottom;
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
