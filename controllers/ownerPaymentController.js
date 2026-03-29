@@ -59,7 +59,7 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
-/* ================= SIGN AGREEMENT ================= */
+
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -108,14 +108,13 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= POSITION FIX =================
+    // ================= SMART POSITION =================
     const metadata = await sharp(baseImage).metadata();
 
-    const marginBottom = 120;  // 🔥 FIXED (move UP)
-    const marginRight = 40;
+    const ownerX = metadata.width - signatureWidth - 40;
 
-    const ownerX = metadata.width - signatureWidth - marginRight;
-    const ownerY = metadata.height - signatureHeight - marginBottom;
+    // 🔥 MAGIC LINE (dynamic position)
+    const ownerY = Math.floor(metadata.height * 0.78);
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
@@ -129,7 +128,7 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= UPLOAD TO CLOUDINARY =================
+    // ================= UPLOAD =================
     const base64Image = finalImage.toString("base64");
 
     const uploadResult = await cloudinary.uploader.upload(
