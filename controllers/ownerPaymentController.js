@@ -1,22 +1,22 @@
+// controllers/ownerPaymentController.js
+
 const db = require("../db");
 const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
 
-/* ================= HELPERS ================= */
+/* ================= PDF SIGN FUNCTION ================= */
 async function embedSignatureIntoPDF(originalPath, signatureBase64, outputPath) {
   const pdfBytes = fs.readFileSync(originalPath);
   const pdfDoc = await PDFDocument.load(pdfBytes);
 
-  // Remove the data:image/png;base64 prefix if present
   const base64Data = signatureBase64.split(",")[1] || signatureBase64;
   const pngImage = await pdfDoc.embedPng(Buffer.from(base64Data, "base64"));
-  
+
   const pages = pdfDoc.getPages();
-  const page = pages[pages.length - 1]; // Sign on the last page
+  const page = pages[pages.length - 1];
   const { width } = page.getSize();
 
-  // Position: Bottom Right
   page.drawImage(pngImage, {
     x: width - 180,
     y: 80,
@@ -34,21 +34,25 @@ async function embedSignatureIntoPDF(originalPath, signatureBase64, outputPath) 
   fs.writeFileSync(outputPath, newPdfBytes);
 }
 
-/* ================= CONTROLLERS ================= */
-
+/* ================= GET OWNER PAYMENTS ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
 
     const [rows] = await db.query(`
       SELECT 
-        b.id AS booking_id, b.name AS tenant_name, b.owner_amount,
+        b.id AS booking_id,
+        b.name AS tenant_name,
+        b.owner_amount,
         pg.pg_name,
-        af.final_pdf, af.signed_pdf, af.agreement_status, af.owner_signed_at
+        af.final_pdf,
+        af.signed_pdf,
+        af.agreement_status,
+        af.owner_signed_at
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       INNER JOIN payments p ON b.id = p.booking_id
-      LEFT JOIN agreements_form af ON b.id = af.booking_id 
+      LEFT JOIN agreements_form af ON b.id = af.booking_id
       WHERE b.owner_id = ? AND p.status = 'paid'
       ORDER BY p.created_at DESC
     `, [ownerId]);
@@ -59,23 +63,24 @@ exports.getOwnerPayments = async (req, res) => {
     }));
 
     res.json({ success: true, data: updated });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+/* ================= SIGN OWNER AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
-  const ownerId = req.user.mysqlId || req.user.id;
 
   try {
     if (!accepted_terms || !owner_signature) {
-      return res.status(400).json({ message: "Terms and Signature required" });
+      return res.status(400).json({ message: "Terms & Signature required" });
     }
 
-    // Get Original PDF path
     const [rows] = await db.query(
-      `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`, 
+      `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
     );
 
@@ -84,18 +89,19 @@ exports.signOwnerAgreement = async (req, res) => {
     }
 
     const originalPdf = path.join(__dirname, "../", rows[0].final_pdf);
+
     const fileName = `signed_${booking_id}_${Date.now()}.pdf`;
     const signedPdfPath = `uploads/signed_agreements/${fileName}`;
     const absoluteOutputPath = path.join(__dirname, "../", signedPdfPath);
 
-    // Ensure directory exists
+    // create folder if not exists
     const dir = path.dirname(absoluteOutputPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    // Embed Signature
+    // embed signature
     await embedSignatureIntoPDF(originalPdf, owner_signature, absoluteOutputPath);
 
-    // Audit Trail Data
+    // audit data
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const device = req.headers["user-agent"];
 
@@ -111,24 +117,48 @@ exports.signOwnerAgreement = async (req, res) => {
         device_info = ?,
         signed_pdf = ?
       WHERE booking_id = ?
-    `, [owner_signature, owner_mobile, ip, device, signedPdfPath, booking_id]);
+    `, [
+      owner_signature,
+      owner_mobile,
+      ip,
+      device,
+      signedPdfPath,
+      booking_id
+    ]);
 
-    res.json({ success: true, message: "Agreement Signed & Stored ✅" });
+    res.json({
+      success: true,
+      message: "Agreement Signed & Stored ✅",
+      signed_pdf: signedPdfPath
+    });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Signing process failed" });
   }
 };
 
+/* ================= OWNER SETTLEMENT SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
-    const [rows] = await db.query(
-      `SELECT COUNT(*) as total, SUM(owner_amount) as total_earned FROM bookings WHERE owner_id = ?`, 
-      [ownerId]
-    );
-    res.json({ success: true, data: rows[0] });
+
+    const [rows] = await db.query(`
+      SELECT 
+        COUNT(*) AS total_bookings,
+        SUM(owner_amount) AS total_earned,
+        SUM(CASE WHEN status = 'paid' THEN owner_amount ELSE 0 END) AS paid_amount
+      FROM bookings
+      WHERE owner_id = ?
+    `, [ownerId]);
+
+    res.json({
+      success: true,
+      data: rows[0]
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false });
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };

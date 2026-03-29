@@ -1,3 +1,5 @@
+// routes/ownerPayments.js
+
 const express = require("express");
 const router = express.Router();
 
@@ -9,13 +11,13 @@ const {
 
 const auth = require("../middlewares/auth");
 
-/* ================= OWNER PAYMENTS ================= */
+/* ================= PAYMENTS ================= */
 router.get("/payments", auth, getOwnerPayments);
 
-/* ================= OWNER SUMMARY ================= */
+/* ================= SUMMARY ================= */
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
 
-/* ================= SIGN AGREEMENT ================= */
+/* ================= SIGN ================= */
 router.post("/agreements/sign", auth, signOwnerAgreement);
 
 module.exports = router;
