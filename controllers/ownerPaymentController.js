@@ -1,10 +1,8 @@
-// controllers/ownerPaymentController.js
-
 const db = require("../db");
-const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const sharp = require("sharp");
 
 /* ================= GET OWNER PAYMENTS ================= */
 exports.getOwnerPayments = async (req, res) => {
@@ -47,11 +45,10 @@ exports.markAgreementViewed = async (req, res) => {
   const { booking_id } = req.body;
 
   try {
-    await db.query(`
-      UPDATE agreements_form 
-      SET viewed_by_owner = 1
-      WHERE booking_id = ?
-    `, [booking_id]);
+    await db.query(
+      `UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`,
+      [booking_id]
+    );
 
     res.json({ success: true });
 
@@ -61,16 +58,16 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
-/* ================= SIGN AGREEMENT ================= */
+/* ================= SIGN AGREEMENT (IMAGE VERSION) ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature) {
-      return res.status(400).json({ message: "Terms & Signature required" });
+      return res.status(400).json({ message: "Signature required" });
     }
 
-    // prevent duplicate signing
+    // prevent duplicate
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -85,52 +82,57 @@ exports.signOwnerAgreement = async (req, res) => {
       [booking_id]
     );
 
-    if (!rows.length || !rows[0].final_pdf) {
-      return res.status(404).json({ message: "PDF not found" });
+    if (!rows.length) {
+      return res.status(404).json({ message: "File not found" });
     }
 
-    let originalPdf;
+    const imageUrl = rows[0].final_pdf;
 
-    if (rows[0].final_pdf.startsWith("http")) {
-      const response = await axios.get(rows[0].final_pdf, { responseType: "arraybuffer" });
-      originalPdf = Buffer.from(response.data);
+    // ================= LOAD IMAGE =================
+    let baseImage;
+
+    if (imageUrl.startsWith("http")) {
+      const response = await axios.get(imageUrl, {
+        responseType: "arraybuffer"
+      });
+      baseImage = Buffer.from(response.data);
     } else {
-      originalPdf = fs.readFileSync(path.join(__dirname, "../", rows[0].final_pdf));
+      baseImage = fs.readFileSync(path.join(__dirname, "../", imageUrl));
     }
 
-    const pdfDoc = await PDFDocument.load(originalPdf);
+    // ================= SIGNATURE =================
+    const base64Data = owner_signature.split(",")[1];
+    const signatureBuffer = Buffer.from(base64Data, "base64");
 
-    const base64Data = owner_signature.split(",")[1] || owner_signature;
-    const pngImage = await pdfDoc.embedPng(Buffer.from(base64Data, "base64"));
+    const resizedSignature = await sharp(signatureBuffer)
+      .resize(200, 80)
+      .png()
+      .toBuffer();
 
-    const page = pdfDoc.getPages().pop();
-    const { width } = page.getSize();
+    // ================= MERGE =================
+    const finalImage = await sharp(baseImage)
+      .composite([
+        {
+          input: resizedSignature,
+          top: 400,   // 🔥 adjust
+          left: 500   // 🔥 adjust
+        }
+      ])
+      .png()
+      .toBuffer();
 
-    page.drawImage(pngImage, {
-      x: width - 180,
-      y: 80,
-      width: 120,
-      height: 50
-    });
-
-    page.drawText(`Digitally Signed on ${new Date().toLocaleString()}`, {
-      x: width - 180,
-      y: 65,
-      size: 8
-    });
-
-    const pdfBytes = await pdfDoc.save();
-
-    const fileName = `signed_${booking_id}_${Date.now()}.pdf`;
-    const signedPath = `uploads/signed_agreements/${fileName}`;
-    const fullPath = path.join(__dirname, "../", signedPath);
+    // ================= SAVE =================
+    const fileName = `signed_${booking_id}_${Date.now()}.png`;
+    const outputPath = `uploads/signed/${fileName}`;
+    const fullPath = path.join(__dirname, "../", outputPath);
 
     if (!fs.existsSync(path.dirname(fullPath))) {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     }
 
-    fs.writeFileSync(fullPath, pdfBytes);
+    fs.writeFileSync(fullPath, finalImage);
 
+    // ================= UPDATE DB =================
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const device = req.headers["user-agent"];
 
@@ -142,28 +144,27 @@ exports.signOwnerAgreement = async (req, res) => {
         owner_signed_at = NOW(),
         agreement_status = 'approved',
         viewed_by_owner = 1,
-        terms_accepted = 1,
+        signed_pdf = ?,
         ip_address = ?,
-        device_info = ?,
-        signed_pdf = ?
+        device_info = ?
       WHERE booking_id = ?
     `, [
       owner_signature,
       owner_mobile,
+      outputPath,
       ip,
       device,
-      signedPath,
       booking_id
     ]);
 
     res.json({
       success: true,
-      message: "Signed successfully",
-      signed_pdf: signedPath
+      message: "Signed Image Created ✅",
+      signed_pdf: outputPath
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("SIGN ERROR:", err);
     res.status(500).json({ message: "Signing failed" });
   }
 };
