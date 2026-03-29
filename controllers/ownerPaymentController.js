@@ -6,7 +6,6 @@ exports.getOwnerPayments = async (req, res) => {
     
     console.log("🔍 Fetching payments & agreements for owner ID:", ownerId);
 
-    // Join with agreement_form to get the final_pdf column
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -22,16 +21,18 @@ exports.getOwnerPayments = async (req, res) => {
         p.amount AS payment_amount,
         p.created_at AS payment_date,
         p.utr,
-        af.final_pdf              /* <--- Fetching from agreement_form table */
+        af.final_pdf
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       INNER JOIN payments p ON b.id = p.booking_id
-      LEFT JOIN agreement_form af ON b.id = af.booking_id  /* Joining the two tables */
+      LEFT JOIN agreements_form af ON b.id = af.booking_id  /* Fixed: added the 's' */
       WHERE b.owner_id = ? 
       AND b.status IN ('confirmed', 'approved', 'agreement_ready')
       AND p.status = 'paid' 
       ORDER BY p.created_at DESC 
     `, [ownerId]);
+
+    console.log(`✅ Success: Found ${rows.length} records for owner ${ownerId}`);
 
     res.json({
       success: true,
@@ -40,15 +41,16 @@ exports.getOwnerPayments = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ OWNER PAYMENTS ERROR:", err);
+    console.error("❌ OWNER PAYMENTS ERROR:", err.message);
     res.status(500).json({
       success: false,
-      message: "Failed to load owner payments",
+      message: "Database error: check table names",
       error: err.message
     });
   }
 };
 
+// Summary remains consistent
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
