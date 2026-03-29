@@ -62,7 +62,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    // prevent duplicate
+    // prevent duplicate signing
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -96,23 +96,27 @@ exports.signOwnerAgreement = async (req, res) => {
     }
 
     // ================= SIGNATURE =================
+    if (!owner_signature.includes("base64")) {
+      return res.status(400).json({ message: "Invalid signature" });
+    }
+
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
+    const signatureWidth = 200;
+    const signatureHeight = 80;
+
     const resizedSignature = await sharp(signatureBuffer)
-      .resize(200, 80)
+      .resize(signatureWidth, signatureHeight)
       .png()
       .toBuffer();
 
     // ================= IMAGE SIZE =================
     const metadata = await sharp(baseImage).metadata();
 
-    const signatureWidth = 200;
-    const signatureHeight = 80;
-
     const margin = 30;
 
-    // 🔥 OWNER (RIGHT SIDE)
+    // ✅ OWNER SIGNATURE (BOTTOM RIGHT)
     const ownerX = metadata.width - signatureWidth - margin;
     const ownerY = metadata.height - signatureHeight - margin;
 
