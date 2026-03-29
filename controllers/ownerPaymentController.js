@@ -27,11 +27,16 @@ exports.getOwnerPayments = async (req, res) => {
       ORDER BY p.created_at DESC
     `, [ownerId]);
 
-    res.json({ success: true, data: rows });
+    const updated = rows.map(r => ({
+      ...r,
+      owner_signed: !!r.signed_pdf
+    }));
+
+    res.json({ success: true, data: updated });
 
   } catch (err) {
-    console.error("GET PAYMENTS ERROR:", err);
-    res.status(500).json({ success: false });
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -48,12 +53,12 @@ exports.markAgreementViewed = async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-    console.error("VIEW ERROR:", err);
-    res.status(500).json({ message: "Failed" });
+    console.error(err);
+    res.status(500).json({ message: "Failed to mark viewed" });
   }
 };
 
-/* ================= SIGN AGREEMENT ================= */
+/* ================= SIGN AGREEMENT (IMAGE VERSION) ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -62,7 +67,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    // prevent duplicate signing
+    // prevent duplicate
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -77,8 +82,8 @@ exports.signOwnerAgreement = async (req, res) => {
       [booking_id]
     );
 
-    if (!rows.length || !rows[0].final_pdf) {
-      return res.status(404).json({ message: "Image not found" });
+    if (!rows.length) {
+      return res.status(404).json({ message: "File not found" });
     }
 
     const imageUrl = rows[0].final_pdf;
@@ -96,37 +101,21 @@ exports.signOwnerAgreement = async (req, res) => {
     }
 
     // ================= SIGNATURE =================
-    if (!owner_signature.includes("base64")) {
-      return res.status(400).json({ message: "Invalid signature" });
-    }
-
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
-    const signatureWidth = 200;
-    const signatureHeight = 80;
-
     const resizedSignature = await sharp(signatureBuffer)
-      .resize(signatureWidth, signatureHeight)
+      .resize(200, 80)
       .png()
       .toBuffer();
-
-    // ================= IMAGE SIZE =================
-    const metadata = await sharp(baseImage).metadata();
-
-    const margin = 30;
-
-    // ✅ OWNER SIGNATURE (BOTTOM RIGHT)
-    const ownerX = metadata.width - signatureWidth - margin;
-    const ownerY = metadata.height - signatureHeight - margin;
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
       .composite([
         {
           input: resizedSignature,
-          top: ownerY,
-          left: ownerX
+          top: 400,   // 🔥 adjust
+          left: 500   // 🔥 adjust
         }
       ])
       .png()
@@ -144,6 +133,9 @@ exports.signOwnerAgreement = async (req, res) => {
     fs.writeFileSync(fullPath, finalImage);
 
     // ================= UPDATE DB =================
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const device = req.headers["user-agent"];
+
     await db.query(`
       UPDATE agreements_form 
       SET 
@@ -152,23 +144,28 @@ exports.signOwnerAgreement = async (req, res) => {
         owner_signed_at = NOW(),
         agreement_status = 'approved',
         viewed_by_owner = 1,
-        signed_pdf = ?
+        signed_pdf = ?,
+        ip_address = ?,
+        device_info = ?
       WHERE booking_id = ?
     `, [
       owner_signature,
       owner_mobile,
       outputPath,
+      ip,
+      device,
       booking_id
     ]);
 
     res.json({
       success: true,
+      message: "Signed Image Created ✅",
       signed_pdf: outputPath
     });
 
   } catch (err) {
     console.error("SIGN ERROR:", err);
-    res.status(500).json({ message: "Signing failed ❌" });
+    res.status(500).json({ message: "Signing failed" });
   }
 };
 
@@ -188,7 +185,6 @@ exports.getOwnerSettlementSummary = async (req, res) => {
     res.json({ success: true, data: rows[0] });
 
   } catch (err) {
-    console.error("SUMMARY ERROR:", err);
     res.status(500).json({ success: false });
   }
 };
