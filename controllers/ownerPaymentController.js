@@ -4,8 +4,6 @@ exports.getOwnerPayments = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
     
-    console.log("🔍 Fetching payments & agreements for owner ID:", ownerId);
-
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -25,36 +23,63 @@ exports.getOwnerPayments = async (req, res) => {
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       INNER JOIN payments p ON b.id = p.booking_id
-      LEFT JOIN agreements_form af ON b.id = af.booking_id  /* Fixed: added the 's' */
+      LEFT JOIN agreements_form af ON b.id = af.booking_id 
       WHERE b.owner_id = ? 
       AND b.status IN ('confirmed', 'approved', 'agreement_ready')
       AND p.status = 'paid' 
       ORDER BY p.created_at DESC 
     `, [ownerId]);
 
-    console.log(`✅ Success: Found ${rows.length} records for owner ${ownerId}`);
-
-    res.json({
-      success: true,
-      data: rows,
-      count: rows.length
-    });
-
+    res.json({ success: true, data: rows, count: rows.length });
   } catch (err) {
-    console.error("❌ OWNER PAYMENTS ERROR:", err.message);
-    res.status(500).json({
-      success: false,
-      message: "Database error: check table names",
-      error: err.message
-    });
+    res.status(500).json({ success: false, message: "Database error", error: err.message });
   }
 };
 
-// Summary remains consistent
+// NEW: Handle the digital signature submission
+exports.signOwnerAgreement = async (req, res) => {
+  const { booking_id, owner_mobile, owner_signature } = req.body;
+  const ownerId = req.user.mysqlId || req.user.id;
+
+  try {
+    // 1. Verify this booking belongs to the requesting owner
+    const [booking] = await db.query(
+      "SELECT id FROM bookings WHERE id = ? AND owner_id = ?", 
+      [booking_id, ownerId]
+    );
+
+    if (booking.length === 0) {
+      return res.status(403).json({ success: false, message: "Unauthorized or booking not found" });
+    }
+
+    // 2. Update the agreements_form table
+    // We store the signature (Base64 string), the mobile used, and set status to 'approved'
+    await db.query(`
+      UPDATE agreements_form 
+      SET 
+        owner_signature = ?, 
+        mobile = ?, 
+        owner_signed_at = NOW(),
+        agreement_status = 'approved' 
+      WHERE booking_id = ?
+    `, [owner_signature, owner_mobile, booking_id]);
+
+    // 3. Optional: Update booking status to 'confirmed' if it was just 'approved'
+    await db.query(
+      "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'approved'", 
+      [booking_id]
+    );
+
+    res.json({ success: true, message: "Agreement signed and approved successfully!" });
+  } catch (err) {
+    console.error("❌ SIGNING ERROR:", err);
+    res.status(500).json({ success: false, message: "Internal server error during signing" });
+  }
+};
+
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
-
     const [rows] = await db.query(`
       SELECT 
         COUNT(DISTINCT b.id) as total_approved_bookings,
@@ -80,33 +105,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
         completed_settlements: rows[0]?.completed_settlements || 0
       }
     });
-
   } catch (err) {
-    console.error("❌ SUMMARY ERROR:", err);
     res.status(500).json({ success: false, message: "Failed to load summary" });
-  }
-};
-
-
-
-
-exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature } = req.body;
-  try {
-    // This updates the signature in the agreements_form table
-    // owner_signature is the Base64 image string from the canvas
-    await db.query(`
-      UPDATE agreements_form 
-      SET 
-        owner_signature = ?, 
-        mobile = ?, 
-        owner_signed_at = NOW(),
-        agreement_status = 'approved' 
-      WHERE booking_id = ?
-    `, [owner_signature, owner_mobile, booking_id]);
-
-    res.json({ success: true, message: "Signature saved!" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
   }
 };

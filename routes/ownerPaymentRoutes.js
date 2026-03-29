@@ -3,12 +3,16 @@ const router = express.Router();
 
 const { 
   getOwnerPayments, 
-  getOwnerSettlementSummary 
+  getOwnerSettlementSummary,
+  signOwnerAgreement // Import the new function
 } = require("../controllers/ownerPaymentController");
 const auth = require("../middlewares/auth");
 
+// GET endpoints
 router.get("/payments", auth, getOwnerPayments);
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
 
-router.post("/sign-agreement", auth, signOwnerAgreement);
+// POST endpoints
+router.post("/sign-agreement", auth, signOwnerAgreement); // Add this line
+
 module.exports = router;
