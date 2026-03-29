@@ -1,18 +1,21 @@
 const express = require("express");
 const router = express.Router();
 
-const { 
-  getOwnerPayments, 
+const {
+  getOwnerPayments,
   getOwnerSettlementSummary,
-  signOwnerAgreement // Import the new function
+  signOwnerAgreement
 } = require("../controllers/ownerPaymentController");
+
 const auth = require("../middlewares/auth");
 
-// GET endpoints
+/* ================= OWNER PAYMENTS ================= */
 router.get("/payments", auth, getOwnerPayments);
+
+/* ================= OWNER SUMMARY ================= */
 router.get("/settlements/summary", auth, getOwnerSettlementSummary);
 
-// POST endpoints
-router.post("/sign-agreement", auth, signOwnerAgreement); // Add this line
+/* ================= SIGN AGREEMENT ================= */
+router.post("/agreements/sign", auth, signOwnerAgreement);
 
 module.exports = router;
