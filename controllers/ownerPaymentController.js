@@ -1,3 +1,5 @@
+// controllers/ownerPaymentController.js
+
 const db = require("../db");
 const axios = require("axios");
 const sharp = require("sharp");
@@ -36,25 +38,22 @@ exports.getOwnerPayments = async (req, res) => {
     res.json({ success: true, data: rows });
 
   } catch (err) {
-    console.error("GET PAYMENTS ERROR:", err);
+    console.error(err);
     res.status(500).json({ success: false });
   }
 };
 
 /* ================= MARK VIEWED ================= */
 exports.markAgreementViewed = async (req, res) => {
-  const { booking_id } = req.body;
-
   try {
     await db.query(
       `UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`,
-      [booking_id]
+      [req.body.booking_id]
     );
 
     res.json({ success: true });
 
   } catch (err) {
-    console.error("VIEW ERROR:", err);
     res.status(500).json({ message: "Failed" });
   }
 };
@@ -68,7 +67,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    // CHECK ALREADY SIGNED
+    /* ===== CHECK ALREADY SIGNED ===== */
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -78,7 +77,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Already signed" });
     }
 
-    // GET IMAGE
+    /* ===== GET BASE IMAGE ===== */
     const [rows] = await db.query(
       `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -92,7 +91,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const baseImage = Buffer.from(response.data);
 
-    // SIGNATURE
+    /* ===== SIGNATURE ===== */
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
@@ -104,24 +103,16 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= STORE IP (NOT DISPLAY) =================
+    /* ===== IP (STORE ONLY) ===== */
     const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
 
     let ip = "Unknown";
     if (rawIp) {
-      const firstIp = rawIp.split(",")[0].trim();
-
-      if (
-        !firstIp.startsWith("127.") &&
-        !firstIp.startsWith("10.") &&
-        !firstIp.startsWith("192.168")
-      ) {
-        ip = firstIp;
-      }
+      ip = rawIp.split(",")[0].trim();
     }
 
-    // ================= STORE DEVICE (NOT DISPLAY) =================
-    let ua = req.headers["user-agent"] || "";
+    /* ===== DEVICE (STORE ONLY) ===== */
+    const ua = req.headers["user-agent"] || "";
     let device = "Unknown";
 
     if (ua.includes("Chrome")) device = "Chrome Browser";
@@ -129,27 +120,36 @@ exports.signOwnerAgreement = async (req, res) => {
     else if (ua.includes("Firefox")) device = "Firefox Browser";
     else if (ua.includes("Mobile")) device = "Mobile Device";
 
-    // ================= LOCATION (OPTIONAL DISPLAY) =================
-    let location = "Unknown";
+    /* ===== LOCATION (DISPLAY) ===== */
+    let location = "India";
     try {
       const geo = await axios.get(`http://ip-api.com/json/${ip}`);
       location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
-    } catch (e) {}
+    } catch {}
 
-    // DATE & TIME
+    /* ===== ✅ IST TIME FIX ===== */
     const now = new Date();
-    const formattedDate = now.toLocaleDateString("en-IN");
-    const formattedTime = now.toLocaleTimeString("en-IN");
 
-    // POSITION
+    const formattedDate = now.toLocaleDateString("en-IN", {
+      timeZone: "Asia/Kolkata"
+    });
+
+    const formattedTime = now.toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+
+    /* ===== POSITION ===== */
     const metadata = await sharp(baseImage).metadata();
 
-    const ownerX = metadata.width - signatureWidth - 40;
-    const ownerY = Math.floor(metadata.height * 0.72);
+    const ownerX = metadata.width - 260;
+    const ownerY = Math.floor(metadata.height * 0.70);
 
-    // ================= SAFE LEGAL TEXT =================
+    /* ===== LEGAL TEXT (NO IP/DEVICE) ===== */
     const svgText = `
-    <svg width="650" height="140">
+    <svg width="600" height="150">
       <text x="0" y="20" font-size="16">Digitally Signed</text>
       <text x="0" y="40" font-size="14">Mobile: ${owner_mobile}</text>
       <text x="0" y="60" font-size="14">Date: ${formattedDate}</text>
@@ -160,12 +160,12 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const textBuffer = Buffer.from(svgText);
 
-    // MERGE
+    /* ===== MERGE ===== */
     const finalImage = await sharp(baseImage)
       .composite([
         {
           input: textBuffer,
-          top: ownerY - 120,
+          top: ownerY - 130,
           left: ownerX
         },
         {
@@ -177,7 +177,7 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // UPLOAD
+    /* ===== UPLOAD ===== */
     const uploadResult = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
       {
@@ -188,7 +188,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const signedUrl = uploadResult.secure_url;
 
-    // SAVE DB (IP + DEVICE STORED HERE)
+    /* ===== SAVE DB ===== */
     await db.query(`
       UPDATE agreements_form 
       SET 
@@ -235,7 +235,6 @@ exports.getOwnerSettlementSummary = async (req, res) => {
     res.json({ success: true, data: rows[0] });
 
   } catch (err) {
-    console.error("SUMMARY ERROR:", err);
     res.status(500).json({ success: false });
   }
 };
