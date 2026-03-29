@@ -67,7 +67,6 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    // prevent duplicate
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -82,13 +81,8 @@ exports.signOwnerAgreement = async (req, res) => {
       [booking_id]
     );
 
-    if (!rows.length || !rows[0].final_pdf) {
-      return res.status(404).json({ message: "Image not found" });
-    }
-
     const imageUrl = rows[0].final_pdf;
 
-    // ================= LOAD IMAGE =================
     const response = await axios.get(imageUrl, {
       responseType: "arraybuffer"
     });
@@ -107,17 +101,43 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ================= SMART POSITION =================
+    // ================= POSITION =================
     const metadata = await sharp(baseImage).metadata();
 
     const ownerX = metadata.width - signatureWidth - 40;
-
-    // 🔥 MAGIC LINE (dynamic position)
     const ownerY = Math.floor(metadata.height * 0.72);
+
+    // ================= LEGAL TEXT =================
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const device = req.headers["user-agent"];
+    const date = new Date().toLocaleString();
+
+    const legalText = `
+      Digitally Signed by Owner
+      Mobile: ${owner_mobile}
+      Date: ${date}
+      IP: ${ip}
+    `;
+
+    const svgText = `
+    <svg width="500" height="100">
+      <text x="0" y="20" font-size="16" fill="black">Digitally Signed</text>
+      <text x="0" y="40" font-size="14" fill="black">Mobile: ${owner_mobile}</text>
+      <text x="0" y="60" font-size="14" fill="black">Date: ${date}</text>
+      <text x="0" y="80" font-size="12" fill="black">IP: ${ip}</text>
+    </svg>
+    `;
+
+    const textBuffer = Buffer.from(svgText);
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
       .composite([
+        {
+          input: textBuffer,
+          top: ownerY - 90,
+          left: ownerX
+        },
         {
           input: resizedSignature,
           top: ownerY,
@@ -128,10 +148,8 @@ exports.signOwnerAgreement = async (req, res) => {
       .toBuffer();
 
     // ================= UPLOAD =================
-    const base64Image = finalImage.toString("base64");
-
     const uploadResult = await cloudinary.uploader.upload(
-      `data:image/png;base64,${base64Image}`,
+      `data:image/png;base64,${finalImage.toString("base64")}`,
       {
         folder: "signed_agreements",
         resource_type: "image"
@@ -140,7 +158,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const signedUrl = uploadResult.secure_url;
 
-    // ================= UPDATE DB =================
+    // ================= SAVE DB =================
     await db.query(`
       UPDATE agreements_form 
       SET 
@@ -149,26 +167,27 @@ exports.signOwnerAgreement = async (req, res) => {
         owner_signed_at = NOW(),
         agreement_status = 'approved',
         viewed_by_owner = 1,
-        signed_pdf = ?
+        signed_pdf = ?,
+        ip_address = ?,
+        device_info = ?,
+        terms_accepted = 1
       WHERE booking_id = ?
     `, [
       owner_signature,
       owner_mobile,
       signedUrl,
+      ip,
+      device,
       booking_id
     ]);
 
-    res.json({
-      success: true,
-      signed_pdf: signedUrl
-    });
+    res.json({ success: true, signed_pdf: signedUrl });
 
   } catch (err) {
-    console.error("SIGN ERROR:", err);
+    console.error(err);
     res.status(500).json({ message: "Signing failed ❌" });
   }
 };
-
 /* ================= SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
