@@ -5,14 +5,14 @@ const axios = require("axios");
 const sharp = require("sharp");
 const cloudinary = require("cloudinary").v2;
 
-/* ================= CLOUDINARY CONFIG ================= */
+/* ================= CLOUDINARY ================= */
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= GET OWNER PAYMENTS ================= */
+/* ================= GET PAYMENTS ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
     const ownerId = req.user.mysqlId || req.user.id;
@@ -22,13 +22,10 @@ exports.getOwnerPayments = async (req, res) => {
         b.id AS booking_id,
         b.name AS tenant_name,
         b.owner_amount,
-        pg.pg_name,
         af.final_pdf,
         af.signed_pdf,
-        af.viewed_by_owner,
-        af.owner_signed_at
+        af.viewed_by_owner
       FROM bookings b
-      JOIN pgs pg ON pg.id = b.pg_id
       INNER JOIN payments p ON b.id = p.booking_id
       LEFT JOIN agreements_form af ON b.id = af.booking_id
       WHERE b.owner_id = ? AND p.status = 'paid'
@@ -50,15 +47,13 @@ exports.markAgreementViewed = async (req, res) => {
       `UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`,
       [req.body.booking_id]
     );
-
     res.json({ success: true });
-
-  } catch (err) {
-    res.status(500).json({ message: "Failed" });
+  } catch {
+    res.status(500).json({ success: false });
   }
 };
 
-/* ================= SIGN OWNER AGREEMENT ================= */
+/* ================= SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -67,13 +62,13 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    /* ===== CHECK ALREADY SIGNED ===== */
+    /* ===== ALREADY SIGNED CHECK ===== */
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
     );
 
-    if (existing.length && existing[0].signed_pdf) {
+    if (existing[0]?.signed_pdf) {
       return res.status(400).json({ message: "Already signed" });
     }
 
@@ -95,23 +90,16 @@ exports.signOwnerAgreement = async (req, res) => {
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
-    const signatureWidth = 200;
-    const signatureHeight = 80;
-
     const resizedSignature = await sharp(signatureBuffer)
-      .resize(signatureWidth, signatureHeight)
+      .resize(220, 90)
       .png()
       .toBuffer();
 
-    /* ===== IP (STORE ONLY) ===== */
+    /* ===== IP STORE ONLY ===== */
     const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const ip = rawIp ? rawIp.split(",")[0].trim() : "Unknown";
 
-    let ip = "Unknown";
-    if (rawIp) {
-      ip = rawIp.split(",")[0].trim();
-    }
-
-    /* ===== DEVICE (STORE ONLY) ===== */
+    /* ===== DEVICE STORE ONLY ===== */
     const ua = req.headers["user-agent"] || "";
     let device = "Unknown";
 
@@ -120,73 +108,67 @@ exports.signOwnerAgreement = async (req, res) => {
     else if (ua.includes("Firefox")) device = "Firefox Browser";
     else if (ua.includes("Mobile")) device = "Mobile Device";
 
-    /* ===== LOCATION (DISPLAY) ===== */
+    /* ===== LOCATION (LEGAL DISPLAY) ===== */
     let location = "India";
     try {
       const geo = await axios.get(`http://ip-api.com/json/${ip}`);
       location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
     } catch {}
 
-    /* ===== ✅ IST TIME FIX ===== */
+    /* ===== IST TIME FIX ===== */
     const now = new Date();
 
-    const formattedDate = now.toLocaleDateString("en-IN", {
-      timeZone: "Asia/Kolkata"
-    });
+    const formattedDate = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    }).format(now);
 
-    const formattedTime = now.toLocaleTimeString("en-IN", {
+    const formattedTime = new Intl.DateTimeFormat("en-IN", {
       timeZone: "Asia/Kolkata",
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit"
-    });
+      second: "2-digit",
+      hour12: true
+    }).format(now);
 
-    /* ===== POSITION ===== */
+    /* ===== POSITION FIX ===== */
     const metadata = await sharp(baseImage).metadata();
 
-    const ownerX = metadata.width - 260;
-    const ownerY = Math.floor(metadata.height * 0.70);
+    const x = metadata.width - 300;
+    const y = metadata.height - 200; // 🔥 FIXED POSITION
 
-    /* ===== LEGAL TEXT (NO IP/DEVICE) ===== */
-    const svgText = `
-    <svg width="600" height="150">
+    /* ===== LEGAL TEXT ===== */
+    const svg = `
+    <svg width="600" height="200">
       <text x="0" y="20" font-size="16">Digitally Signed</text>
-      <text x="0" y="40" font-size="14">Mobile: ${owner_mobile}</text>
-      <text x="0" y="60" font-size="14">Date: ${formattedDate}</text>
-      <text x="0" y="80" font-size="14">Time: ${formattedTime}</text>
-      <text x="0" y="100" font-size="12">Location: ${location}</text>
+      <text x="0" y="45" font-size="14">Mobile: ${owner_mobile}</text>
+      <text x="0" y="70" font-size="14">Date: ${formattedDate}</text>
+      <text x="0" y="95" font-size="14">Time: ${formattedTime}</text>
+      <text x="0" y="120" font-size="12">Location: ${location}</text>
     </svg>
     `;
 
-    const textBuffer = Buffer.from(svgText);
+    const textBuffer = Buffer.from(svg);
 
     /* ===== MERGE ===== */
     const finalImage = await sharp(baseImage)
       .composite([
-        {
-          input: textBuffer,
-          top: ownerY - 130,
-          left: ownerX
-        },
-        {
-          input: resizedSignature,
-          top: ownerY,
-          left: ownerX
-        }
+        { input: textBuffer, top: y - 140, left: x },
+        { input: resizedSignature, top: y, left: x }
       ])
       .png()
       .toBuffer();
 
-    /* ===== UPLOAD ===== */
-    const uploadResult = await cloudinary.uploader.upload(
+    /* ===== CLOUDINARY UPLOAD ===== */
+    const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
       {
         folder: "signed_agreements",
         resource_type: "image"
       }
     );
-
-    const signedUrl = uploadResult.secure_url;
 
     /* ===== SAVE DB ===== */
     await db.query(`
@@ -196,7 +178,6 @@ exports.signOwnerAgreement = async (req, res) => {
         mobile = ?, 
         owner_signed_at = NOW(),
         agreement_status = 'approved',
-        viewed_by_owner = 1,
         signed_pdf = ?,
         ip_address = ?,
         device_info = ?,
@@ -205,13 +186,16 @@ exports.signOwnerAgreement = async (req, res) => {
     `, [
       owner_signature,
       owner_mobile,
-      signedUrl,
+      upload.secure_url,
       ip,
       device,
       booking_id
     ]);
 
-    res.json({ success: true, signed_pdf: signedUrl });
+    res.json({
+      success: true,
+      signed_pdf: upload.secure_url
+    });
 
   } catch (err) {
     console.error(err);
@@ -234,7 +218,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
 
     res.json({ success: true, data: rows[0] });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ success: false });
   }
 };
