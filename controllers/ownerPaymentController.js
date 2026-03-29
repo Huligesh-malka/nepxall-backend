@@ -8,9 +8,9 @@ async function embedSignatureIntoPDF(originalPath, signatureBase64, outputPath) 
   const pdfBytes = fs.readFileSync(originalPath);
   const pdfDoc = await PDFDocument.load(pdfBytes);
 
-  // Clean base64 string
-  const base64Data = signatureBase64.replace(/^data:image\/png;base64,/, "");
-  const pngImage = await pdfDoc.embedPng(Buffer.from(base64Data, 'base64'));
+  // Remove the data:image/png;base64 prefix if present
+  const base64Data = signatureBase64.split(",")[1] || signatureBase64;
+  const pngImage = await pdfDoc.embedPng(Buffer.from(base64Data, "base64"));
   
   const pages = pdfDoc.getPages();
   const page = pages[pages.length - 1]; // Sign on the last page
@@ -19,14 +19,14 @@ async function embedSignatureIntoPDF(originalPath, signatureBase64, outputPath) 
   // Position: Bottom Right
   page.drawImage(pngImage, {
     x: width - 180,
-    y: 70,
+    y: 80,
     width: 120,
     height: 50,
   });
 
-  page.drawText(`Digitally Signed on: ${new Date().toLocaleString()}`, {
+  page.drawText(`Digitally Signed on ${new Date().toLocaleString()}`, {
     x: width - 180,
-    y: 55,
+    y: 65,
     size: 8,
   });
 
@@ -55,7 +55,7 @@ exports.getOwnerPayments = async (req, res) => {
 
     const updated = rows.map(r => ({
       ...r,
-      owner_signed: !!r.signed_pdf // If signed_pdf exists, it's signed
+      owner_signed: r.agreement_status === "approved" || !!r.signed_pdf
     }));
 
     res.json({ success: true, data: updated });
@@ -69,25 +69,33 @@ exports.signOwnerAgreement = async (req, res) => {
   const ownerId = req.user.mysqlId || req.user.id;
 
   try {
-    // 1. Validation
-    const [rows] = await db.query(`SELECT final_pdf FROM agreements_form WHERE booking_id = ?`, [booking_id]);
-    if (!rows.length || !rows[0].final_pdf) return res.status(404).json({ message: "PDF not found" });
-
-    // 2. Paths
-    const originalPdfPath = path.join(__dirname, "../", rows[0].final_pdf);
-    const fileName = `signed_${booking_id}_${Date.now()}.pdf`;
-    const relativePath = `uploads/signed_agreements/${fileName}`;
-    const fullOutputPath = path.join(__dirname, "../", relativePath);
-
-    // Ensure directory exists
-    if (!fs.existsSync(path.dirname(fullOutputPath))) {
-      fs.mkdirSync(path.dirname(fullOutputPath), { recursive: true });
+    if (!accepted_terms || !owner_signature) {
+      return res.status(400).json({ message: "Terms and Signature required" });
     }
 
-    // 3. Process PDF
-    await embedSignatureIntoPDF(originalPdfPath, owner_signature, fullOutputPath);
+    // Get Original PDF path
+    const [rows] = await db.query(
+      `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`, 
+      [booking_id]
+    );
 
-    // 4. Update DB (Audit Trail)
+    if (!rows.length || !rows[0].final_pdf) {
+      return res.status(404).json({ message: "Original PDF not found" });
+    }
+
+    const originalPdf = path.join(__dirname, "../", rows[0].final_pdf);
+    const fileName = `signed_${booking_id}_${Date.now()}.pdf`;
+    const signedPdfPath = `uploads/signed_agreements/${fileName}`;
+    const absoluteOutputPath = path.join(__dirname, "../", signedPdfPath);
+
+    // Ensure directory exists
+    const dir = path.dirname(absoluteOutputPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Embed Signature
+    await embedSignatureIntoPDF(originalPdf, owner_signature, absoluteOutputPath);
+
+    // Audit Trail Data
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const device = req.headers["user-agent"];
 
@@ -98,15 +106,29 @@ exports.signOwnerAgreement = async (req, res) => {
         mobile = ?, 
         owner_signed_at = NOW(),
         agreement_status = 'approved',
+        terms_accepted = 1,
         ip_address = ?,
         device_info = ?,
         signed_pdf = ?
       WHERE booking_id = ?
-    `, [owner_signature, owner_mobile, ip, device, relativePath, booking_id]);
+    `, [owner_signature, owner_mobile, ip, device, signedPdfPath, booking_id]);
 
-    res.json({ success: true, message: "Signed and stored separately ✅" });
+    res.json({ success: true, message: "Agreement Signed & Stored ✅" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Signing failed" });
+    res.status(500).json({ message: "Signing process failed" });
+  }
+};
+
+exports.getOwnerSettlementSummary = async (req, res) => {
+  try {
+    const ownerId = req.user.mysqlId || req.user.id;
+    const [rows] = await db.query(
+      `SELECT COUNT(*) as total, SUM(owner_amount) as total_earned FROM bookings WHERE owner_id = ?`, 
+      [ownerId]
+    );
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false });
   }
 };
