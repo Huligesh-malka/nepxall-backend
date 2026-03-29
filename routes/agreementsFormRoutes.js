@@ -1,16 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const agreementsFormController = require("../controllers/agreementsFormController");
-const uploadAgreement = require("../middlewares/agreementUpload");
+const controller = require("../controllers/agreementsFormController");
+const upload = require("../middlewares/agreementUpload");
 
-/* ================= USER ROUTES ================= */
+/* USER */
+router.get("/status/:bookingId", controller.getAgreementByBookingId);
 
-// Route to check if an agreement already exists for a booking
-router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
-
-router.post(
-  "/submit",
-  uploadAgreement.fields([
+router.post("/submit",
+  upload.fields([
     { name: "aadhaar_front", maxCount: 1 },
     { name: "aadhaar_back", maxCount: 1 },
     { name: "pan_card", maxCount: 1 },
@@ -18,18 +15,21 @@ router.post(
   ]),
   async (req, res) => {
     try {
-      const result = await agreementsFormController.submitAgreementForm(req);
-      res.status(200).json({ success: true, message: "Submitted Successfully", data: result });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+      const result = await controller.submitAgreementForm(req);
+      res.json({ success: true, data: result });
+    } catch {
+      res.status(500).json({ success: false });
     }
   }
 );
 
-/* ================= ADMIN ROUTES ================= */
-router.get("/admin/all", agreementsFormController.getAllAgreements);
-router.get("/admin/:id", agreementsFormController.getAgreementById);
-router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
-router.put("/admin/:id/upload-image", uploadAgreement.single("final_image"), agreementsFormController.uploadFinalImage);
+/* ADMIN */
+router.put("/admin/:id/upload-image", upload.single("final_image"), controller.uploadFinalImage);
+
+/* OWNER SIGN */
+router.post("/owner/sign", controller.ownerSign);
+
+/* TENANT SIGN */
+router.post("/tenant/sign", controller.tenantFinalSign);
 
 module.exports = router;
