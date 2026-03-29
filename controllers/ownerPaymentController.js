@@ -59,7 +59,6 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
-
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
@@ -114,7 +113,7 @@ exports.signOwnerAgreement = async (req, res) => {
     const ownerX = metadata.width - signatureWidth - 40;
 
     // 🔥 MAGIC LINE (dynamic position)
-    const ownerY = Math.floor(metadata.height * 0.78);
+    const ownerY = Math.floor(metadata.height * 0.72);
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
