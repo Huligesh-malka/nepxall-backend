@@ -1,8 +1,14 @@
 const db = require("../db");
-const fs = require("fs");
-const path = require("path");
 const axios = require("axios");
 const sharp = require("sharp");
+const cloudinary = require("cloudinary").v2;
+
+/* ================= CLOUDINARY CONFIG ================= */
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 /* ================= GET OWNER PAYMENTS ================= */
 exports.getOwnerPayments = async (req, res) => {
@@ -62,8 +68,6 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ message: "Signature required" });
     }
 
-    console.log("SIGN REQUEST:", booking_id);
-
     // prevent duplicate
     const [existing] = await db.query(
       `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
@@ -85,61 +89,57 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const imageUrl = rows[0].final_pdf;
 
-    console.log("IMAGE URL:", imageUrl);
-
     // ================= LOAD IMAGE =================
-    let baseImage;
+    const response = await axios.get(imageUrl, {
+      responseType: "arraybuffer"
+    });
 
-    if (imageUrl.startsWith("http")) {
-      const response = await axios.get(imageUrl, {
-        responseType: "arraybuffer"
-      });
-      baseImage = Buffer.from(response.data);
-    } else {
-      baseImage = fs.readFileSync(path.join(__dirname, "../", imageUrl));
-    }
+    const baseImage = Buffer.from(response.data);
 
     // ================= SIGNATURE =================
-    if (!owner_signature.includes("base64")) {
-      return res.status(400).json({ message: "Invalid signature format" });
-    }
-
     const base64Data = owner_signature.split(",")[1];
     const signatureBuffer = Buffer.from(base64Data, "base64");
 
+    const signatureWidth = 200;
+    const signatureHeight = 80;
+
     const resizedSignature = await sharp(signatureBuffer)
-      .resize(200, 80)
+      .resize(signatureWidth, signatureHeight)
       .png()
       .toBuffer();
 
-    // ================= IMAGE SIZE =================
+    // ================= POSITION =================
     const metadata = await sharp(baseImage).metadata();
 
-    const posX = Math.max(metadata.width - 220, 10);
-    const posY = Math.max(metadata.height - 120, 10);
+    const margin = 30;
+
+    const ownerX = metadata.width - signatureWidth - margin;
+    const ownerY = metadata.height - signatureHeight - margin;
 
     // ================= MERGE =================
     const finalImage = await sharp(baseImage)
       .composite([
         {
           input: resizedSignature,
-          top: posY,
-          left: posX
+          top: ownerY,
+          left: ownerX
         }
       ])
       .png()
       .toBuffer();
 
-    // ================= SAVE =================
-    const fileName = `signed_${booking_id}_${Date.now()}.png`;
-    const outputPath = `uploads/signed/${fileName}`;
-    const fullPath = path.join(__dirname, "../", outputPath);
+    // ================= UPLOAD TO CLOUDINARY =================
+    const base64Image = finalImage.toString("base64");
 
-    if (!fs.existsSync(path.dirname(fullPath))) {
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-    }
+    const uploadResult = await cloudinary.uploader.upload(
+      `data:image/png;base64,${base64Image}`,
+      {
+        folder: "signed_agreements",
+        resource_type: "image"
+      }
+    );
 
-    fs.writeFileSync(fullPath, finalImage);
+    const signedUrl = uploadResult.secure_url;
 
     // ================= UPDATE DB =================
     await db.query(`
@@ -155,15 +155,13 @@ exports.signOwnerAgreement = async (req, res) => {
     `, [
       owner_signature,
       owner_mobile,
-      outputPath,
+      signedUrl,
       booking_id
     ]);
 
-    console.log("SIGN SUCCESS:", booking_id);
-
     res.json({
       success: true,
-      signed_pdf: outputPath
+      signed_pdf: signedUrl
     });
 
   } catch (err) {
