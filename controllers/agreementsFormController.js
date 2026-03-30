@@ -134,7 +134,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
 exports.tenantFinalSign = async (req, res) => {
   try {
-    const { booking_id, tenant_signature } = req.body;
+    const { booking_id, tenant_signature, tenant_mobile } = req.body;
 
     if (!tenant_signature) {
       return res.status(400).json({ message: "Tenant signature required" });
@@ -195,7 +195,7 @@ exports.tenantFinalSign = async (req, res) => {
     <svg width="320" height="180">
       <text x="0" y="20" font-size="14" fill="black">Digitally Signed by Tenant</text>
       <text x="0" y="40" font-size="12" fill="gray">Name: ${data.full_name || "-"}</text>
-      <text x="0" y="60" font-size="12" fill="gray">Mobile: ${data.mobile || "-"}</text>
+      <text x="0" y="60" font-size="12" fill="gray">Mobile: ${tenant_mobile || data.mobile || "-"}</text>
       <text x="0" y="80" font-size="12" fill="gray">Address: ${data.address || ""}</text>
       <text x="0" y="100" font-size="12" fill="gray">${data.city || ""}, ${data.state || ""}</text>
       <text x="0" y="120" font-size="12" fill="gray">Date: ${istDate}</text>
@@ -228,11 +228,11 @@ exports.tenantFinalSign = async (req, res) => {
 
     /* ================= UPDATE DB ================= */
     await db.query(
-      `UPDATE agreements_form 
-       SET signed_pdf=?, agreement_status='completed', tenant_signed_at=NOW() 
-       WHERE booking_id=?`,
-      [upload.secure_url, booking_id]
-    );
+  `UPDATE agreements_form 
+   SET signed_pdf=?, tenant_mobile=?, agreement_status='completed', tenant_signed_at=NOW() 
+   WHERE booking_id=?`,
+  [upload.secure_url, tenant_mobile, booking_id]
+);
 
     res.json({
       success: true,
