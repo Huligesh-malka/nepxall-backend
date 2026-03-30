@@ -5,7 +5,7 @@ const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= USER ROUTES ================= */
 
-// Route to check if an agreement already exists for a booking
+// Fix: Ensure this is defined BEFORE generic ID routes if you have any
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
 
 router.post(
@@ -26,10 +26,13 @@ router.post(
   }
 );
 
-/* ================= ADMIN ROUTES ================= */
+/* ================= ADMIN & SIGNING ROUTES ================= */
 router.get("/admin/all", agreementsFormController.getAllAgreements);
+router.post("/owner/sign", agreementsFormController.signOwnerAgreement);
+router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
+
+// If you have specific admin update routes:
 router.get("/admin/:id", agreementsFormController.getAgreementById);
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
-router.put("/admin/:id/upload-image", uploadAgreement.single("final_image"), agreementsFormController.uploadFinalImage);
-router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
+
 module.exports = router;

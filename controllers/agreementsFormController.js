@@ -11,16 +11,21 @@ cloudinary.config({
 });
 
 /* ================= USER: GET AGREEMENT STATUS ================= */
-// Now returns signed_pdf so the user can see it once owner signs
 exports.getAgreementByBookingId = async (req, res) => {
   try {
     const { bookingId } = req.params;
+    
+    // Safety check for bookingId
+    if (!bookingId || bookingId === "undefined") {
+      return res.status(400).json({ success: false, message: "Invalid Booking ID" });
+    }
+
     const [rows] = await db.query(
-      "SELECT agreement_status, final_pdf, signed_pdf FROM agreements_form WHERE booking_id = ?",
+      "SELECT agreement_status, final_pdf, signed_pdf, full_name, email FROM agreements_form WHERE booking_id = ?",
       [bookingId]
     );
 
-    if (rows.length > 0) {
+    if (rows && rows.length > 0) {
       return res.json({
         success: true,
         exists: true,
@@ -28,9 +33,12 @@ exports.getAgreementByBookingId = async (req, res) => {
       });
     }
 
-    res.json({ success: true, exists: false });
+    // This is the CRITICAL fix: Return 200 with exists: false instead of crashing
+    return res.json({ success: true, exists: false });
+    
   } catch (error) {
-    res.status(500).json({ success: false, message: "Error checking status" });
+    console.error("Error in getAgreementByBookingId:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error checking status" });
   }
 };
 
@@ -49,7 +57,10 @@ exports.submitAgreementForm = async (req) => {
     const aadhaar_back = files["aadhaar_back"]?.[0]?.path || null;
     const pan_card = files["pan_card"]?.[0]?.path || null;
 
-    const toSafeInt = (val) => (isNaN(val) || val === null ? 0 : parseInt(val));
+    const toSafeInt = (val) => {
+        const parsed = parseInt(val);
+        return isNaN(parsed) ? 0 : parsed;
+    };
 
     const sql = `
       INSERT INTO agreements_form (
@@ -71,16 +82,15 @@ exports.submitAgreementForm = async (req) => {
     const [result] = await db.query(sql, values);
     return { insertId: result.insertId };
   } catch (error) {
+    console.error("Submission Error:", error);
     throw error;
   }
 };
 
-/* ================= OWNER: SIGN AGREEMENT ================= */
-// Owner signs the 'final_pdf' and saves to 'signed_pdf'
+/* ================= OWNER & TENANT SIGNING LOGIC ================= */
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
-
   try {
+    const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
     if (!accepted_terms || !owner_signature) {
       return res.status(400).json({ message: "Signature and terms acceptance required" });
     }
@@ -92,11 +102,9 @@ exports.signOwnerAgreement = async (req, res) => {
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    // Resize Owner Signature
     const sigBuffer = Buffer.from(owner_signature.split(",")[1], "base64");
     const resizedSig = await sharp(sigBuffer).resize(220, 90).png().toBuffer();
 
-    // IST Time & Metadata
     const now = new Date();
     const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
@@ -128,12 +136,11 @@ exports.signOwnerAgreement = async (req, res) => {
 
     res.json({ success: true, signed_pdf: upload.secure_url });
   } catch (err) {
+    console.error("Owner Signing Error:", err);
     res.status(500).json({ message: "Owner signing failed" });
   }
 };
 
-/* ================= TENANT: FINAL SIGN ================= */
-// Tenant signs the 'signed_pdf' (Owner's version) and saves as 'completed'
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature } = req.body;
@@ -154,7 +161,7 @@ exports.tenantFinalSign = async (req, res) => {
       .composite([{
         input: resizedSig,
         top: metadata.height - 180,
-        left: 80 // BOTTOM LEFT FOR TENANT
+        left: 80 
       }])
       .png().toBuffer();
 
@@ -162,7 +169,6 @@ exports.tenantFinalSign = async (req, res) => {
       folder: "signed_agreements"
     });
 
-    // Update to completed
     await db.query(
       "UPDATE agreements_form SET signed_pdf=?, agreement_status='completed' WHERE booking_id=?",
       [upload.secure_url, booking_id]
@@ -170,6 +176,21 @@ exports.tenantFinalSign = async (req, res) => {
 
     res.json({ success: true, url: upload.secure_url });
   } catch (err) {
+    console.error("Tenant Signing Error:", err);
     res.status(500).json({ message: "Tenant signing failed" });
   }
 };
+
+/* ================= ADMIN STUBS ================= */
+exports.getAllAgreements = async (req, res) => {
+    try {
+        const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch agreements" });
+    }
+};
+
+exports.getAgreementById = async (req, res) => { /* Logic here */ };
+exports.updateAgreementStatus = async (req, res) => { /* Logic here */ };
+exports.uploadFinalImage = async (req, res) => { /* Logic here */ };
