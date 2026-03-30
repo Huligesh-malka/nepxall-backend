@@ -4,7 +4,6 @@ const agreementsFormController = require("../controllers/agreementsFormControlle
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= USER ROUTES ================= */
-
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
 
 router.post(
@@ -36,12 +35,15 @@ router.get("/admin/:id", agreementsFormController.getAgreementById);
 // Update status manually
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
-// Upload final image from Admin Details page
+// Upload/Re-upload final image (Resets flow for Owner/Tenant)
 router.put(
-    "/admin/:id/upload-image", 
-    uploadAgreement.single("final_image"), 
-    agreementsFormController.uploadFinalImage
+  "/admin/:id/upload-image", 
+  uploadAgreement.single("final_image"), 
+  agreementsFormController.uploadFinalImage
 );
+
+// Delete Agreement
+router.delete("/admin/:id", agreementsFormController.deleteAgreement);
 
 /* ================= SIGNING FLOW ================= */
 router.post("/owner/sign", agreementsFormController.signOwnerAgreement);
