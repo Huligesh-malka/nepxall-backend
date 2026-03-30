@@ -216,7 +216,7 @@ const finalImageBuffer = await sharp(baseImage)
     },
     {
       input: resizedSig,
-      top: y, // signature below
+      top: y - 70,// signature below
       left: x
     }
   ])
