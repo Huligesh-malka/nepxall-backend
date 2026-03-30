@@ -5,7 +5,6 @@ const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= USER ROUTES ================= */
 
-// Fix: Ensure this is defined BEFORE generic ID routes if you have any
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
 
 router.post(
@@ -27,12 +26,25 @@ router.post(
 );
 
 /* ================= ADMIN & SIGNING ROUTES ================= */
+
+// Fetch all for the Admin Table
 router.get("/admin/all", agreementsFormController.getAllAgreements);
+
+// Fetch single for Admin Details View
+router.get("/admin/:id", agreementsFormController.getAgreementById);
+
+// Update status manually
+router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
+
+// Upload final image from Admin Details page
+router.put(
+    "/admin/:id/upload-image", 
+    uploadAgreement.single("final_image"), 
+    agreementsFormController.uploadFinalImage
+);
+
+/* ================= SIGNING FLOW ================= */
 router.post("/owner/sign", agreementsFormController.signOwnerAgreement);
 router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
-
-// If you have specific admin update routes:
-router.get("/admin/:id", agreementsFormController.getAgreementById);
-router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
 
 module.exports = router;

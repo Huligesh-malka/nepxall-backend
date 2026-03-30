@@ -14,8 +14,6 @@ cloudinary.config({
 exports.getAgreementByBookingId = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    
-    // Safety check for bookingId
     if (!bookingId || bookingId === "undefined") {
       return res.status(400).json({ success: false, message: "Invalid Booking ID" });
     }
@@ -26,19 +24,12 @@ exports.getAgreementByBookingId = async (req, res) => {
     );
 
     if (rows && rows.length > 0) {
-      return res.json({
-        success: true,
-        exists: true,
-        data: rows[0]
-      });
+      return res.json({ success: true, exists: true, data: rows[0] });
     }
-
-    // This is the CRITICAL fix: Return 200 with exists: false instead of crashing
     return res.json({ success: true, exists: false });
-    
   } catch (error) {
     console.error("Error in getAgreementByBookingId:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error checking status" });
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
@@ -58,8 +49,8 @@ exports.submitAgreementForm = async (req) => {
     const pan_card = files["pan_card"]?.[0]?.path || null;
 
     const toSafeInt = (val) => {
-        const parsed = parseInt(val);
-        return isNaN(parsed) ? 0 : parsed;
+      const parsed = parseInt(val);
+      return isNaN(parsed) ? 0 : parsed;
     };
 
     const sql = `
@@ -144,7 +135,6 @@ exports.signOwnerAgreement = async (req, res) => {
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature } = req.body;
-
     const [rows] = await db.query("SELECT signed_pdf FROM agreements_form WHERE booking_id = ?", [booking_id]);
     const ownerSignedUrl = rows[0]?.signed_pdf;
 
@@ -158,11 +148,7 @@ exports.tenantFinalSign = async (req, res) => {
     const resizedSig = await sharp(sigBuffer).resize(220, 90).png().toBuffer();
 
     const finalImage = await sharp(baseImage)
-      .composite([{
-        input: resizedSig,
-        top: metadata.height - 180,
-        left: 80 
-      }])
+      .composite([{ input: resizedSig, top: metadata.height - 180, left: 80 }])
       .png().toBuffer();
 
     const upload = await cloudinary.uploader.upload(`data:image/png;base64,${finalImage.toString("base64")}`, {
@@ -181,16 +167,63 @@ exports.tenantFinalSign = async (req, res) => {
   }
 };
 
-/* ================= ADMIN STUBS ================= */
+/* ================= ADMIN LOGIC ================= */
+
+// Updated to return the format your frontend needs
 exports.getAllAgreements = async (req, res) => {
     try {
         const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
-        res.json(rows);
+        res.status(200).json({
+            success: true,
+            data: rows
+        });
     } catch (error) {
-        res.status(500).json({ message: "Failed to fetch agreements" });
+        console.error("Admin Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch agreements" });
     }
 };
 
-exports.getAgreementById = async (req, res) => { /* Logic here */ };
-exports.updateAgreementStatus = async (req, res) => { /* Logic here */ };
-exports.uploadFinalImage = async (req, res) => { /* Logic here */ };
+exports.getAgreementById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Agreement not found" });
+        }
+        res.json({ success: true, data: rows[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error fetching details" });
+    }
+};
+
+exports.updateAgreementStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        await db.query("UPDATE agreements_form SET agreement_status = ? WHERE id = ?", [status, id]);
+        res.json({ success: true, message: "Status updated" });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Update failed" });
+    }
+};
+
+exports.uploadFinalImage = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const final_image_path = req.file?.path;
+
+        if (!final_image_path) {
+            return res.status(400).json({ success: false, message: "No image file provided" });
+        }
+
+        // Update DB with the Cloudinary path (provided by your upload middleware)
+        await db.query(
+            "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?", 
+            [final_image_path, id]
+        );
+
+        res.json({ success: true, message: "Image uploaded and status approved" });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Upload failed" });
+    }
+};
