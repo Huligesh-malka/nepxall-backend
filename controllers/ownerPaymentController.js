@@ -95,11 +95,11 @@ exports.signOwnerAgreement = async (req, res) => {
       .png()
       .toBuffer();
 
-    /* ===== IP STORE ONLY ===== */
+    /* ===== IP ===== */
     const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const ip = rawIp ? rawIp.split(",")[0].trim() : "Unknown";
 
-    /* ===== DEVICE STORE ONLY ===== */
+    /* ===== DEVICE ===== */
     const ua = req.headers["user-agent"] || "";
     let device = "Unknown";
 
@@ -108,14 +108,14 @@ exports.signOwnerAgreement = async (req, res) => {
     else if (ua.includes("Firefox")) device = "Firefox Browser";
     else if (ua.includes("Mobile")) device = "Mobile Device";
 
-    /* ===== LOCATION (LEGAL DISPLAY) ===== */
+    /* ===== LOCATION ===== */
     let location = "India";
     try {
       const geo = await axios.get(`http://ip-api.com/json/${ip}`);
       location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
     } catch {}
 
-    /* ===== IST TIME FIX ===== */
+    /* ===== TIME ===== */
     const now = new Date();
 
     const formattedDate = new Intl.DateTimeFormat("en-IN", {
@@ -133,28 +133,45 @@ exports.signOwnerAgreement = async (req, res) => {
       hour12: true
     }).format(now);
 
-    /* ===== POSITION FIX ===== */
-    
+    /* ===== POSITION (MATCH TENANT) ===== */
+    const metadata = await sharp(baseImage).metadata();
 
-    /* ===== LEGAL TEXT ===== */
-    const svgText = `
-    <svg width="600" height="200">
-      <text x="0" y="20" font-size="16">Digitally Signed</text>
-      <text x="0" y="45" font-size="14">Mobile: ${tenant_mobile}</text>
-      <text x="0" y="70" font-size="14">Date: ${istDate}</text>
-      <text x="0" y="95" font-size="14">Time: ${istTime}</text>
-      <text x="0" y="120" font-size="12">Location: ${data.city || ""}, ${data.state || ""}</text>
+    const x = metadata.width - 380; // 🔥 FIXED ALIGNMENT
+    const y = metadata.height - 200;
+
+    /* ===== UPDATED SVG (MATCH TENANT FORMAT EXACTLY) ===== */
+    const svg = `
+    <svg width="350" height="160">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">
+        Digitally Signed
+      </text>
+
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">
+        Mobile: ${owner_mobile}
+      </text>
+
+      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">
+        Location: ${location}
+      </text>
+
+      <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">
+        Date: ${formattedDate} ${formattedTime}
+      </text>
     </svg>
     `;
-    
-        const finalImage = await sharp(baseImage)
-          .composite([
-            { input: Buffer.from(svgText), top: metadata.height - 240, left: metadata.width - 320 },
-            { input: resizedSig, top: metadata.height - 180, left: metadata.width - 320 }
-          ])
-          .png().toBuffer();
 
-    /* ===== CLOUDINARY UPLOAD ===== */
+    const textBuffer = Buffer.from(svg);
+
+    /* ===== MERGE ===== */
+    const finalImage = await sharp(baseImage)
+      .composite([
+        { input: textBuffer, top: y - 140, left: x },
+        { input: resizedSignature, top: y, left: x }
+      ])
+      .png()
+      .toBuffer();
+
+    /* ===== UPLOAD ===== */
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
       {
@@ -163,7 +180,7 @@ exports.signOwnerAgreement = async (req, res) => {
       }
     );
 
-    /* ===== SAVE DB ===== */
+    /* ===== SAVE ===== */
     await db.query(`
       UPDATE agreements_form 
       SET 
