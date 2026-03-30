@@ -148,10 +148,10 @@ exports.tenantFinalSign = async (req, res) => {
     const ownerSignedUrl = rows[0]?.signed_pdf;
 
     if (!ownerSignedUrl) {
-      return res.status(400).json({ message: "Wait for owner signature" });
+      return res.status(400).json({ message: "Owner not signed yet" });
     }
 
-    // ✅ FIX 1: Use axios safely
+    // ✅ FIX: Proper axios fetch
     const response = await axios({
       url: ownerSignedUrl,
       method: "GET",
@@ -161,7 +161,7 @@ exports.tenantFinalSign = async (req, res) => {
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    // ✅ Tenant signature
+    // ✅ Tenant signature buffer fix
     const sigBuffer = Buffer.from(
       tenant_signature.replace(/^data:image\/\w+;base64,/, ""),
       "base64"
@@ -172,62 +172,39 @@ exports.tenantFinalSign = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ✅ Date + Time
-    const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      dateStyle: "short",
-    }).format(now);
-
-    const istTime = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      timeStyle: "medium",
-    }).format(now);
-
-    // ✅ TEXT FOR TENANT
-    const svgText = `
-    <svg width="300" height="150">
-      <text x="0" y="20" font-size="14" fill="black">Digitally Signed by Tenant</text>
-      <text x="0" y="40" font-size="12" fill="gray">Date: ${istDate} ${istTime}</text>
-    </svg>`;
-
-    // ✅ FINAL COMPOSITE (LEFT SIDE)
+    // ✅ Final image (LEFT SIDE SIGN)
     const finalImage = await sharp(baseImage)
       .composite([
         {
-          input: Buffer.from(svgText),
-          top: metadata.height - 240,
-          left: 60, // 🔥 LEFT SIDE
-        },
-        {
           input: resizedSig,
           top: metadata.height - 180,
-          left: 60, // 🔥 LEFT SIDE SIGN
+          left: 60, // LEFT SIDE
         },
       ])
       .png()
       .toBuffer();
 
-    // ✅ Upload final signed PDF
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
-      { folder: "signed_agreements" }
+      {
+        folder: "signed_agreements",
+      }
     );
 
-    // ✅ Update DB
     await db.query(
-      "UPDATE agreements_form SET signed_pdf=?, agreement_status='completed', tenant_signed_at=NOW() WHERE booking_id=?",
+      "UPDATE agreements_form SET signed_pdf=?, agreement_status='completed' WHERE booking_id=?",
       [upload.secure_url, booking_id]
     );
 
     res.json({
       success: true,
-      message: "Tenant signed successfully",
       url: upload.secure_url,
     });
+
   } catch (err) {
-    console.error("🔥 Tenant Signing Error FULL:", err); // VERY IMPORTANT
+    console.error("Tenant Signing Error:", err);
     res.status(500).json({
+      success: false,
       message: "Tenant signing failed",
       error: err.message,
     });
