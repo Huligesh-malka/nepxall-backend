@@ -200,20 +200,20 @@ exports.tenantFinalSign = async (req, res) => {
 
     // 6. PERFECT POSITION FIX
     const finalImageBuffer = await sharp(baseImage)
-      .composite([
-        {
-          input: Buffer.from(svgText),
-          top: metadata.height - 220, // better spacing
-          left: 80                   // inside margin
-        },
-        {
-          input: resizedSig,
-          top: metadata.height - 140, // below text
-          left: 80
-        }
-      ])
-      .png()
-      .toBuffer();
+  .composite([
+    {
+      input: Buffer.from(svgText),
+      top: metadata.height - 260,  // 🔼 moved UP (important fix)
+      left: 80
+    },
+    {
+      input: resizedSig,
+      top: metadata.height - 170,  // 🔼 signature also UP
+      left: 80
+    }
+  ])
+  .png()
+  .toBuffer();
 
     // 7. Upload
     const upload = await cloudinary.uploader.upload(
