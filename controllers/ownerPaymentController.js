@@ -143,7 +143,7 @@ exports.signOwnerAgreement = async (req, res) => {
     const svg = `
     <svg width="350" height="160">
       <text x="0" y="18" font-family="Arial" font-size="13" fill="black">
-        Digitally Signed
+        Digitally Signed by Owner
       </text>
 
       <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">
