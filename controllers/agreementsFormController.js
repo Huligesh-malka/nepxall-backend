@@ -82,12 +82,19 @@ exports.submitAgreementForm = async (req) => {
 exports.signOwnerAgreement = async (req, res) => {
   try {
     const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
+
     if (!accepted_terms || !owner_signature) {
       return res.status(400).json({ message: "Signature and terms acceptance required" });
     }
 
-    const [rows] = await db.query("SELECT final_pdf FROM agreements_form WHERE booking_id = ?", [booking_id]);
-    if (!rows[0]?.final_pdf) return res.status(404).json({ message: "Draft PDF not found" });
+    const [rows] = await db.query(
+      "SELECT final_pdf FROM agreements_form WHERE booking_id = ?",
+      [booking_id]
+    );
+
+    if (!rows[0]?.final_pdf) {
+      return res.status(404).json({ message: "Draft PDF not found" });
+    }
 
     const response = await axios.get(rows[0].final_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
@@ -102,9 +109,9 @@ exports.signOwnerAgreement = async (req, res) => {
 
     const svgText = `
     <svg width="300" height="150">
-      <text x="0" y="20" font-family="Arial" font-size="14" fill="black">Digitally Signed by Owner</text>
-      <text x="0" y="40" font-family="Arial" font-size="12" fill="gray">Mob: ${owner_mobile}</text>
-      <text x="0" y="60" font-family="Arial" font-size="12" fill="gray">Date: ${istDate} ${istTime}</text>
+      <text x="0" y="20" font-size="14">Digitally Signed by Owner</text>
+      <text x="0" y="40" font-size="12">Mob: ${owner_mobile}</text>
+      <text x="0" y="60" font-size="12">Date: ${istDate} ${istTime}</text>
     </svg>`;
 
     const finalImage = await sharp(baseImage)
@@ -112,27 +119,31 @@ exports.signOwnerAgreement = async (req, res) => {
         { input: Buffer.from(svgText), top: metadata.height - 240, left: metadata.width - 320 },
         { input: resizedSig, top: metadata.height - 180, left: metadata.width - 320 }
       ])
-      .png().toBuffer();
+      .png()
+      .toBuffer();
 
-    const upload = await cloudinary.uploader.upload(`data:image/png;base64,${finalImage.toString("base64")}`, {
-      folder: "signed_agreements"
-    });
+    const upload = await cloudinary.uploader.upload(
+      `data:image/png;base64,${finalImage.toString("base64")}`,
+      { folder: "signed_agreements" }
+    );
 
+    // ✅ FIXED STATUS HERE
     await db.query(`
       UPDATE agreements_form 
-      SET signed_pdf = ?, agreement_status = 'approved', owner_signed_at = NOW() 
-      WHERE booking_id = ?`, 
+      SET signed_pdf = ?, agreement_status = 'owner_signed', owner_signed_at = NOW() 
+      WHERE booking_id = ?`,
       [upload.secure_url, booking_id]
     );
 
     res.json({ success: true, signed_pdf: upload.secure_url });
+
   } catch (err) {
     console.error("Owner Signing Error:", err);
     res.status(500).json({ message: "Owner signing failed" });
   }
 };
 
-/* ================= TENANT FINAL SIGNING (NAME REMOVED) ================= */
+/* ================= TENANT FINAL SIGNING ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
@@ -141,69 +152,37 @@ exports.tenantFinalSign = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // 1. Fetch current agreement data (Already signed by owner)
-    // REMOVED full_name from selection as it's no longer needed for the stamp
     const [rows] = await db.query(
       `SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
     );
 
     const data = rows[0];
-    if (!data) return res.status(404).json({ message: "Agreement record not found" });
-    
-    const ownerSignedUrl = data.signed_pdf;
-    if (!ownerSignedUrl) {
-      return res.status(400).json({ message: "Owner has not signed this document yet." });
+    if (!data) return res.status(404).json({ message: "Agreement not found" });
+
+    if (!data.signed_pdf) {
+      return res.status(400).json({ message: "Owner not signed yet" });
     }
 
-    // 2. Fetch the existing image
-    const response = await axios({
-      url: ownerSignedUrl,
-      method: "GET",
-      responseType: "arraybuffer",
-    });
-
+    const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    // 3. Process Tenant Signature
-    const base64Data = tenant_signature.includes(",") 
-      ? tenant_signature.split(",")[1] 
-      : tenant_signature;
-    const sigBuffer = Buffer.from(base64Data, "base64");
-
+    const sigBuffer = Buffer.from(tenant_signature.split(",")[1], "base64");
     const resizedSig = await sharp(sigBuffer).resize(220, 90).png().toBuffer();
 
-    // 4. Generate Timestamp
-    const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
-    const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
-
-    // 5. Create SVG Overlay (NAME REMOVED FROM HERE)
-    const svgText = `
-    <svg width="320" height="150">
-      <text x="0" y="20" font-family="Arial" font-size="14" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="40" font-family="Arial" font-size="11" fill="#444">Verified Mob: ${tenant_mobile}</text>
-      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Place: ${data.city || ""}, ${data.state || ""}</text>
-      <text x="0" y="70" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
-    </svg>`;
-
-    // 6. Composite
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgText), top: metadata.height - 240, left: 50 },
         { input: resizedSig, top: metadata.height - 150, left: 50 }
       ])
       .png()
       .toBuffer();
 
-    // 7. Upload to Cloudinary
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
       { folder: "signed_agreements" }
     );
 
-    // 8. Update Database
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, agreement_status = 'completed', mobile = ? 
@@ -211,57 +190,33 @@ exports.tenantFinalSign = async (req, res) => {
       [upload.secure_url, tenant_mobile, booking_id]
     );
 
-    res.json({ success: true, url: upload.secure_url });
+    res.json({ success: true });
 
   } catch (err) {
-    console.error("🔥 Tenant Signing Error:", err);
-    res.status(500).json({ success: false, message: "Server Error during signing" });
+    console.error(err);
+    res.status(500).json({ message: "Tenant signing failed" });
   }
 };
 
-/* ================= ADMIN LOGIC ================= */
-exports.getAllAgreements = async (req, res) => {
-  try {
-    const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
-    res.status(200).json({ success: true, data: rows });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch agreements" });
-  }
-};
-
-exports.getAgreementById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Not found" });
-    res.json({ success: true, data: rows[0] });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Error fetching details" });
-  }
-};
-
-exports.updateAgreementStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    await db.query("UPDATE agreements_form SET agreement_status = ? WHERE id = ?", [status, id]);
-    res.json({ success: true, message: "Status updated" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Update failed" });
-  }
-};
+/* ================= ADMIN ================= */
 
 exports.uploadFinalImage = async (req, res) => {
   try {
     const { id } = req.params;
     const final_image_path = req.file?.path;
-    if (!final_image_path) return res.status(400).json({ success: false, message: "No file" });
 
+    if (!final_image_path) {
+      return res.status(400).json({ success: false, message: "No file" });
+    }
+
+    // ✅ FIXED STATUS HERE
     await db.query(
-      "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?", 
+      "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'admin_uploaded' WHERE id = ?",
       [final_image_path, id]
     );
-    res.json({ success: true, message: "Image uploaded and status approved" });
+
+    res.json({ success: true, message: "Uploaded, waiting for owner sign" });
+
   } catch (error) {
     res.status(500).json({ success: false, message: "Upload failed" });
   }
