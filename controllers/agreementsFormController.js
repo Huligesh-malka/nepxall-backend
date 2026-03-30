@@ -198,23 +198,27 @@ exports.tenantFinalSign = async (req, res) => {
       <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
 
-    // 6. PERFECT POSITION FIX
-    const finalImageBuffer = await sharp(baseImage)
+    // 6. POSITION LIKE OWNER (LEFT SIDE MIRROR)
+const x = 80; // left side (same margin)
+const y = metadata.height - 200; // SAME as owner
+
+const textBuffer = Buffer.from(svgText);
+
+const finalImageBuffer = await sharp(baseImage)
   .composite([
     {
-      input: Buffer.from(svgText),
-      top: metadata.height - 260,  // 🔼 moved UP (important fix)
-      left: 80
+      input: textBuffer,
+      top: y - 140, // text above (same as owner logic)
+      left: x
     },
     {
       input: resizedSig,
-      top: metadata.height - 170,  // 🔼 signature also UP
-      left: 80
+      top: y, // signature below
+      left: x
     }
   ])
   .png()
   .toBuffer();
-
     // 7. Upload
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
