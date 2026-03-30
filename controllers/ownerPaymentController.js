@@ -137,7 +137,7 @@ exports.signOwnerAgreement = async (req, res) => {
     const metadata = await sharp(baseImage).metadata();
 
     const x = metadata.width - 380; // 🔥 FIXED ALIGNMENT
-    const y = metadata.height - 110;  // ✅ FIXED
+    const y = metadata.height - 200;
 
     /* ===== UPDATED SVG (MATCH TENANT FORMAT EXACTLY) ===== */
     const svg = `
@@ -166,7 +166,7 @@ exports.signOwnerAgreement = async (req, res) => {
     const finalImage = await sharp(baseImage)
       .composite([
         { input: textBuffer, top: y - 140, left: x },
-        { input: resizedSignature, top: y, left: x }
+        { input: resizedSignature, top: y - 70, left: x }
       ])
       .png()
       .toBuffer();
