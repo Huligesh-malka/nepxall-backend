@@ -131,16 +131,15 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ message: "Owner signing failed" });
   }
 };
-
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
 
-    if (!tenant_signature) {
-      return res.status(400).json({ message: "Tenant signature required" });
+    if (!tenant_signature || !booking_id) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // ✅ GET FULL USER DATA
+    // 1. Fetch current agreement data
     const [rows] = await db.query(
       `SELECT signed_pdf, full_name, mobile, address, city, state 
        FROM agreements_form WHERE booking_id = ?`,
@@ -148,13 +147,14 @@ exports.tenantFinalSign = async (req, res) => {
     );
 
     const data = rows[0];
-    const ownerSignedUrl = data?.signed_pdf;
-
+    if (!data) return res.status(404).json({ message: "Agreement record not found" });
+    
+    const ownerSignedUrl = data.signed_pdf;
     if (!ownerSignedUrl) {
-      return res.status(400).json({ message: "Owner not signed yet" });
+      return res.status(400).json({ message: "Owner has not signed this document yet." });
     }
 
-    /* ================= FETCH IMAGE ================= */
+    // 2. Fetch the existing image (signed by owner)
     const response = await axios({
       url: ownerSignedUrl,
       method: "GET",
@@ -164,75 +164,63 @@ exports.tenantFinalSign = async (req, res) => {
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    /* ================= TENANT SIGNATURE ================= */
-    const sigBuffer = Buffer.from(
-      tenant_signature.replace(/^data:image\/\w+;base64,/, ""),
-      "base64"
-    );
+    // 3. Process Tenant Signature
+    // Remove header if it exists, then convert to buffer
+    const base64Data = tenant_signature.includes(",") 
+      ? tenant_signature.split(",")[1] 
+      : tenant_signature;
+    const sigBuffer = Buffer.from(base64Data, "base64");
 
     const resizedSig = await sharp(sigBuffer)
       .resize(220, 90)
       .png()
       .toBuffer();
 
-    /* ================= DATE TIME ================= */
+    // 4. Generate IST Date/Time
     const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      dateStyle: "short",
-    }).format(now);
+    const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
+    const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
+    const deviceInfo = (req.headers["user-agent"] || "Unknown Device").substring(0, 50);
 
-    const istTime = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      timeStyle: "medium",
-    }).format(now);
-
-    /* ================= DEVICE INFO ================= */
-    const deviceInfo = req.headers["user-agent"] || "Unknown Device";
-
-    /* ================= SVG TEXT ================= */
+    // 5. Create SVG Overlay (Tenant Info)
     const svgText = `
     <svg width="320" height="180">
-      <text x="0" y="20" font-size="14" fill="black">Digitally Signed by Tenant</text>
-      <text x="0" y="40" font-size="12" fill="gray">Name: ${data.full_name || "-"}</text>
-      <text x="0" y="60" font-size="12" fill="gray">Mobile: ${tenant_mobile || data.mobile || "-"}</text>
-      <text x="0" y="80" font-size="12" fill="gray">Address: ${data.address || ""}</text>
-      <text x="0" y="100" font-size="12" fill="gray">${data.city || ""}, ${data.state || ""}</text>
-      <text x="0" y="120" font-size="12" fill="gray">Date: ${istDate}</text>
-      <text x="0" y="140" font-size="12" fill="gray">Time: ${istTime}</text>
-      <text x="0" y="160" font-size="10" fill="gray">Device: ${deviceInfo}</text>
+      <style>
+        .label { font-family: Arial; font-size: 14px; fill: black; font-weight: bold; }
+        .info { font-family: Arial; font-size: 11px; fill: #444; }
+      </style>
+      <text x="0" y="20" class="label">Digitally Signed by Tenant</text>
+      <text x="0" y="40" class="info">Name: ${data.full_name || "-"}</text>
+      <text x="0" y="55" class="info">Mobile: ${tenant_mobile || data.mobile || "-"}</text>
+      <text x="0" y="70" class="info">Place: ${data.city || ""}, ${data.state || ""}</text>
+      <text x="0" y="85" class="info">Date: ${istDate} ${istTime}</text>
+      <text x="0" y="100" class="info">Device: ${deviceInfo}</text>
     </svg>`;
 
-    /* ================= FINAL IMAGE ================= */
-    const finalImage = await sharp(baseImage)
+    // 6. Composite Images
+    const finalImageBuffer = await sharp(baseImage)
       .composite([
-        {
-          input: Buffer.from(svgText),
-          top: metadata.height - 260,
-          left: 50, // ✅ LEFT SIDE TEXT
-        },
-        {
-          input: resizedSig,
-          top: metadata.height - 150,
-          left: 50, // ✅ LEFT SIDE SIGN
-        },
+        { input: Buffer.from(svgText), top: metadata.height - 260, left: 50 },
+        { input: resizedSig, top: metadata.height - 150, left: 50 }
       ])
       .png()
       .toBuffer();
 
-    /* ================= UPLOAD ================= */
+    // 7. Upload to Cloudinary
+    // Use a string template for the base64 upload
     const upload = await cloudinary.uploader.upload(
-      `data:image/png;base64,${finalImage.toString("base64")}`,
-      { folder: "signed_agreements" }
+      `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
+      { folder: "signed_agreements", resource_type: "image" }
     );
 
-    /* ================= UPDATE DB ================= */
+    // 8. Update Database
+    // IMPORTANT: Ensure your DB has the column 'tenant_mobile' and 'tenant_signed_at'
     await db.query(
-  `UPDATE agreements_form 
-   SET signed_pdf=?, tenant_mobile=?, agreement_status='completed', tenant_signed_at=NOW() 
-   WHERE booking_id=?`,
-  [upload.secure_url, tenant_mobile, booking_id]
-);
+      `UPDATE agreements_form 
+       SET signed_pdf=?, agreement_status='completed', tenant_signed_at=NOW() 
+       WHERE booking_id=?`,
+      [upload.secure_url, booking_id]
+    );
 
     res.json({
       success: true,
@@ -243,12 +231,11 @@ exports.tenantFinalSign = async (req, res) => {
     console.error("🔥 Tenant Signing Error:", err);
     res.status(500).json({
       success: false,
-      message: "Tenant signing failed",
+      message: "Server Error during signing",
       error: err.message,
     });
   }
 };
-
 /* ================= ADMIN LOGIC ================= */
 
 // Updated to return the format your frontend needs
