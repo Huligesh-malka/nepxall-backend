@@ -137,7 +137,7 @@ exports.signOwnerAgreement = async (req, res) => {
     const metadata = await sharp(baseImage).metadata();
 
     const x = metadata.width - 380; // 🔥 FIXED ALIGNMENT
-    const y = metadata.height - 200;
+    const y = metadata.height - 110;  // ✅ FIXED
 
     /* ===== UPDATED SVG (MATCH TENANT FORMAT EXACTLY) ===== */
     const svg = `
