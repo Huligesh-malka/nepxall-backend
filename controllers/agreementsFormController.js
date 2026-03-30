@@ -141,8 +141,7 @@ exports.tenantFinalSign = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // 1. Fetch current agreement data (Already signed by owner)
-    // REMOVED full_name from selection as it's no longer needed for the stamp
+    // 1. Fetch agreement (owner already signed)
     const [rows] = await db.query(
       `SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
@@ -150,13 +149,13 @@ exports.tenantFinalSign = async (req, res) => {
 
     const data = rows[0];
     if (!data) return res.status(404).json({ message: "Agreement record not found" });
-    
+
     const ownerSignedUrl = data.signed_pdf;
     if (!ownerSignedUrl) {
       return res.status(400).json({ message: "Owner has not signed this document yet." });
     }
 
-    // 2. Fetch the existing image
+    // 2. Fetch image
     const response = await axios({
       url: ownerSignedUrl,
       method: "GET",
@@ -166,44 +165,63 @@ exports.tenantFinalSign = async (req, res) => {
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    // 3. Process Tenant Signature
-    const base64Data = tenant_signature.includes(",") 
-      ? tenant_signature.split(",")[1] 
+    // 3. Process signature
+    const base64Data = tenant_signature.includes(",")
+      ? tenant_signature.split(",")[1]
       : tenant_signature;
+
     const sigBuffer = Buffer.from(base64Data, "base64");
 
-    const resizedSig = await sharp(sigBuffer).resize(220, 90).png().toBuffer();
+    const resizedSig = await sharp(sigBuffer)
+      .resize(180, 70) // smaller clean signature
+      .png()
+      .toBuffer();
 
-    // 4. Generate Timestamp
+    // 4. Time
     const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
-    const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
+    const istDate = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "short",
+    }).format(now);
 
-    // 5. Create SVG Overlay (NAME REMOVED FROM HERE)
+    const istTime = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      timeStyle: "medium",
+    }).format(now);
+
+    // 5. Clean SVG (NO BOLD + PROPER FORMAT)
     const svgText = `
-    <svg width="320" height="150">
-      <text x="0" y="20" font-family="Arial" font-size="14" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="40" font-family="Arial" font-size="11" fill="#444">Verified Mob: ${tenant_mobile}</text>
-      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Place: ${data.city || ""}, ${data.state || ""}</text>
-      <text x="0" y="70" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
+    <svg width="350" height="160">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">Digitally Signed by Tenant</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${tenant_mobile}</text>
+      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
+      <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
 
-    // 6. Composite
+    // 6. PERFECT POSITION FIX
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgText), top: metadata.height - 240, left: 50 },
-        { input: resizedSig, top: metadata.height - 150, left: 50 }
+        {
+          input: Buffer.from(svgText),
+          top: metadata.height - 220, // better spacing
+          left: 80                   // inside margin
+        },
+        {
+          input: resizedSig,
+          top: metadata.height - 140, // below text
+          left: 80
+        }
       ])
       .png()
       .toBuffer();
 
-    // 7. Upload to Cloudinary
+    // 7. Upload
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
       { folder: "signed_agreements" }
     );
 
-    // 8. Update Database
+    // 8. Save
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, agreement_status = 'completed', mobile = ? 
