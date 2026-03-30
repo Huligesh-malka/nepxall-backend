@@ -75,12 +75,21 @@ exports.signOwnerAgreement = async (req, res) => {
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
-    const [rows] = await db.query(`SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`, [booking_id]);
-    if (!rows[0]?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
+    
+    // 1. Fetch record including location data
+    const [rows] = await db.query(
+      `SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`, 
+      [booking_id]
+    );
+    const data = rows[0];
 
-    const response = await axios.get(rows[0].signed_pdf, { responseType: "arraybuffer" });
+    if (!data?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
+
+    // 2. Process Image
+    const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
+    
     const sigBuffer = Buffer.from(tenant_signature.split(",")[1], "base64");
     const resizedSig = await sharp(sigBuffer).resize(180, 70).png().toBuffer();
 
@@ -88,19 +97,41 @@ exports.tenantFinalSign = async (req, res) => {
     const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
 
-    const svgText = `<svg width="350" height="160"><text x="0" y="18" font-family="Arial" font-size="13">Digitally Signed by Tenant</text><text x="0" y="38" font-family="Arial" font-size="11">Mobile: ${tenant_mobile}</text><text x="0" y="72" font-family="Arial" font-size="11">Date: ${istDate} ${istTime}</text></svg>`;
+    // 3. SVG with Location line added (y=55)
+    const svgText = `
+    <svg width="350" height="160">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">Digitally Signed by Tenant</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${tenant_mobile}</text>
+      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
+      <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
+    </svg>`;
 
+    // 4. Composite
     const finalImageBuffer = await sharp(baseImage)
       .composite([
         { input: Buffer.from(svgText), top: metadata.height - 340, left: 80 },
         { input: resizedSig, top: metadata.height - 270, left: 80 }
       ]).png().toBuffer();
 
-    const upload = await cloudinary.uploader.upload(`data:image/png;base64,${finalImageBuffer.toString("base64")}`, { folder: "signed_agreements" });
+    const upload = await cloudinary.uploader.upload(
+      `data:image/png;base64,${finalImageBuffer.toString("base64")}`, 
+      { folder: "signed_agreements" }
+    );
 
-    await db.query(`UPDATE agreements_form SET signed_pdf = ?, agreement_status = 'completed' WHERE booking_id = ?`, [upload.secure_url, booking_id]);
+    // 5. Update Database
+    await db.query(
+      `UPDATE agreements_form 
+       SET signed_pdf = ?, 
+           agreement_status = 'completed', 
+           tenant_final_signature = ?, 
+           tenant_mobile = ? 
+       WHERE booking_id = ?`, 
+      [upload.secure_url, tenant_signature, tenant_mobile, booking_id]
+    );
+
     res.json({ success: true, url: upload.secure_url });
   } catch (err) {
+    console.error("🔥 Tenant Signing Error:", err);
     res.status(500).json({ success: false, message: "Tenant signing failed" });
   }
 };
