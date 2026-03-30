@@ -134,32 +134,25 @@ exports.signOwnerAgreement = async (req, res) => {
     }).format(now);
 
     /* ===== POSITION FIX ===== */
-    const metadata = await sharp(baseImage).metadata();
-
-    const x = metadata.width - 300;
-    const y = metadata.height - 200; // 🔥 FIXED POSITION
+    
 
     /* ===== LEGAL TEXT ===== */
-    const svg = `
+    const svgText = `
     <svg width="600" height="200">
       <text x="0" y="20" font-size="16">Digitally Signed</text>
-      <text x="0" y="45" font-size="14">Mobile: ${owner_mobile}</text>
-      <text x="0" y="70" font-size="14">Date: ${formattedDate}</text>
-      <text x="0" y="95" font-size="14">Time: ${formattedTime}</text>
-      <text x="0" y="120" font-size="12">Location: ${location}</text>
+      <text x="0" y="45" font-size="14">Mobile: ${tenant_mobile}</text>
+      <text x="0" y="70" font-size="14">Date: ${istDate}</text>
+      <text x="0" y="95" font-size="14">Time: ${istTime}</text>
+      <text x="0" y="120" font-size="12">Location: ${data.city || ""}, ${data.state || ""}</text>
     </svg>
     `;
-
-    const textBuffer = Buffer.from(svg);
-
-    /* ===== MERGE ===== */
-    const finalImage = await sharp(baseImage)
-      .composite([
-        { input: textBuffer, top: y - 140, left: x },
-        { input: resizedSignature, top: y, left: x }
-      ])
-      .png()
-      .toBuffer();
+    
+        const finalImage = await sharp(baseImage)
+          .composite([
+            { input: Buffer.from(svgText), top: metadata.height - 240, left: metadata.width - 320 },
+            { input: resizedSig, top: metadata.height - 180, left: metadata.width - 320 }
+          ])
+          .png().toBuffer();
 
     /* ===== CLOUDINARY UPLOAD ===== */
     const upload = await cloudinary.uploader.upload(
