@@ -101,11 +101,14 @@ exports.signOwnerAgreement = async (req, res) => {
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
 
     const svgText = `
-    <svg width="300" height="150">
-      <text x="0" y="20" font-family="Arial" font-size="14" fill="black">Digitally Signed by Owner</text>
-      <text x="0" y="40" font-family="Arial" font-size="12" fill="gray">Mob: ${owner_mobile}</text>
-      <text x="0" y="60" font-family="Arial" font-size="12" fill="gray">Date: ${istDate} ${istTime}</text>
-    </svg>`;
+<svg width="600" height="200">
+  <text x="0" y="20" font-size="16">Digitally Signed</text>
+  <text x="0" y="45" font-size="14">Mobile: ${tenant_mobile}</text>
+  <text x="0" y="70" font-size="14">Date: ${istDate}</text>
+  <text x="0" y="95" font-size="14">Time: ${istTime}</text>
+  <text x="0" y="120" font-size="12">Location: ${data.city || ""}, ${data.state || ""}</text>
+</svg>
+`;
 
     const finalImage = await sharp(baseImage)
       .composite([
