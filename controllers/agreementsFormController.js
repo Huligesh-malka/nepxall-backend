@@ -140,18 +140,21 @@ exports.tenantFinalSign = async (req, res) => {
       return res.status(400).json({ message: "Tenant signature required" });
     }
 
+    // ✅ GET FULL USER DATA
     const [rows] = await db.query(
-      "SELECT signed_pdf FROM agreements_form WHERE booking_id = ?",
+      `SELECT signed_pdf, full_name, mobile, address, city, state 
+       FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
     );
 
-    const ownerSignedUrl = rows[0]?.signed_pdf;
+    const data = rows[0];
+    const ownerSignedUrl = data?.signed_pdf;
 
     if (!ownerSignedUrl) {
       return res.status(400).json({ message: "Owner not signed yet" });
     }
 
-    // ✅ FIX: Proper axios fetch
+    /* ================= FETCH IMAGE ================= */
     const response = await axios({
       url: ownerSignedUrl,
       method: "GET",
@@ -161,7 +164,7 @@ exports.tenantFinalSign = async (req, res) => {
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
 
-    // ✅ Tenant signature buffer fix
+    /* ================= TENANT SIGNATURE ================= */
     const sigBuffer = Buffer.from(
       tenant_signature.replace(/^data:image\/\w+;base64,/, ""),
       "base64"
@@ -172,27 +175,62 @@ exports.tenantFinalSign = async (req, res) => {
       .png()
       .toBuffer();
 
-    // ✅ Final image (LEFT SIDE SIGN)
+    /* ================= DATE TIME ================= */
+    const now = new Date();
+    const istDate = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "short",
+    }).format(now);
+
+    const istTime = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      timeStyle: "medium",
+    }).format(now);
+
+    /* ================= DEVICE INFO ================= */
+    const deviceInfo = req.headers["user-agent"] || "Unknown Device";
+
+    /* ================= SVG TEXT ================= */
+    const svgText = `
+    <svg width="320" height="180">
+      <text x="0" y="20" font-size="14" fill="black">Digitally Signed by Tenant</text>
+      <text x="0" y="40" font-size="12" fill="gray">Name: ${data.full_name || "-"}</text>
+      <text x="0" y="60" font-size="12" fill="gray">Mobile: ${data.mobile || "-"}</text>
+      <text x="0" y="80" font-size="12" fill="gray">Address: ${data.address || ""}</text>
+      <text x="0" y="100" font-size="12" fill="gray">${data.city || ""}, ${data.state || ""}</text>
+      <text x="0" y="120" font-size="12" fill="gray">Date: ${istDate}</text>
+      <text x="0" y="140" font-size="12" fill="gray">Time: ${istTime}</text>
+      <text x="0" y="160" font-size="10" fill="gray">Device: ${deviceInfo}</text>
+    </svg>`;
+
+    /* ================= FINAL IMAGE ================= */
     const finalImage = await sharp(baseImage)
       .composite([
         {
+          input: Buffer.from(svgText),
+          top: metadata.height - 260,
+          left: 50, // ✅ LEFT SIDE TEXT
+        },
+        {
           input: resizedSig,
-          top: metadata.height - 180,
-          left: 60, // LEFT SIDE
+          top: metadata.height - 150,
+          left: 50, // ✅ LEFT SIDE SIGN
         },
       ])
       .png()
       .toBuffer();
 
+    /* ================= UPLOAD ================= */
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImage.toString("base64")}`,
-      {
-        folder: "signed_agreements",
-      }
+      { folder: "signed_agreements" }
     );
 
+    /* ================= UPDATE DB ================= */
     await db.query(
-      "UPDATE agreements_form SET signed_pdf=?, agreement_status='completed' WHERE booking_id=?",
+      `UPDATE agreements_form 
+       SET signed_pdf=?, agreement_status='completed', tenant_signed_at=NOW() 
+       WHERE booking_id=?`,
       [upload.secure_url, booking_id]
     );
 
@@ -202,7 +240,7 @@ exports.tenantFinalSign = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Tenant Signing Error:", err);
+    console.error("🔥 Tenant Signing Error:", err);
     res.status(500).json({
       success: false,
       message: "Tenant signing failed",
