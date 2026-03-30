@@ -132,7 +132,7 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-/* ================= TENANT FINAL SIGNING (FIXED) ================= */
+/* ================= TENANT FINAL SIGNING (NAME REMOVED) ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
@@ -142,9 +142,9 @@ exports.tenantFinalSign = async (req, res) => {
     }
 
     // 1. Fetch current agreement data (Already signed by owner)
+    // REMOVED full_name from selection as it's no longer needed for the stamp
     const [rows] = await db.query(
-      `SELECT signed_pdf, full_name, mobile, address, city, state 
-       FROM agreements_form WHERE booking_id = ?`,
+      `SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`,
       [booking_id]
     );
 
@@ -179,20 +179,19 @@ exports.tenantFinalSign = async (req, res) => {
     const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
 
-    // 5. Create SVG Overlay (Using the mobile passed from frontend)
+    // 5. Create SVG Overlay (NAME REMOVED FROM HERE)
     const svgText = `
-    <svg width="320" height="180">
+    <svg width="320" height="150">
       <text x="0" y="20" font-family="Arial" font-size="14" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="40" font-family="Arial" font-size="11" fill="#444">Name: ${data.full_name || "-"}</text>
-      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Verified Mob: ${tenant_mobile}</text>
-      <text x="0" y="70" font-family="Arial" font-size="11" fill="#444">Place: ${data.city || ""}, ${data.state || ""}</text>
-      <text x="0" y="85" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
+      <text x="0" y="40" font-family="Arial" font-size="11" fill="#444">Verified Mob: ${tenant_mobile}</text>
+      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Place: ${data.city || ""}, ${data.state || ""}</text>
+      <text x="0" y="70" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
 
     // 6. Composite
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgText), top: metadata.height - 260, left: 50 },
+        { input: Buffer.from(svgText), top: metadata.height - 240, left: 50 },
         { input: resizedSig, top: metadata.height - 150, left: 50 }
       ])
       .png()
@@ -204,8 +203,7 @@ exports.tenantFinalSign = async (req, res) => {
       { folder: "signed_agreements" }
     );
 
-    // 8. Update Database - REMOVED extra columns to prevent 500 error if they don't exist
-    // We update the 'mobile' to the new verified one and set status to completed
+    // 8. Update Database
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, agreement_status = 'completed', mobile = ? 
@@ -223,48 +221,48 @@ exports.tenantFinalSign = async (req, res) => {
 
 /* ================= ADMIN LOGIC ================= */
 exports.getAllAgreements = async (req, res) => {
-    try {
-        const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
-        res.status(200).json({ success: true, data: rows });
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to fetch agreements" });
-    }
+  try {
+    const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
+    res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch agreements" });
+  }
 };
 
 exports.getAgreementById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
-        if (rows.length === 0) return res.status(404).json({ success: false, message: "Not found" });
-        res.json({ success: true, data: rows[0] });
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching details" });
-    }
+  try {
+    const { id } = req.params;
+    const [rows] = await db.query("SELECT * FROM agreements_form WHERE id = ?", [id]);
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Not found" });
+    res.json({ success: true, data: rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching details" });
+  }
 };
 
 exports.updateAgreementStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status } = req.body;
-        await db.query("UPDATE agreements_form SET agreement_status = ? WHERE id = ?", [status, id]);
-        res.json({ success: true, message: "Status updated" });
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Update failed" });
-    }
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    await db.query("UPDATE agreements_form SET agreement_status = ? WHERE id = ?", [status, id]);
+    res.json({ success: true, message: "Status updated" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Update failed" });
+  }
 };
 
 exports.uploadFinalImage = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const final_image_path = req.file?.path;
-        if (!final_image_path) return res.status(400).json({ success: false, message: "No file" });
+  try {
+    const { id } = req.params;
+    const final_image_path = req.file?.path;
+    if (!final_image_path) return res.status(400).json({ success: false, message: "No file" });
 
-        await db.query(
-            "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?", 
-            [final_image_path, id]
-        );
-        res.json({ success: true, message: "Image uploaded and status approved" });
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Upload failed" });
-    }
+    await db.query(
+      "UPDATE agreements_form SET final_pdf = ?, agreement_status = 'approved' WHERE id = ?", 
+      [final_image_path, id]
+    );
+    res.json({ success: true, message: "Image uploaded and status approved" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Upload failed" });
+  }
 };
