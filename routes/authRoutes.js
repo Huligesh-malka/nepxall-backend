@@ -44,11 +44,15 @@ router.post("/firebase", async (req, res) => {
     ===================================================== */
     if (!rows.length) {
 
-      // ✅ SECURITY FIX: Only allow safe roles (NO ADMIN)
+      // 🔐 STRICT ROLE CONTROL
       const allowedRoles = ["tenant", "owner", "vendor"];
 
-      role = allowedRoles.includes(requestedRole)
-        ? requestedRole
+      const safeRequestedRole = (requestedRole || "")
+        .toLowerCase()
+        .trim();
+
+      role = allowedRoles.includes(safeRequestedRole)
+        ? safeRequestedRole
         : "tenant";
 
       console.log("🛡️ Assigned safe role:", role);
@@ -69,7 +73,6 @@ router.post("/firebase", async (req, res) => {
       };
 
       console.log("🆕 NEW USER CREATED");
-
     }
 
     /* =====================================================
@@ -81,30 +84,30 @@ router.post("/firebase", async (req, res) => {
 
       console.log("👤 Existing user role:", role);
 
+      // update missing fields only
       if (!user.phone && phone) {
-        await db.query("UPDATE users SET phone=? WHERE id=?", [phone, user.id]);
+        await db.query(
+          "UPDATE users SET phone=? WHERE id=?",
+          [phone, user.id]
+        );
       }
 
       if (!user.email && email) {
-        await db.query("UPDATE users SET email=? WHERE id=?", [email, user.id]);
+        await db.query(
+          "UPDATE users SET email=? WHERE id=?",
+          [email, user.id]
+        );
       }
     }
 
     /* =====================================================
-       🔒 SECURITY: REMOVE AUTO ROLE CHANGE
-    ===================================================== */
-    // ❌ OLD: Auto upgrade to owner (REMOVED)
-    // ✅ Now role only changes via admin/manual process
-    console.log("🔒 Role locked as:", role);
-
-    /* =====================================================
-       🔐 CREATE JWT (WITH ROLE)
+       🔐 CREATE JWT
     ===================================================== */
     const token = jwt.sign(
       {
         id: user.id,
         firebase_uid,
-        role   // ✅ important
+        role
       },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
