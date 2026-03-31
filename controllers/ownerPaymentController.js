@@ -122,11 +122,20 @@ exports.signOwnerAgreement = async (req, res) => {
     const yPos = metadata.height - 200;
 
     const svgOverlay = `
-    <svg width="350" height="100">
-      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${owner_mobile}</text>
-      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
-    </svg>`;
+<svg width="350" height="120">
+  <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">
+    Digitally Signed by Owner
+  </text>
+  <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">
+    Mobile: ${owner_mobile}
+  </text>
+  <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">
+    Location: Bangalore, Karnataka
+  </text>
+  <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">
+    Date: ${formattedDate}
+  </text>
+</svg>`;
 
     const finalImageBuffer = await sharp(baseImage)
       .composite([
