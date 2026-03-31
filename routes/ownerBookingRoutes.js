@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const firebaseAuth = require("../middlewares/auth");
+const firebaseAuth = require("../middlewares/authMiddleware");
 
 const {
   getOwnerBookings,

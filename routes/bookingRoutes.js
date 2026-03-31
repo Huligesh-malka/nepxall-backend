@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const firebaseAuth = require("../middlewares/auth");
+const firebaseAuth = require("../middlewares/authMiddleware");
 const bookingController = require("../controllers/bookingController");
 
 router.post("/:pgId", firebaseAuth, bookingController.createBooking);
