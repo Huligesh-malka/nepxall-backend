@@ -15,7 +15,7 @@ cloudinary.config({
 /* ================= GET PAYMENTS ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
-    const ownerId = req.user.mysqlId || req.user.id;
+    const ownerId = req.user.id || req.user.id;
 
     const [rows] = await db.query(`
       SELECT 
@@ -216,7 +216,7 @@ exports.signOwnerAgreement = async (req, res) => {
 /* ================= SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
-    const ownerId = req.user.mysqlId || req.user.id;
+    const ownerId = req.user.id || req.user.id;
 
     const [rows] = await db.query(`
       SELECT 

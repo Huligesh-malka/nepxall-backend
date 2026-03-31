@@ -6,7 +6,7 @@ const db = require("../db");
 exports.saveUserConsent = async (req, res) => {
   try {
     const { bookingId, aadhaarConsent, agreementConsent } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     if (!aadhaarConsent || !agreementConsent) {
       return res.status(400).json({
@@ -35,7 +35,7 @@ exports.saveUserConsent = async (req, res) => {
 exports.completeMoveIn = async (req, res) => {
   try {
     const { bookingId } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     const [[booking]] = await db.query(
       `SELECT * FROM bookings 

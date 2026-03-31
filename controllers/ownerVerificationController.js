@@ -18,7 +18,7 @@ const getHeaders = (token) => ({
 //////////////////////////////////////////////////
 exports.sendAadhaarOtp = async (req, res) => {
   try {
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
     const { aadhaar_number } = req.body;
 
     // Validation
@@ -70,7 +70,7 @@ exports.sendAadhaarOtp = async (req, res) => {
 //////////////////////////////////////////////////
 exports.verifyAadhaarOtp = async (req, res) => {
   try {
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
     const { otp } = req.body;
 
     if (!otp) return res.status(400).json({ message: "OTP is required" });
@@ -130,7 +130,7 @@ exports.verifyAadhaarOtp = async (req, res) => {
 //////////////////////////////////////////////////
 exports.getVerificationStatus = async (req, res) => {
   try {
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
     const [rows] = await db.query(
       "SELECT aadhaar_verified, owner_verification_status FROM users WHERE id=?",
       [userId]

@@ -25,7 +25,7 @@ async function checkPgAccess(pgId, userId) {
 exports.sendMessage = async (req, res) => {
   try {
     const { pg_id, message } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     if (!pg_id || !message?.trim()) {
       return res.status(400).json({ message: "Message cannot be empty" });
@@ -81,7 +81,7 @@ exports.sendMessage = async (req, res) => {
 exports.getMessages = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const userId = req.user.mysqlId; // Ensure this is correctly attached from auth middleware
+    const userId = req.user.id; // Ensure this is correctly attached from auth middleware
 
     /* 🔐 ROBUST ACCESS CHECK */
     // This query checks if the user is the owner OR an active tenant in one go
@@ -131,7 +131,7 @@ exports.updateMessage = async (req, res) => {
   try {
     const { id } = req.params;
     const { message } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     const [result] = await db.query(
       `
@@ -161,7 +161,7 @@ exports.updateMessage = async (req, res) => {
 exports.deleteMessage = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     const [result] = await db.query(
       `

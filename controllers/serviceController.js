@@ -6,7 +6,7 @@ const db = require("../db");
  */
 exports.bookService = async (req, res) => {
   try {
-    const userId = req.user.mysqlId || req.user.id; 
+    const userId = req.user.id || req.user.id; 
 
     const {
       bookingId,
@@ -70,7 +70,7 @@ exports.bookService = async (req, res) => {
  */
 exports.getUserServices = async (req, res) => {
   try {
-    const userId = req.user.mysqlId || req.user.id;
+    const userId = req.user.id || req.user.id;
 
     const [rows] = await db.query(
       `SELECT * FROM service_bookings WHERE user_id = ? ORDER BY created_at DESC`,

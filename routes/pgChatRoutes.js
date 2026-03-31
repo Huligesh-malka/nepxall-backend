@@ -5,7 +5,7 @@ const pgChat = require("../controllers/pgChatController");
 const auth = require("../middlewares/authMiddleware");
 
 /* =========================================================
-   🔐 FIREBASE AUTH → ATTACH req.user.mysqlId
+   🔐 FIREBASE AUTH → ATTACH req.user.id
 ========================================================= */
 router.use(auth);
 

@@ -6,7 +6,7 @@ const db = require("../db");
 exports.getVendorServices = async (req, res) => {
   try {
 
-    const vendorId = req.user.mysqlId || req.user.id;
+    const vendorId = req.user.id || req.user.id;
 
     const [rows] = await db.query(
       `
@@ -56,7 +56,7 @@ exports.getVendorServices = async (req, res) => {
 exports.updateVendorServiceStatus = async (req, res) => {
   try {
 
-    const vendorId = req.user.mysqlId || req.user.id;
+    const vendorId = req.user.id || req.user.id;
     const { id } = req.params;
     const { vendor_status } = req.body;
 

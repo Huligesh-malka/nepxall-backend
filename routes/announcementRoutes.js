@@ -9,7 +9,7 @@ const auth = require("../middlewares/authMiddleware");
 router.post("/", auth, async (req, res) => {
   try {
     const { pg_id, message } = req.body;
-    const userId = req.user.mysqlId; 
+    const userId = req.user.id; 
 
     if (!pg_id || !message?.trim()) {
       return res.status(400).json({ message: "Content required" });

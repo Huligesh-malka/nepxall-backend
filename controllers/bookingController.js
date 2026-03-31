@@ -7,7 +7,7 @@ exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
     const { name, check_in_date, room_type, phone } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     if (!check_in_date || !room_type) {
       return res.status(400).json({ message: "Missing required fields" });
@@ -15,7 +15,7 @@ exports.createBooking = async (req, res) => {
 
     // 🔐 PREVENT DOUBLE CLICK (CHECK FIRST)
     const [[existing]] = await db.query(
-      `SELECT id FROM bookings
+      `SELECT id FROM pg_bookings
        WHERE user_id=? AND pg_id=? AND check_in_date=? LIMIT 1`,
       [userId, pgId, check_in_date]
     );
@@ -81,7 +81,7 @@ exports.createBooking = async (req, res) => {
     // 📝 INSERT
     //////////////////////////////////////////////////////
     await db.query(
-      `INSERT INTO bookings
+      `INSERT INTO pg_bookings
       (pg_id, user_id, owner_id, name, email, phone,
        check_in_date, room_type,
        rent_amount, security_deposit, maintenance_amount, status)
@@ -146,13 +146,13 @@ exports.getUserBookings = async (req, res) => {
         p.area,
         p.contact_phone AS owner_phone,
         pr.room_no
-      FROM bookings b
+        FROM pg_bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
       WHERE b.user_id=?
       ORDER BY b.created_at DESC
       `,
-      [req.user.mysqlId]
+      [req.user.id]
     );
 
     res.json(rows);
@@ -173,13 +173,13 @@ exports.getOwnerBookings = async (req, res) => {
         p.pg_name,
         u.name AS tenant_name,
         u.phone AS tenant_phone
-      FROM bookings b
+      FROM pg_bookings b
       JOIN pgs p ON p.id = b.pg_id
       JOIN users u ON u.id = b.user_id
       WHERE b.owner_id=?
       ORDER BY b.created_at DESC
       `,
-      [req.user.mysqlId]
+      [req.user.id]
     );
 
     res.json(rows);
@@ -197,8 +197,8 @@ exports.updateBookingStatus = async (req, res) => {
     const { status } = req.body;
 
     await db.query(
-      "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
-      [status, bookingId, req.user.mysqlId]
+      "UPDATE pg_bookings SET status=? WHERE id=? AND owner_id=?",
+      [status, bookingId, req.user.id]
     );
 
     res.json({ success: true });
@@ -214,7 +214,7 @@ exports.markPaymentDone = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { room_id } = req.body;
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
@@ -273,7 +273,7 @@ exports.getActiveTenantsByOwner = async (req, res) => {
       JOIN pgs p ON p.id = pu.pg_id
       WHERE pu.owner_id=? AND pu.status='ACTIVE'
       `,
-      [req.user.mysqlId]
+      [req.user.id]
     );
 
     res.json(rows);

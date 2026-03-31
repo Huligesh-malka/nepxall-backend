@@ -199,7 +199,7 @@ exports.uploadPhotosOnly = async (req, res) => {
     // 🔥 FIXED: Added owner_id check for security
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
-      [id, req.user.mysqlId]
+      [id, req.user.id]
     );
 
     if (rows.length === 0) {
@@ -212,7 +212,7 @@ exports.uploadPhotosOnly = async (req, res) => {
     // Update database
     await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ? AND owner_id = ?",
-      [JSON.stringify(updatedPhotos), id, req.user.mysqlId]
+      [JSON.stringify(updatedPhotos), id, req.user.id]
     );
 
     res.json({
@@ -237,7 +237,7 @@ exports.addPG = async (req, res) => {
     console.log('Add PG request body:', b);
 
     // 🔐 OWNER MUST COME FROM JWT
-    const numericOwnerId = req.user.mysqlId;   // ✅ MySQL user id
+    const numericOwnerId = req.user.id;   // ✅ MySQL user id
     const firebaseUid = req.user.uid;          // ✅ only for notifications
 
     console.log('Got numeric user ID:', numericOwnerId);
@@ -568,7 +568,7 @@ exports.updatePG = async (req, res) => {
     // 🔥 FIXED: Check if PG belongs to this owner
     const [checkRows] = await db.query(
       "SELECT id FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
-      [id, req.user.mysqlId]
+      [id, req.user.id]
     );
 
     if (checkRows.length === 0) {
@@ -759,7 +759,7 @@ exports.updatePG = async (req, res) => {
 
       const [rows] = await db.query(
         "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?",
-        [id, req.user.mysqlId]
+        [id, req.user.id]
       );
 
       if (rows.length === 0) {
@@ -773,7 +773,7 @@ exports.updatePG = async (req, res) => {
     // 🔥 FIXED: Added owner_id check in WHERE clause
     const [updateResult] = await db.query(
       "UPDATE pgs SET ? WHERE id = ? AND owner_id = ? AND is_deleted = 0",
-      [updateData, id, req.user.mysqlId]
+      [updateData, id, req.user.id]
     );
 
     if (updateResult.affectedRows === 0) {
@@ -791,7 +791,7 @@ exports.updatePG = async (req, res) => {
 /* ================= OWNER DASHBOARD ================= */
 exports.getOwnerDashboardPGs = async (req, res) => {
   try {
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({
@@ -869,7 +869,7 @@ exports.deletePG = async (req, res) => {
     // 🔥 FIXED: Added owner_id check
     const [result] = await db.query(
       "UPDATE pgs SET is_deleted = 1 WHERE id = ? AND owner_id = ?",
-      [req.params.id, req.user.mysqlId]
+      [req.params.id, req.user.id]
     );
 
     if (result.affectedRows === 0) {
@@ -896,7 +896,7 @@ exports.joinPG = async (req, res) => {
       return res.status(400).json({ success: false, message: "PG ID required" });
     }
 
-    const numericUserId = req.user.mysqlId;
+    const numericUserId = req.user.id;
 
     // 🔥 FIXED: Prevent duplicate join requests
     await db.query(
@@ -925,7 +925,7 @@ exports.deleteSinglePhoto = async (req, res) => {
     // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?", 
-      [id, req.user.mysqlId]
+      [id, req.user.id]
     );
 
     if (rows.length === 0) {
@@ -937,7 +937,7 @@ exports.deleteSinglePhoto = async (req, res) => {
 
     await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ? AND owner_id = ?",
-      [JSON.stringify(photos), id, req.user.mysqlId]
+      [JSON.stringify(photos), id, req.user.id]
     );
 
     // ✅ REMOVED: Don't try to delete from local filesystem with Cloudinary
@@ -960,7 +960,7 @@ exports.updatePhotoOrder = async (req, res) => {
     // 🔥 FIXED: Added owner_id check
     const [result] = await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ? AND owner_id = ?",
-      [JSON.stringify(photos), id, req.user.mysqlId]
+      [JSON.stringify(photos), id, req.user.id]
     );
 
     if (result.affectedRows === 0) {
@@ -993,7 +993,7 @@ exports.uploadPGVideos = async (req, res) => {
     // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT videos FROM pgs WHERE id = ? AND owner_id = ?",
-      [id, req.user.mysqlId]
+      [id, req.user.id]
     );
 
     if (rows.length === 0) {
@@ -1011,7 +1011,7 @@ exports.uploadPGVideos = async (req, res) => {
 
     await db.query(
       "UPDATE pgs SET videos = ? WHERE id = ? AND owner_id = ?",
-      [JSON.stringify(updatedVideos), id, req.user.mysqlId]
+      [JSON.stringify(updatedVideos), id, req.user.id]
     );
 
     res.json({
@@ -1116,7 +1116,7 @@ exports.deleteSingleVideo = async (req, res) => {
     // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT videos FROM pgs WHERE id = ? AND owner_id = ?", 
-      [id, req.user.mysqlId]
+      [id, req.user.id]
     );
 
     if (rows.length === 0) {
@@ -1136,7 +1136,7 @@ exports.deleteSingleVideo = async (req, res) => {
 
     await db.query(
       "UPDATE pgs SET videos = ? WHERE id = ? AND owner_id = ?",
-      [JSON.stringify(updatedVideos), id, req.user.mysqlId]
+      [JSON.stringify(updatedVideos), id, req.user.id]
     );
 
     res.json({ success: true, videos: updatedVideos });
@@ -1234,7 +1234,7 @@ exports.cleanInvalidNotifications = async (req, res) => {
 
 exports.becomeOwner = async (req, res) => {
   try {
-    const userId = req.user.mysqlId;
+    const userId = req.user.id;
 
     await db.query(
       "UPDATE users SET role = 'owner' WHERE id = ?",
