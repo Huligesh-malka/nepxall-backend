@@ -1,22 +1,19 @@
-// controllers/ownerPaymentController.js
-
 const db = require("../db");
 const axios = require("axios");
 const sharp = require("sharp");
 const cloudinary = require("cloudinary").v2;
 
-/* ================= CLOUDINARY ================= */
+/* ================= CLOUDINARY CONFIG ================= */
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= GET PAYMENTS ================= */
+/* ================= GET PAYMENTS (Requires Auth) ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
-    const ownerId = req.user.id || req.user.id;
-
+    const ownerId = req.user.id;
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -31,12 +28,112 @@ exports.getOwnerPayments = async (req, res) => {
       WHERE b.owner_id = ? AND p.status = 'paid'
       ORDER BY p.created_at DESC
     `, [ownerId]);
-
     res.json({ success: true, data: rows });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false });
+  }
+};
+
+/* ================= SIGN AGREEMENT (PUBLIC / NO AUTH) ================= */
+exports.signOwnerAgreement = async (req, res) => {
+  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
+
+  try {
+    // 1. Basic Validation
+    if (!accepted_terms || !owner_signature || !booking_id) {
+      return res.status(400).json({ success: false, message: "Required fields missing" });
+    }
+
+    // 2. Check if already signed or exists
+    const [existing] = await db.query(
+      `SELECT signed_pdf, final_pdf FROM agreements_form WHERE booking_id = ?`,
+      [booking_id]
+    );
+
+    if (!existing.length) {
+      return res.status(404).json({ success: false, message: "Agreement not found" });
+    }
+    if (existing[0].signed_pdf) {
+      return res.status(400).json({ success: false, message: "Agreement already signed" });
+    }
+
+    // 3. Image Processing
+    const imageUrl = existing[0].final_pdf;
+    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
+    const baseImage = Buffer.from(response.data);
+
+    const base64Data = owner_signature.split(",")[1];
+    const signatureBuffer = Buffer.from(base64Data, "base64");
+
+    const resizedSignature = await sharp(signatureBuffer)
+      .resize(220, 90)
+      .png()
+      .toBuffer();
+
+    // 4. Metadata & Info
+    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const ip = rawIp ? rawIp.split(",")[0].trim() : "Unknown";
+    const ua = req.headers["user-agent"] || "";
+    let device = ua.includes("Mobile") ? "Mobile Device" : "Desktop Browser";
+
+    const now = new Date();
+    const formattedDate = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: true
+    }).format(now);
+
+    const metadata = await sharp(baseImage).metadata();
+    const x = metadata.width - 380;
+    const y = metadata.height - 200;
+
+    const svg = `
+    <svg width="350" height="100">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">Digitally Signed by Owner</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${owner_mobile}</text>
+      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
+    </svg>`;
+
+    // 5. Merge and Upload
+    const finalImage = await sharp(baseImage)
+      .composite([
+        { input: Buffer.from(svg), top: y - 120, left: x },
+        { input: resizedSignature, top: y - 50, left: x }
+      ])
+      .png()
+      .toBuffer();
+
+    const upload = await cloudinary.uploader.upload(
+      `data:image/png;base64,${finalImage.toString("base64")}`,
+      { folder: "signed_agreements", resource_type: "image" }
+    );
+
+    // 6. Update DB (Bypass Auth context, use provided booking_id)
+    await db.query(`
+      UPDATE agreements_form 
+      SET 
+        owner_signature = ?, 
+        mobile = ?, 
+        owner_signed_at = NOW(),
+        agreement_status = 'approved',
+        signed_pdf = ?,
+        ip_address = ?,
+        device_info = ?,
+        terms_accepted = 1
+      WHERE booking_id = ?
+    `, [owner_signature, owner_mobile, upload.secure_url, ip, device, booking_id]);
+
+    // Simply return success data - no redirect instructions
+    res.json({
+      success: true,
+      message: "Signed successfully",
+      signed_pdf: upload.secure_url
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Signing failed" });
   }
 };
 
@@ -53,181 +150,15 @@ exports.markAgreementViewed = async (req, res) => {
   }
 };
 
-/* ================= SIGN AGREEMENT ================= */
-exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
-
-  try {
-    if (!accepted_terms || !owner_signature) {
-      return res.status(400).json({ message: "Signature required" });
-    }
-
-    /* ===== ALREADY SIGNED CHECK ===== */
-    const [existing] = await db.query(
-      `SELECT signed_pdf FROM agreements_form WHERE booking_id = ?`,
-      [booking_id]
-    );
-
-    if (existing[0]?.signed_pdf) {
-      return res.status(400).json({ message: "Already signed" });
-    }
-
-    /* ===== GET BASE IMAGE ===== */
-    const [rows] = await db.query(
-      `SELECT final_pdf FROM agreements_form WHERE booking_id = ?`,
-      [booking_id]
-    );
-
-    const imageUrl = rows[0].final_pdf;
-
-    const response = await axios.get(imageUrl, {
-      responseType: "arraybuffer"
-    });
-
-    const baseImage = Buffer.from(response.data);
-
-    /* ===== SIGNATURE ===== */
-    const base64Data = owner_signature.split(",")[1];
-    const signatureBuffer = Buffer.from(base64Data, "base64");
-
-    const resizedSignature = await sharp(signatureBuffer)
-      .resize(220, 90)
-      .png()
-      .toBuffer();
-
-    /* ===== IP ===== */
-    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-    const ip = rawIp ? rawIp.split(",")[0].trim() : "Unknown";
-
-    /* ===== DEVICE ===== */
-    const ua = req.headers["user-agent"] || "";
-    let device = "Unknown";
-
-    if (ua.includes("Chrome")) device = "Chrome Browser";
-    else if (ua.includes("Safari")) device = "Safari Browser";
-    else if (ua.includes("Firefox")) device = "Firefox Browser";
-    else if (ua.includes("Mobile")) device = "Mobile Device";
-
-    /* ===== LOCATION ===== */
-    let location = "India";
-    try {
-      const geo = await axios.get(`http://ip-api.com/json/${ip}`);
-      location = `${geo.data.city}, ${geo.data.regionName}, ${geo.data.country}`;
-    } catch {}
-
-    /* ===== TIME ===== */
-    const now = new Date();
-
-    const formattedDate = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric"
-    }).format(now);
-
-    const formattedTime = new Intl.DateTimeFormat("en-IN", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true
-    }).format(now);
-
-    /* ===== POSITION (MATCH TENANT) ===== */
-    const metadata = await sharp(baseImage).metadata();
-
-    const x = metadata.width - 380; // 🔥 FIXED ALIGNMENT
-    const y = metadata.height - 200;
-
-    /* ===== UPDATED SVG (MATCH TENANT FORMAT EXACTLY) ===== */
-    const svg = `
-    <svg width="350" height="160">
-      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">
-        Digitally Signed by Owner
-      </text>
-
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">
-        Mobile: ${owner_mobile}
-      </text>
-
-      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">
-        Location: ${location}
-      </text>
-
-      <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">
-        Date: ${formattedDate} ${formattedTime}
-      </text>
-    </svg>
-    `;
-
-    const textBuffer = Buffer.from(svg);
-
-    /* ===== MERGE ===== */
-    const finalImage = await sharp(baseImage)
-      .composite([
-        { input: textBuffer, top: y - 140, left: x },
-        { input: resizedSignature, top: y - 70, left: x }
-      ])
-      .png()
-      .toBuffer();
-
-    /* ===== UPLOAD ===== */
-    const upload = await cloudinary.uploader.upload(
-      `data:image/png;base64,${finalImage.toString("base64")}`,
-      {
-        folder: "signed_agreements",
-        resource_type: "image"
-      }
-    );
-
-    /* ===== SAVE ===== */
-    await db.query(`
-      UPDATE agreements_form 
-      SET 
-        owner_signature = ?, 
-        mobile = ?, 
-        owner_signed_at = NOW(),
-        agreement_status = 'approved',
-        signed_pdf = ?,
-        ip_address = ?,
-        device_info = ?,
-        terms_accepted = 1
-      WHERE booking_id = ?
-    `, [
-      owner_signature,
-      owner_mobile,
-      upload.secure_url,
-      ip,
-      device,
-      booking_id
-    ]);
-
-    res.json({
-      success: true,
-      signed_pdf: upload.secure_url
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Signing failed ❌" });
-  }
-};
-
 /* ================= SUMMARY ================= */
 exports.getOwnerSettlementSummary = async (req, res) => {
   try {
-    const ownerId = req.user.id || req.user.id;
-
+    const ownerId = req.user.id;
     const [rows] = await db.query(`
-      SELECT 
-        COUNT(*) AS total_bookings,
-        SUM(owner_amount) AS total_earned
-      FROM bookings
-      WHERE owner_id = ?
+      SELECT COUNT(*) AS total_bookings, SUM(owner_amount) AS total_earned
+      FROM bookings WHERE owner_id = ?
     `, [ownerId]);
-
     res.json({ success: true, data: rows[0] });
-
   } catch {
     res.status(500).json({ success: false });
   }
