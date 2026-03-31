@@ -7,7 +7,7 @@ router.get("/:id", qrScanController.getPGScanData);
 router.post("/:id/track", qrScanController.trackQRScan);
 
 // Protected routes - require authentication
-const auth = require("../middlewares/auth");
+const auth = require("../middlewares/authMiddleware");
 router.get("/:id/statistics", auth, qrScanController.getScanStatistics);
 
 module.exports = router;

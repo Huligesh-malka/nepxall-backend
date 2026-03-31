@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const pgChat = require("../controllers/pgChatController");
-const auth = require("../middlewares/auth");
+const auth = require("../middlewares/authMiddleware");
 
 /* =========================================================
    🔐 FIREBASE AUTH → ATTACH req.user.mysqlId

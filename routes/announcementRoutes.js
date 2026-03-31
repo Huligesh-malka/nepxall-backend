@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
-const auth = require("../middlewares/auth");
+const auth = require("../middlewares/authMiddleware");
 
 /* ======================================================
     📢 POST ANNOUNCEMENT (OWNER ONLY)

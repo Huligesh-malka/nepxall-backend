@@ -8,7 +8,7 @@ const {
   markAgreementViewed
 } = require("../controllers/ownerPaymentController");
 
-const auth = require("../middlewares/auth");
+const auth = require("../middlewares/authMiddleware");
 
 /* ================= OWNER ROUTES ================= */
 

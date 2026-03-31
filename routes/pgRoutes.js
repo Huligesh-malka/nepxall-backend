@@ -3,7 +3,7 @@ const multer = require("multer");
 const router = express.Router();
 
 const controller = require("../controllers/pgController");
-const auth = require("../middlewares/auth");
+const auth = require("../middlewares/authMiddleware");
 const db = require("../db");
 
 const { uploadPhotos, uploadVideos } = require("../middlewares/upload");
