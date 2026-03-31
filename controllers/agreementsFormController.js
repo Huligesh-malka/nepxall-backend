@@ -10,33 +10,46 @@ cloudinary.config({
 });
 
 /* ================= PRE-OTP VERIFICATION (FOR TENANT) ================= */
-// Prevents unauthorized mobile numbers from triggering OTP for a specific booking
+// This ensures that ONLY the mobile number registered during form submission can get the OTP
 exports.verifyTenantForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
+  
+  if (!booking_id || !mobile) {
+    return res.status(400).json({ success: false, message: "Booking ID and Mobile are required" });
+  }
+
   try {
+    // Fetch the registered mobile for this specific booking
     const [rows] = await db.query(
       "SELECT mobile FROM agreements_form WHERE booking_id = ?",
       [booking_id]
     );
 
     if (!rows.length) {
-      return res.status(404).json({ success: false, message: "Agreement record not found" });
+      return res.status(404).json({ success: false, message: "No agreement record found for this booking." });
     }
 
-    const dbMobile = rows[0].mobile.replace(/\D/g, '');
+    // Clean both numbers (remove +91, spaces, dashes) to compare purely digits
+    const registeredMobile = rows[0].mobile.replace(/\D/g, '');
     const inputMobile = mobile.replace(/\D/g, '');
 
-    // Check if input matches the mobile submitted in the form
-    if (dbMobile.endsWith(inputMobile) || inputMobile.endsWith(dbMobile)) {
-      return res.json({ success: true, message: "Tenant verified. Proceed to OTP." });
+    // Strict validation: The input must match the last 10 digits of the registered number
+    const isMatch = registeredMobile.endsWith(inputMobile) && inputMobile.length >= 10;
+
+    if (isMatch) {
+      return res.json({ 
+        success: true, 
+        message: "Mobile verified. You may proceed with OTP." 
+      });
     } else {
       return res.status(403).json({ 
         success: false, 
-        message: "This mobile number does not match our records for this agreement." 
+        message: "Access Denied. This mobile number is not registered for this agreement." 
       });
     }
   } catch (err) {
-    res.status(500).json({ success: false, message: "Verification failed" });
+    console.error("Verification Error:", err);
+    res.status(500).json({ success: false, message: "Internal Server Error during verification" });
   }
 };
 
@@ -73,7 +86,6 @@ exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
     
-    // 1. Fetch record and verify mobile again for security
     const [rows] = await db.query(
       `SELECT signed_pdf, city, state, mobile FROM agreements_form WHERE booking_id = ?`, 
       [booking_id]
@@ -84,11 +96,11 @@ exports.tenantFinalSign = async (req, res) => {
     
     const dbMobile = data.mobile.replace(/\D/g, '');
     const inputMobile = tenant_mobile.replace(/\D/g, '');
-    if (!dbMobile.includes(inputMobile)) {
-        return res.status(403).json({ message: "Mobile number verification failed" });
+    
+    if (!dbMobile.endsWith(inputMobile)) {
+        return res.status(403).json({ message: "Mobile number verification failed. Use your registered number." });
     }
 
-    // 2. Process Image
     const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
@@ -100,7 +112,6 @@ exports.tenantFinalSign = async (req, res) => {
     const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
 
-    // 3. SVG Overlay
     const svgText = `
     <svg width="350" height="160">
       <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
@@ -109,7 +120,6 @@ exports.tenantFinalSign = async (req, res) => {
       <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
 
-    // 4. Composite
     const finalImageBuffer = await sharp(baseImage)
       .composite([
         { input: Buffer.from(svgText), top: metadata.height - 340, left: 80 },
@@ -121,7 +131,6 @@ exports.tenantFinalSign = async (req, res) => {
       { folder: "signed_agreements" }
     );
 
-    // 5. Update Database
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, 
@@ -139,7 +148,7 @@ exports.tenantFinalSign = async (req, res) => {
   }
 };
 
-/* ================= ADMIN & OTHER LOGIC ================= */
+/* ================= ADMIN LOGIC ================= */
 exports.getAllAgreements = async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");

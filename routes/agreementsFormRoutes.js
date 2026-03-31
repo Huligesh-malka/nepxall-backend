@@ -6,7 +6,7 @@ const uploadAgreement = require("../middlewares/agreementUpload");
 /* ================= USER/TENANT ROUTES ================= */
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
 
-// Verify mobile belongs to the tenant before OTP
+// CRITICAL: This route verifies the number before Firebase OTP is triggered
 router.post("/tenant/verify", agreementsFormController.verifyTenantForBooking);
 
 router.post(
