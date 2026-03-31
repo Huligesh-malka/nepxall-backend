@@ -10,7 +10,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= PRE-OTP VERIFICATION ================= */
+/* ================= NEW: PRE-OTP VERIFICATION ================= */
 exports.verifyOwnerForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   try {
@@ -36,9 +36,11 @@ exports.verifyOwnerForBooking = async (req, res) => {
 };
 
 /* ================= TENANT SIDE: SUBMIT FORM ================= */
+// Call this when the user/tenant submits their initial details
 exports.submitTenantAgreement = async (req, res) => {
-  const { booking_id, full_name, tenant_mobile, location_str } = req.body;
+  const { booking_id, full_name, tenant_mobile /* other tenant fields */ } = req.body;
   
+  // Capture Tenant Device Info
   const tenantIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
   const tenantDevice = req.headers["user-agent"] || "Unknown Device";
 
@@ -49,10 +51,9 @@ exports.submitTenantAgreement = async (req, res) => {
           tenant_mobile = ?, 
           tenant_ip_address = ?, 
           tenant_device_info = ?, 
-          tenant_location = ?,
           agreement_status = 'pending_owner'
       WHERE booking_id = ?
-    `, [full_name, tenant_mobile, tenantIp.split(",")[0], tenantDevice, location_str || "Not Provided", booking_id]);
+    `, [full_name, tenant_mobile, tenantIp.split(",")[0], tenantDevice, booking_id]);
 
     res.json({ success: true, message: "Tenant details saved." });
   } catch (err) {
@@ -63,7 +64,7 @@ exports.submitTenantAgreement = async (req, res) => {
 
 /* ================= OWNER SIDE: SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms, location_str } = req.body;
+  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
@@ -80,58 +81,45 @@ exports.signOwnerAgreement = async (req, res) => {
 
     if (!verification.length) return res.status(404).json({ success: false, message: "Agreement not found" });
 
-    // 1. Capture metadata
-    const ownerIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "0.0.0.0").split(",")[0];
+    // Capture Owner Device Info
+    const ownerIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
     const ownerDevice = req.headers["user-agent"] || "Unknown Device";
     
-    // Formatting date/time as per your screenshot (12-hour format with AM/PM)
     const formattedDate = new Intl.DateTimeFormat("en-IN", {
       timeZone: "Asia/Kolkata",
       day: "2-digit", month: "2-digit", year: "numeric",
       hour: "2-digit", minute: "2-digit", hour12: true
-    }).format(new Date()).toLowerCase();
+    }).format(new Date());
 
-    // 2. Image Processing
+    // Image Processing
     const response = await axios.get(verification[0].final_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const signatureBuffer = Buffer.from(owner_signature.split(",")[1], "base64");
-    
-    // Resize signature to look natural
-    const resizedSignature = await sharp(signatureBuffer).resize(220, 80).png().toBuffer();
+    const resizedSignature = await sharp(signatureBuffer).resize(220, 90).png().toBuffer();
     const metadata = await sharp(baseImage).metadata();
     
-    // Position: Bottom Right (adjust based on your template)
-    const xPos = metadata.width - 400;
-    const yPos = metadata.height - 250;
+    const xPos = metadata.width - 380;
+    const yPos = metadata.height - 200;
 
-    // 3. Create SVG Overlay with all details requested
-    // This creates the text block seen in your screenshot
-    const svgOverlay = `
-    <svg width="400" height="150">
-      <style>
-        .label { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #000; }
-        .data { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }
-      </style>
-      <text x="0" y="20" class="label">Digitally Signed by Owner</text>
-      <text x="0" y="42" class="data">Mobile: ${owner_mobile}</text>
-      <text x="0" y="62" class="data">Date: ${formattedDate}</text>
-      <text x="0" y="82" class="data">IP: ${ownerIp}</text>
-      <text x="0" y="102" class="data">Loc: ${location_str || "N/A"}</text>
+    const svgOverlay = `<svg width="350" height="120">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${owner_mobile}</text>
+      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
+      <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">IP: ${ownerIp.split(",")[0]}</text>
     </svg>`;
 
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgOverlay), top: yPos, left: xPos },
-        { input: resizedSignature, top: yPos + 105, left: xPos + 50 }
+        { input: Buffer.from(svgOverlay), top: yPos - 120, left: xPos },
+        { input: resizedSignature, top: yPos - 50, left: xPos }
       ]).png().toBuffer();
 
-    // 4. Upload to Cloudinary
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
       { folder: "signed_agreements" }
     );
 
-    // 5. Update Database
+    // Update Database with specific OWNER columns
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
@@ -140,10 +128,9 @@ exports.signOwnerAgreement = async (req, res) => {
           signed_pdf = ?, 
           owner_ip_address = ?, 
           owner_device_info = ?, 
-          owner_location = ?,
           terms_accepted = 1
       WHERE booking_id = ?
-    `, [owner_signature, upload.secure_url, ownerIp, ownerDevice, location_str || "Not Provided", booking_id]);
+    `, [owner_signature, upload.secure_url, ownerIp.split(",")[0], ownerDevice, booking_id]);
 
     res.json({ success: true, message: "Signed successfully", signed_pdf: upload.secure_url });
 
@@ -153,7 +140,7 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-/* ================= UTILITIES ================= */
+/* ================= OTHER UTILITIES ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -168,4 +155,21 @@ exports.getOwnerPayments = async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false });
   }
+};
+
+exports.markAgreementViewed = async (req, res) => {
+  try {
+    await db.query(`UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`, [req.body.booking_id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false }); }
+};
+
+exports.getOwnerSettlementSummary = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT COUNT(*) AS total_bookings, IFNULL(SUM(owner_amount), 0) AS total_earned
+      FROM bookings WHERE owner_id = ?
+    `, [req.user.id]);
+    res.json({ success: true, data: rows[0] });
+  } catch (err) { res.status(500).json({ success: false }); }
 };
