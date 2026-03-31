@@ -20,7 +20,7 @@ const getOwner = async (firebaseUid) => {
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebaseUid);
+    const owner = await getOwner(req.user.firebase_uid);
 
     if (!owner) {
       return res.status(403).json({ message: "Not an owner" });
@@ -85,7 +85,7 @@ exports.updateBookingStatus = async (req, res) => {
     const { bookingId } = req.params;
     const { status, reject_reason, room_id, exit_date } = req.body;
 
-    const owner = await getOwner(req.user.firebaseUid);
+    const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
     /* 🚨 BLOCK IF NOT VERIFIED */
@@ -159,7 +159,7 @@ exports.updateBookingStatus = async (req, res) => {
 ====================================================== */
 exports.getActiveTenantsByOwner = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebaseUid);
+    const owner = await getOwner(req.user.firebase_uid);
     if (!owner) return res.status(403).json({ message: "Not an owner" });
 
     const [rows] = await db.query(

@@ -20,7 +20,7 @@ const getOwner = async (firebaseUid) => {
 ====================================================== */
 exports.saveOwnerBank = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebaseUid);
+    const owner = await getOwner(req.user.firebase_uid);
 
     if (!owner) {
       return res.status(403).json({ success: false, message: "Not an owner" });
@@ -89,7 +89,7 @@ exports.saveOwnerBank = async (req, res) => {
 ====================================================== */
 exports.getOwnerBank = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebaseUid);
+    const owner = await getOwner(req.user.firebase_uid);
 
     if (!owner) {
       return res.status(403).json({ success: false, message: "Not an owner" });
