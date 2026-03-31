@@ -10,7 +10,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= PRE-OTP VERIFICATION ================= */
+/* ================= NEW: PRE-OTP VERIFICATION ================= */
 exports.verifyOwnerForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   try {
@@ -25,83 +25,101 @@ exports.verifyOwnerForBooking = async (req, res) => {
     const dbPhone = rows[0].phone.replace(/\D/g, '');
     const inputPhone = mobile.replace(/\D/g, '');
 
-    // Matches if the input matches the DB record (handling potential country code prefixes)
     if (dbPhone.endsWith(inputPhone) || inputPhone.endsWith(dbPhone)) {
       return res.json({ success: true, message: "Owner verified. Proceeding to OTP." });
     } else {
-      return res.status(403).json({ success: false, message: "This mobile number is not registered for this booking. ❌" });
+      return res.status(403).json({ success: false, message: "Access denied." });
     }
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
+/* ================= TENANT SIDE: SUBMIT FORM ================= */
+// Call this when the user/tenant submits their initial details
+exports.submitTenantAgreement = async (req, res) => {
+  const { booking_id, full_name, tenant_mobile /* other tenant fields */ } = req.body;
+  
+  // Capture Tenant Device Info
+  const tenantIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
+  const tenantDevice = req.headers["user-agent"] || "Unknown Device";
+
+  try {
+    await db.query(`
+      UPDATE agreements_form 
+      SET full_name = ?, 
+          tenant_mobile = ?, 
+          tenant_ip_address = ?, 
+          tenant_device_info = ?, 
+          agreement_status = 'pending_owner'
+      WHERE booking_id = ?
+    `, [full_name, tenant_mobile, tenantIp.split(",")[0], tenantDevice, booking_id]);
+
+    res.json({ success: true, message: "Tenant details saved." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Update failed" });
+  }
+};
+
 /* ================= OWNER SIDE: SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info } = req.body;
+  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
     const [verification] = await db.query(`
-      SELECT af.final_pdf 
+      SELECT af.signed_pdf, af.final_pdf, u.phone 
       FROM agreements_form af
+      JOIN bookings b ON af.booking_id = b.id
+      JOIN users u ON b.owner_id = u.id
       WHERE af.booking_id = ?
     `, [booking_id]);
 
-    if (!verification.length) return res.status(404).json({ success: false, message: "Agreement record not found" });
+    if (!verification.length) return res.status(404).json({ success: false, message: "Agreement not found" });
 
-    // Capture Audit Trail Data (Stored in DB, not shown on PDF)
+    // Capture Owner Device Info
     const ownerIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
-    // We use the device info sent from frontend or the header
-    const finalDeviceInfo = owner_device_info || req.headers["user-agent"] || "Unknown Device";
+    const ownerDevice = req.headers["user-agent"] || "Unknown Device";
     
-    // Formatting Date for the PDF Overlay
-    const now = new Date();
     const formattedDate = new Intl.DateTimeFormat("en-IN", {
       timeZone: "Asia/Kolkata",
       day: "2-digit", month: "2-digit", year: "numeric",
       hour: "2-digit", minute: "2-digit", hour12: true
-    }).format(now);
+    }).format(new Date());
 
-    /* --- IMAGE PROCESSING --- */
+    // Image Processing
     const response = await axios.get(verification[0].final_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
-    
-    // Process Signature
     const signatureBuffer = Buffer.from(owner_signature.split(",")[1], "base64");
-    const resizedSignature = await sharp(signatureBuffer).resize(200, 80).png().toBuffer();
-    
+    const resizedSignature = await sharp(signatureBuffer).resize(220, 90).png().toBuffer();
     const metadata = await sharp(baseImage).metadata();
-    const xPos = metadata.width - 350;
-    const yPos = metadata.height - 180;
+    
+    const xPos = metadata.width - 380;
+    const yPos = metadata.height - 200;
 
-    // Clean PDF Overlay (No IP/Device shown here)
-    const svgOverlay = `
-    <svg width="300" height="100">
-      <rect x="0" y="0" width="300" height="100" fill="white" fill-opacity="0.8" rx="5"/>
-      <text x="10" y="20" font-family="Helvetica" font-size="12" fill="#1b5e20" font-weight="bold">DIGITALLY VERIFIED OWNER</text>
-      <text x="10" y="40" font-family="Helvetica" font-size="11" fill="#333">Mobile: +91 ${owner_mobile}</text>
-      <text x="10" y="55" font-family="Helvetica" font-size="11" fill="#333">Date: ${formattedDate}</text>
-      <text x="10" y="70" font-family="Helvetica" font-size="11" fill="#333">Status: Legally Accepted</text>
+    const svgOverlay = `<svg width="350" height="120">
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${owner_mobile}</text>
+      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
+      <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">IP: ${ownerIp.split(",")[0]}</text>
     </svg>`;
 
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgOverlay), top: yPos - 110, left: xPos },
-        { input: resizedSignature, top: yPos - 30, left: xPos }
+        { input: Buffer.from(svgOverlay), top: yPos - 120, left: xPos },
+        { input: resizedSignature, top: yPos - 50, left: xPos }
       ]).png().toBuffer();
 
-    // Upload to Cloudinary
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
-      { folder: "signed_agreements", public_id: `signed_${booking_id}_${Date.now()}` }
+      { folder: "signed_agreements" }
     );
 
-    /* --- UPDATE DATABASE --- */
-    // Stores IP and Device Info for backend records/legal audit
+    // Update Database with specific OWNER columns
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
@@ -110,31 +128,19 @@ exports.signOwnerAgreement = async (req, res) => {
           signed_pdf = ?, 
           owner_ip_address = ?, 
           owner_device_info = ?, 
-          terms_accepted = 1,
-          owner_mobile = ?
+          terms_accepted = 1
       WHERE booking_id = ?
-    `, [
-      owner_signature, 
-      upload.secure_url, 
-      ownerIp.split(",")[0], 
-      finalDeviceInfo, 
-      owner_mobile,
-      booking_id
-    ]);
+    `, [owner_signature, upload.secure_url, ownerIp.split(",")[0], ownerDevice, booking_id]);
 
-    res.json({ 
-      success: true, 
-      message: "Agreement signed and verified successfully ✅", 
-      signed_pdf: upload.secure_url 
-    });
+    res.json({ success: true, message: "Signed successfully", signed_pdf: upload.secure_url });
 
   } catch (err) {
     console.error("Signing Error:", err);
-    res.status(500).json({ success: false, message: "Failed to process digital signature" });
+    res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
 
-/* ================= UTILITIES ================= */
+/* ================= OTHER UTILITIES ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
