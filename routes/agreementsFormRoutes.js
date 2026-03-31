@@ -4,11 +4,14 @@ const agreementsFormController = require("../controllers/agreementsFormControlle
 const uploadAgreement = require("../middlewares/agreementUpload");
 
 /* ================= USER/TENANT ROUTES ================= */
+
+// 1. Get status (Now includes registered phone from users table)
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
 
-// CRITICAL: This route verifies the number before Firebase OTP is triggered
+// 2. CRITICAL: Verifies the input mobile matches the 'users' table before OTP
 router.post("/tenant/verify", agreementsFormController.verifyTenantForBooking);
 
+// 3. Form Submission
 router.post(
   "/submit",
   uploadAgreement.fields([
@@ -20,21 +23,28 @@ router.post(
   async (req, res) => {
     try {
       const result = await agreementsFormController.submitAgreementForm(req);
-      res.status(200).json({ success: true, message: "Submitted Successfully", data: result });
+      res.status(200).json({ success: true, message: "Form Submitted Successfully", data: result });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
   }
 );
 
-/* ================= ADMIN & SIGNING ROUTES ================= */
+/* ================= SIGNING FLOW ================= */
+
+// Final signing (Validates against users.phone before applying stamp)
+router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
+
+/* ================= ADMIN ROUTES ================= */
+
 router.get("/admin/all", agreementsFormController.getAllAgreements);
 router.get("/admin/:id", agreementsFormController.getAgreementById);
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
-router.put("/admin/:id/upload-image", uploadAgreement.single("final_image"), agreementsFormController.uploadFinalImage);
+router.put(
+  "/admin/:id/upload-image", 
+  uploadAgreement.single("final_image"), 
+  agreementsFormController.uploadFinalImage
+);
 router.delete("/admin/:id", agreementsFormController.deleteAgreement);
-
-/* ================= SIGNING FLOW ================= */
-router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
 
 module.exports = router;

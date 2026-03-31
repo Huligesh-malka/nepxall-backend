@@ -9,8 +9,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= PRE-OTP VERIFICATION (FOR TENANT) ================= */
-// This ensures that ONLY the mobile number registered during form submission can get the OTP
+/* ================= PRE-OTP VERIFICATION (USING USERS TABLE) ================= */
+/**
+ * Verifies if the mobile number provided for OTP matches the 
+ * registered phone number in the 'users' table.
+ */
 exports.verifyTenantForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   
@@ -19,32 +22,35 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 
   try {
-    // Fetch the registered mobile for this specific booking
+    // JOIN with users table to fetch the official 'phone' number
     const [rows] = await db.query(
-      "SELECT mobile FROM agreements_form WHERE booking_id = ?",
+      `SELECT u.phone 
+       FROM agreements_form af
+       JOIN users u ON af.user_id = u.id
+       WHERE af.booking_id = ?`,
       [booking_id]
     );
 
     if (!rows.length) {
-      return res.status(404).json({ success: false, message: "No agreement record found for this booking." });
+      return res.status(404).json({ success: false, message: "No record found for this booking or user." });
     }
 
-    // Clean both numbers (remove +91, spaces, dashes) to compare purely digits
-    const registeredMobile = rows[0].mobile.replace(/\D/g, '');
+    // Clean both numbers to compare only digits
+    const registeredPhone = rows[0].phone.replace(/\D/g, '');
     const inputMobile = mobile.replace(/\D/g, '');
 
-    // Strict validation: The input must match the last 10 digits of the registered number
-    const isMatch = registeredMobile.endsWith(inputMobile) && inputMobile.length >= 10;
+    // Check if input matches the registered phone (checking last 10 digits for safety)
+    const isMatch = registeredPhone.endsWith(inputMobile) && inputMobile.length >= 10;
 
     if (isMatch) {
       return res.json({ 
         success: true, 
-        message: "Mobile verified. You may proceed with OTP." 
+        message: "Mobile verified against registered account. Proceed with OTP." 
       });
     } else {
       return res.status(403).json({ 
         success: false, 
-        message: "Access Denied. This mobile number is not registered for this agreement." 
+        message: "Access Denied. This number does not match your registered account phone." 
       });
     }
   } catch (err) {
@@ -53,54 +59,33 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 };
 
-/* ================= USER: GET STATUS ================= */
-exports.getAgreementByBookingId = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    const [rows] = await db.query(
-      "SELECT agreement_status, final_pdf, signed_pdf, full_name, mobile, email FROM agreements_form WHERE booking_id = ?",
-      [bookingId]
-    );
-    if (rows && rows.length > 0) return res.json({ success: true, exists: true, data: rows[0] });
-    return res.json({ success: true, exists: false });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
-};
-
-/* ================= USER: SUBMIT FORM ================= */
-exports.submitAgreementForm = async (req) => {
-  const { user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance } = req.body;
-  const files = req.files || {};
-  const toSafeInt = (v) => isNaN(parseInt(v)) ? 0 : parseInt(v);
-
-  const sql = `INSERT INTO agreements_form (user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance, signature, aadhaar_front, aadhaar_back, pan_card, agreement_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
-  const values = [toSafeInt(user_id), toSafeInt(booking_id), full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, toSafeInt(agreement_months), toSafeInt(rent), toSafeInt(deposit), toSafeInt(maintenance), files["signature"]?.[0]?.path, files["aadhaar_front"]?.[0]?.path, files["aadhaar_back"]?.[0]?.path, files["pan_card"]?.[0]?.path];
-
-  const [result] = await db.query(sql, values);
-  return { insertId: result.insertId };
-};
-
-/* ================= TENANT FINAL SIGNING ================= */
+/* ================= TENANT FINAL SIGNING (STRICT USER CHECK) ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
     
+    // Fetch draft PDF and official user phone
     const [rows] = await db.query(
-      `SELECT signed_pdf, city, state, mobile FROM agreements_form WHERE booking_id = ?`, 
+      `SELECT af.signed_pdf, af.city, af.state, u.phone 
+       FROM agreements_form af
+       JOIN users u ON af.user_id = u.id
+       WHERE af.booking_id = ?`, 
       [booking_id]
     );
+    
     const data = rows[0];
 
     if (!data?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
     
-    const dbMobile = data.mobile.replace(/\D/g, '');
+    // Security check against User Table phone
+    const dbPhone = data.phone.replace(/\D/g, '');
     const inputMobile = tenant_mobile.replace(/\D/g, '');
     
-    if (!dbMobile.endsWith(inputMobile)) {
-        return res.status(403).json({ message: "Mobile number verification failed. Use your registered number." });
+    if (!dbPhone.endsWith(inputMobile)) {
+        return res.status(403).json({ message: "Mobile number mismatch with registered profile." });
     }
 
+    // PDF Overlay Logic
     const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
@@ -115,7 +100,7 @@ exports.tenantFinalSign = async (req, res) => {
     const svgText = `
     <svg width="350" height="160">
       <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${tenant_mobile}</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Reg. Mobile: ${tenant_mobile}</text>
       <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
       <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
@@ -146,6 +131,37 @@ exports.tenantFinalSign = async (req, res) => {
     console.error("🔥 Tenant Signing Error:", err);
     res.status(500).json({ success: false, message: "Tenant signing failed" });
   }
+};
+
+/* ================= USER: GET STATUS (INCLUDES REG PHONE) ================= */
+exports.getAgreementByBookingId = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const [rows] = await db.query(
+      `SELECT af.*, u.phone as registered_phone 
+       FROM agreements_form af
+       JOIN users u ON af.user_id = u.id
+       WHERE af.booking_id = ?`,
+      [bookingId]
+    );
+    if (rows && rows.length > 0) return res.json({ success: true, exists: true, data: rows[0] });
+    return res.json({ success: true, exists: false });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+/* ================= USER: SUBMIT FORM ================= */
+exports.submitAgreementForm = async (req) => {
+  const { user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance } = req.body;
+  const files = req.files || {};
+  const toSafeInt = (v) => isNaN(parseInt(v)) ? 0 : parseInt(v);
+
+  const sql = `INSERT INTO agreements_form (user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance, signature, aadhaar_front, aadhaar_back, pan_card, agreement_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
+  const values = [toSafeInt(user_id), toSafeInt(booking_id), full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, toSafeInt(agreement_months), toSafeInt(rent), toSafeInt(deposit), toSafeInt(maintenance), files["signature"]?.[0]?.path, files["aadhaar_front"]?.[0]?.path, files["aadhaar_back"]?.[0]?.path, files["pan_card"]?.[0]?.path];
+
+  const [result] = await db.query(sql, values);
+  return { insertId: result.insertId };
 };
 
 /* ================= ADMIN LOGIC ================= */
