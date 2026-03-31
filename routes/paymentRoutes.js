@@ -6,7 +6,7 @@ const cloudinary = require("cloudinary").v2;
 
 const paymentController = require("../controllers/paymentController");
 const webhookController = require("../controllers/paymentWebhookController");
-const verifyFirebaseToken = require("../middlewares/auth");
+const verifyFirebaseToken = require("../middlewares/authMiddleware");
 
 //////////////////////////////////////////////////////
 // CLOUDINARY CONFIGURATION (using your existing setup)
