@@ -5,36 +5,39 @@ const auth = require("../middlewares/authMiddleware");
 
 /**
  * --- PROTECTED ROUTES ---
- * These require a valid JWT token in the Authorization header.
- * Used for the main Owner Dashboard views.
+ * Requires JWT token. Used for the Internal Owner Dashboard.
  */
+
 // Fetch all payments/bookings for the logged-in owner
 router.get("/payments", auth, ownerController.getOwnerPayments);
 
 // Get total earnings and booking count summary
 router.get("/settlements/summary", auth, ownerController.getOwnerSettlementSummary);
 
-// Mark a specific agreement as 'Viewed' when the owner opens the draft
+// Mark a specific agreement as 'Viewed' (audit trail)
 router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 
 
 /**
  * --- PUBLIC / SECURE SIGNING ROUTES ---
- * These do not require a login token because they are part of the 
- * external signing flow. Security is handled by Mobile/OTP verification.
+ * Secured via Mobile/OTP verification instead of JWT for external access.
  */
 
 /** 
  * 1. PRE-VERIFICATION
- * Checks if the entered mobile number matches the owner_id linked to the booking.
- * Returns 403 "This mobile number is not registered for this booking" if it fails.
+ * Verifies if the mobile number belongs to the owner of the booking.
  */
 router.post("/agreements/verify-owner", ownerController.verifyOwnerForBooking);
 
 /** 
- * 2. FINAL SIGNATURE & CLOUDINARY UPLOAD
- * Processes the signature, overlays it on the PDF, and updates the database.
- * Also stores the IP and Device Info for the legal audit trail.
+ * 2. TENANT INITIAL SUBMISSION
+ * Captures Tenant IP, Device, and Location.
+ */
+router.post("/agreements/tenant-submit", ownerController.submitTenantAgreement);
+
+/** 
+ * 3. FINAL OWNER SIGNATURE & CLOUDINARY UPLOAD
+ * Processes the signature, overlays metadata (IP, Loc, Date) on PDF.
  */
 router.post("/agreements/sign", ownerController.signOwnerAgreement);
 
