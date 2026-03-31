@@ -238,7 +238,7 @@ exports.addPG = async (req, res) => {
 
     // 🔐 OWNER MUST COME FROM JWT
     const numericOwnerId = req.user.id;   // ✅ MySQL user id
-    const firebase_uid= req.user.uid;          // ✅ only for notifications
+    const firebase_uid = req.user.firebase_uid;           // ✅ only for notifications
 
     console.log('Got numeric user ID:', numericOwnerId);
 

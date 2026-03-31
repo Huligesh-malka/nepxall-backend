@@ -20,7 +20,7 @@ const getOwner = async (firebase_uid) => {
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebase_uid);
+    const owner = await getOwner(req.user.firebase_uid); 
 
     if (!owner) {
       return res.status(403).json({ message: "Not an owner" });
