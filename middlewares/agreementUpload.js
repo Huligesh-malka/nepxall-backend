@@ -9,32 +9,37 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= AGREEMENT STORAGE ================= */
+/* ================= STORAGE CONFIG ================= */
 const agreementStorage = new CloudinaryStorage({
   cloudinary,
   params: async (req, file) => {
-    const isPDF = file.mimetype === "application/pdf";
-    const publicId = `agreement-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const timestamp = Date.now();
+    const random = Math.round(Math.random() * 1e9);
 
-    // Logic for PDFs
-    if (isPDF) {
-  return {
-    folder: "agreements",
-    resource_type: "image", // 🔥 CHANGE THIS
-    public_id: publicId,
-    format: "pdf",
-    type: "upload",
-    access_mode: "public"
-  };
-}
+    const publicId = `user-${req.user?.id || "guest"}-${timestamp}-${random}`;
 
-    // Logic for Images (Aadhaar, PAN, Signatures)
+    /* ================= PDF FILE ================= */
+    if (file.mimetype === "application/pdf") {
+      return {
+        folder: "agreements/pdfs",
+        resource_type: "raw", // ✅ FIXED
+        public_id: publicId,
+        format: "pdf",
+      };
+    }
+
+    /* ================= IMAGE FILE ================= */
     return {
-      folder: "agreements",
+      folder: "agreements/images",
       resource_type: "image",
       public_id: publicId,
       transformation: [
-        { width: 1600, crop: "limit", quality: "auto", fetch_format: "auto" }
+        {
+          width: 1600,
+          crop: "limit",
+          quality: "auto",
+          fetch_format: "auto",
+        },
       ],
     };
   },
@@ -46,23 +51,23 @@ const fileFilter = (req, file, cb) => {
     "image/jpeg",
     "image/png",
     "image/jpg",
-    "application/pdf"
+    "application/pdf",
   ];
 
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only JPG, PNG, or PDF files are allowed"), false);
+  if (!allowedTypes.includes(file.mimetype)) {
+    return cb(new Error("Only JPG, PNG, or PDF files are allowed"), false);
   }
+
+  cb(null, true);
 };
 
 /* ================= MULTER CONFIG ================= */
 const uploadAgreement = multer({
   storage: agreementStorage,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB
+    fileSize: 10 * 1024 * 1024, // 10MB
   },
-  fileFilter
+  fileFilter,
 });
 
 module.exports = uploadAgreement;

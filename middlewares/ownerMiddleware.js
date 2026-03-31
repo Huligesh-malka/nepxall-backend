@@ -2,7 +2,15 @@ const db = require("../db");
 
 exports.uploadOwnerDocs = async (req, res) => {
   try {
-    const firebase_uid = req.user.firebase_uid; 
+    const firebase_uid = req.user.firebase_uid;
+
+    /* 🔒 ROLE CHECK */
+    if (req.user.role !== "owner") {
+      return res.status(403).json({
+        success: false,
+        message: "Only owners can upload documents"
+      });
+    }
 
     const [[user]] = await db.query(
       "SELECT id, owner_verification_status FROM users WHERE firebase_uid = ?",
@@ -10,11 +18,14 @@ exports.uploadOwnerDocs = async (req, res) => {
     );
 
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
     }
 
-    // 🔒 First-time-only rule
-    if (user.owner_verification_status === "approved") {
+    /* 🔒 BLOCK IF ALREADY VERIFIED */
+    if (user.owner_verification_status === "verified") {
       return res.status(400).json({
         success: false,
         message: "Owner already verified"
@@ -34,6 +45,35 @@ exports.uploadOwnerDocs = async (req, res) => {
       });
     }
 
+    /* 🔒 FILE TYPE VALIDATION */
+    const allowedTypes = ["image/jpeg", "image/png", "application/pdf"];
+
+    if (
+      !allowedTypes.includes(idProof.mimetype) ||
+      !allowedTypes.includes(propertyProof.mimetype) ||
+      !allowedTypes.includes(signature.mimetype)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file type"
+      });
+    }
+
+    /* 🔒 FILE SIZE LIMIT */
+    const MAX_SIZE = 5 * 1024 * 1024;
+
+    if (
+      idProof.size > MAX_SIZE ||
+      propertyProof.size > MAX_SIZE ||
+      signature.size > MAX_SIZE
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "File too large (max 5MB)"
+      });
+    }
+
+    /* 💾 SAVE DATA */
     await db.query(
       `INSERT INTO owner_verifications
        (owner_id, id_proof_type, id_proof_file, property_proof_file, digital_signature_file)
@@ -54,6 +94,7 @@ exports.uploadOwnerDocs = async (req, res) => {
       ]
     );
 
+    /* 🔄 UPDATE USER STATUS */
     await db.query(
       "UPDATE users SET owner_verification_status = 'pending' WHERE id = ?",
       [user.id]
@@ -66,6 +107,9 @@ exports.uploadOwnerDocs = async (req, res) => {
 
   } catch (err) {
     console.error("Owner verification error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 };
