@@ -9,6 +9,37 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+/* ================= PRE-OTP VERIFICATION (FOR TENANT) ================= */
+// Prevents unauthorized mobile numbers from triggering OTP for a specific booking
+exports.verifyTenantForBooking = async (req, res) => {
+  const { booking_id, mobile } = req.body;
+  try {
+    const [rows] = await db.query(
+      "SELECT mobile FROM agreements_form WHERE booking_id = ?",
+      [booking_id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "Agreement record not found" });
+    }
+
+    const dbMobile = rows[0].mobile.replace(/\D/g, '');
+    const inputMobile = mobile.replace(/\D/g, '');
+
+    // Check if input matches the mobile submitted in the form
+    if (dbMobile.endsWith(inputMobile) || inputMobile.endsWith(dbMobile)) {
+      return res.json({ success: true, message: "Tenant verified. Proceed to OTP." });
+    } else {
+      return res.status(403).json({ 
+        success: false, 
+        message: "This mobile number does not match our records for this agreement." 
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Verification failed" });
+  }
+};
+
 /* ================= USER: GET STATUS ================= */
 exports.getAgreementByBookingId = async (req, res) => {
   try {
@@ -37,53 +68,25 @@ exports.submitAgreementForm = async (req) => {
   return { insertId: result.insertId };
 };
 
-/* ================= OWNER SIGNING ================= */
-exports.signOwnerAgreement = async (req, res) => {
-  try {
-    const { booking_id, owner_signature, accepted_terms } = req.body;
-    const [rows] = await db.query("SELECT final_pdf, city, state FROM agreements_form WHERE booking_id = ?", [booking_id]);
-    if (!rows[0]?.final_pdf) return res.status(404).json({ message: "Draft not found" });
-
-    const response = await axios.get(rows[0].final_pdf, { responseType: "arraybuffer" });
-    const baseImage = Buffer.from(response.data);
-    const metadata = await sharp(baseImage).metadata();
-    const sigBuffer = Buffer.from(owner_signature.split(",")[1], "base64");
-    const resizedSig = await sharp(sigBuffer).resize(220, 90).png().toBuffer();
-
-    const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
-    const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
-
-    const svgText = `<svg width="600" height="200"><text x="0" y="20" font-family="Arial" font-size="16">Digitally Signed by Owner</text><text x="0" y="45" font-family="Arial" font-size="14">Date: ${istDate}</text><text x="0" y="70" font-family="Arial" font-size="14">Time: ${istTime}</text></svg>`;
-
-    const finalImage = await sharp(baseImage)
-      .composite([
-        { input: Buffer.from(svgText), top: metadata.height - 240, left: metadata.width - 320 },
-        { input: resizedSig, top: metadata.height - 180, left: metadata.width - 320 }
-      ]).png().toBuffer();
-
-    const upload = await cloudinary.uploader.upload(`data:image/png;base64,${finalImage.toString("base64")}`, { folder: "signed_agreements" });
-
-    await db.query(`UPDATE agreements_form SET signed_pdf = ?, agreement_status = 'approved', owner_signed_at = NOW() WHERE booking_id = ?`, [upload.secure_url, booking_id]);
-    res.json({ success: true, signed_pdf: upload.secure_url });
-  } catch (err) {
-    res.status(500).json({ message: "Owner signing failed" });
-  }
-};
-
-/* ================= TENANT SIGNING ================= */
+/* ================= TENANT FINAL SIGNING ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
     
-    // 1. Fetch record including location data
+    // 1. Fetch record and verify mobile again for security
     const [rows] = await db.query(
-      `SELECT signed_pdf, city, state FROM agreements_form WHERE booking_id = ?`, 
+      `SELECT signed_pdf, city, state, mobile FROM agreements_form WHERE booking_id = ?`, 
       [booking_id]
     );
     const data = rows[0];
 
     if (!data?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
+    
+    const dbMobile = data.mobile.replace(/\D/g, '');
+    const inputMobile = tenant_mobile.replace(/\D/g, '');
+    if (!dbMobile.includes(inputMobile)) {
+        return res.status(403).json({ message: "Mobile number verification failed" });
+    }
 
     // 2. Process Image
     const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
@@ -97,10 +100,10 @@ exports.tenantFinalSign = async (req, res) => {
     const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
     const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
 
-    // 3. SVG with Location line added (y=55)
+    // 3. SVG Overlay
     const svgText = `
     <svg width="350" height="160">
-      <text x="0" y="18" font-family="Arial" font-size="13" fill="black">Digitally Signed by Tenant</text>
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
       <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${tenant_mobile}</text>
       <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
       <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
@@ -136,7 +139,7 @@ exports.tenantFinalSign = async (req, res) => {
   }
 };
 
-/* ================= ADMIN LOGIC ================= */
+/* ================= ADMIN & OTHER LOGIC ================= */
 exports.getAllAgreements = async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM agreements_form ORDER BY created_at DESC");
@@ -171,13 +174,11 @@ exports.uploadFinalImage = async (req, res) => {
     const final_image_path = req.file?.path;
     if (!final_image_path) return res.status(400).json({ success: false, message: "No file uploaded" });
 
-    // CRITICAL: Clear signed_pdf and owner_signed_at when Admin re-uploads.
-    // This forces the workflow back to the beginning for the NEW version.
     await db.query(
       "UPDATE agreements_form SET final_pdf = ?, signed_pdf = NULL, owner_signed_at = NULL, agreement_status = 'approved' WHERE id = ?", 
       [final_image_path, id]
     );
-    res.json({ success: true, message: "Document re-uploaded. All previous signatures cleared for the new version." });
+    res.json({ success: true, message: "Document re-uploaded. Workflow reset." });
   } catch (error) {
     res.status(500).json({ success: false, message: "Upload failed" });
   }
@@ -188,7 +189,7 @@ exports.deleteAgreement = async (req, res) => {
     const { id } = req.params;
     const [result] = await db.query("DELETE FROM agreements_form WHERE id = ?", [id]);
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Not found" });
-    res.json({ success: true, message: "Agreement deleted successfully" });
+    res.json({ success: true, message: "Agreement deleted" });
   } catch (error) {
     res.status(500).json({ success: false, message: "Delete failed" });
   }

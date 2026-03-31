@@ -3,8 +3,11 @@ const router = express.Router();
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
-/* ================= USER ROUTES ================= */
+/* ================= USER/TENANT ROUTES ================= */
 router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
+
+// Verify mobile belongs to the tenant before OTP
+router.post("/tenant/verify", agreementsFormController.verifyTenantForBooking);
 
 router.post(
   "/submit",
@@ -25,28 +28,13 @@ router.post(
 );
 
 /* ================= ADMIN & SIGNING ROUTES ================= */
-
-// Fetch all for the Admin Table
 router.get("/admin/all", agreementsFormController.getAllAgreements);
-
-// Fetch single for Admin Details View
 router.get("/admin/:id", agreementsFormController.getAgreementById);
-
-// Update status manually
 router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
-
-// Upload/Re-upload final image (Resets flow for Owner/Tenant)
-router.put(
-  "/admin/:id/upload-image", 
-  uploadAgreement.single("final_image"), 
-  agreementsFormController.uploadFinalImage
-);
-
-// Delete Agreement
+router.put("/admin/:id/upload-image", uploadAgreement.single("final_image"), agreementsFormController.uploadFinalImage);
 router.delete("/admin/:id", agreementsFormController.deleteAgreement);
 
 /* ================= SIGNING FLOW ================= */
-router.post("/owner/sign", agreementsFormController.signOwnerAgreement);
 router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
 
 module.exports = router;
