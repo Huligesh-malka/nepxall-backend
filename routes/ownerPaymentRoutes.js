@@ -1,23 +1,18 @@
 const express = require("express");
 const router = express.Router();
-const {
-  getOwnerPayments,
-  getOwnerSettlementSummary,
-  signOwnerAgreement,
-  markAgreementViewed
-} = require("../controllers/ownerPaymentController");
-
+const ownerController = require("../controllers/ownerPaymentController");
 const auth = require("../middlewares/authMiddleware");
 
-// --- PROTECTED ROUTES (Requires Login Token) ---
-// Used for the owner dashboard to see their list of payments
-router.get("/payments", auth, getOwnerPayments);
-router.get("/settlements/summary", auth, getOwnerSettlementSummary);
-router.post("/agreements/viewed", auth, markAgreementViewed);
+// --- PROTECTED ROUTES (Requires Login) ---
+router.get("/payments", auth, ownerController.getOwnerPayments);
+router.get("/settlements/summary", auth, ownerController.getOwnerSettlementSummary);
+router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 
-// --- PUBLIC ROUTE (No Token Required) ---
-// This allows the owner to sign after verifying via Phone/OTP in the modal
-// We rely on the 'booking_id' and 'owner_mobile' check inside the controller for security.
-router.post("/agreements/sign", signOwnerAgreement);
+// --- PUBLIC ROUTES (No Token Required - Handled by Mobile/OTP Security) ---
+// 1. Verify if the mobile number belongs to the booking owner before sending OTP
+router.post("/agreements/verify-owner", ownerController.verifyOwnerForBooking);
+
+// 2. Final signature upload
+router.post("/agreements/sign", ownerController.signOwnerAgreement);
 
 module.exports = router;
