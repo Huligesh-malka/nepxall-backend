@@ -3,16 +3,16 @@ const router = express.Router();
 const db = require("../db");
 
 // ✅ GET notifications by Firebase UID (DIRECT QUERY)
-router.get("/:firebaseUid", (req, res) => {
-  const { firebaseUid } = req.params;
+router.get("/:firebase_uid", (req, res) => {
+  const { firebase_uid} = req.params;
   
-  console.log(`📋 Fetching notifications for Firebase UID: ${firebaseUid}`);
+  console.log(`📋 Fetching notifications for Firebase UID: ${firebase_uid}`);
 
   db.query(
     `SELECT * FROM notifications 
      WHERE user_id = ? 
      ORDER BY created_at DESC`,
-    [firebaseUid],
+    [firebase_uid],
     (err, data) => {
       if (err) {
         console.error("❌ Error fetching notifications:", err);
@@ -22,7 +22,7 @@ router.get("/:firebaseUid", (req, res) => {
         });
       }
       
-      console.log(`✅ Found ${data.length} notifications for ${firebaseUid}`);
+      console.log(`✅ Found ${data.length} notifications for ${firebase_uid}`);
       res.json({ success: true, data });
     }
   );

@@ -2,11 +2,11 @@ const db = require("../db");
 
 exports.uploadOwnerDocs = async (req, res) => {
   try {
-    const firebaseUid = req.user.uid;
+    const firebase_uid= req.user.uid;
 
     const [[user]] = await db.query(
       "SELECT id, owner_verification_status FROM users WHERE firebase_uid = ?",
-      [firebaseUid]
+      [firebase_uid]
     );
 
     if (!user) {

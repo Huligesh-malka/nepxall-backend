@@ -3,13 +3,13 @@ const db = require("../db");
 /* ======================================================
    🧠 GET OWNER FROM FIREBASE UID
 ====================================================== */
-const getOwner = async (firebaseUid) => {
+const getOwner = async (firebase_uid) => {
   const [rows] = await db.query(
     `SELECT id, name, owner_verification_status
      FROM users 
      WHERE firebase_uid = ? AND role = 'owner'
      LIMIT 1`,
-    [firebaseUid]
+    [firebase_uid]
   );
 
   return rows[0] || null;

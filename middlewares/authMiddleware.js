@@ -13,15 +13,15 @@ module.exports = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     let decoded;
-    let firebaseUid;
+    let firebase_uid;
 
     try {
       decoded = await admin.auth().verifyIdToken(token);
-      firebaseUid = decoded.uid;
+      firebase_uid= decoded.uid;
     } catch {
       try {
         decoded = jwt.verify(token, process.env.JWT_SECRET);
-        firebaseUid = decoded.firebase_uid;
+        firebase_uid= decoded.firebase_uid;
       } catch {
         return res.status(401).json({ message: "Invalid token" });
       }
@@ -29,7 +29,7 @@ module.exports = async (req, res, next) => {
 
     const [rows] = await db.query(
       "SELECT * FROM users WHERE firebase_uid=? LIMIT 1",
-      [firebaseUid]
+      [firebase_uid]
     );
 
     if (!rows.length) {

@@ -4,7 +4,7 @@ let io;
 
 /* =========================================================
    ONLINE USERS MAP
-   firebaseUid -> Set(socketIds)
+   firebase_uid-> Set(socketIds)
 ========================================================= */
 const onlineUsers = new Map();
 
@@ -41,19 +41,19 @@ const initSocket = (server) => {
     /* =====================================================
        REGISTER USER
     ===================================================== */
-    socket.on("register", (firebaseUid) => {
+    socket.on("register", (firebase_uid) => {
 
-      if (!firebaseUid) return;
+      if (!firebase_uid) return;
 
-      if (!onlineUsers.has(firebaseUid)) {
-        onlineUsers.set(firebaseUid, new Set());
+      if (!onlineUsers.has(firebase_uid)) {
+        onlineUsers.set(firebase_uid, new Set());
       }
 
-      onlineUsers.get(firebaseUid).add(socket.id);
+      onlineUsers.get(firebase_uid).add(socket.id);
 
-      socket.firebaseUid = firebaseUid;
+      socket.firebase_uid= firebase_uid;
 
-      io.emit("user_online", firebaseUid);
+      io.emit("user_online", firebase_uid);
 
     });
 
@@ -190,7 +190,7 @@ const initSocket = (server) => {
     ===================================================== */
     socket.on("disconnect", () => {
 
-      const uid = socket.firebaseUid;
+      const uid = socket.firebase_uid;
 
       if (uid && onlineUsers.has(uid)) {
 
@@ -220,11 +220,11 @@ const initSocket = (server) => {
 /* =========================================================
    EMIT CHAT LIST UPDATE
 ========================================================= */
-const emitChatListUpdate = (firebaseUid) => {
+const emitChatListUpdate = (firebase_uid) => {
 
-  if (!firebaseUid) return;
+  if (!firebase_uid) return;
 
-  const sockets = onlineUsers.get(firebaseUid);
+  const sockets = onlineUsers.get(firebase_uid);
 
   if (!sockets) return;
 
@@ -240,11 +240,11 @@ const emitChatListUpdate = (firebaseUid) => {
 
 const getIO = () => io;
 
-const isUserOnline = (firebaseUid) =>
-  onlineUsers.has(firebaseUid) && onlineUsers.get(firebaseUid).size > 0;
+const isUserOnline = (firebase_uid) =>
+  onlineUsers.has(firebase_uid) && onlineUsers.get(firebase_uid).size > 0;
 
-const getUserSockets = (firebaseUid) =>
-  onlineUsers.get(firebaseUid) || new Set();
+const getUserSockets = (firebase_uid) =>
+  onlineUsers.get(firebase_uid) || new Set();
 
 /* =========================================================
    EXPORTS

@@ -40,34 +40,34 @@ const normalizePrices = (pg) => {
   });
 };
 
-const isFirebaseUid = (uid) => {
+const isfirebase_uid= (uid) => {
   return uid && typeof uid === 'string' && uid.length > 20 && /^[a-zA-Z0-9]+$/.test(uid);
 };
 
 /* ================= GET OR CREATE USER ================= */
-const getOrCreateUserId = async (firebaseUid, userData = {}) => {
-  console.log('getOrCreateUserId called with:', firebaseUid);
+const getOrCreateUserId = async (firebase_uid, userData = {}) => {
+  console.log('getOrCreateUserId called with:', firebase_uid);
   
-  if (!firebaseUid) {
+  if (!firebase_uid) {
     throw new Error('Firebase UID is required');
   }
 
   // If it's already a numeric ID, return it (for backward compatibility)
-  if (!isNaN(firebaseUid) && Number.isInteger(Number(firebaseUid))) {
-    console.log('Already numeric ID:', firebaseUid);
-    return parseInt(firebaseUid);
+  if (!isNaN(firebase_uid) && Number.isInteger(Number(firebase_uid))) {
+    console.log('Already numeric ID:', firebase_uid);
+    return parseInt(firebase_uid);
   }
 
   try {
     // Check if user exists
     const [rows] = await db.query(
       'SELECT id FROM users WHERE firebase_uid = ?',
-      [firebaseUid]
+      [firebase_uid]
     );
     
     if (rows.length === 0) {
       // Create new user
-      return await createNewUser(firebaseUid, userData);
+      return await createNewUser(firebase_uid, userData);
     }
     
     return rows[0].id;
@@ -77,10 +77,10 @@ const getOrCreateUserId = async (firebaseUid, userData = {}) => {
   }
 };
 
-const createNewUser = async (firebaseUid, userData) => {
+const createNewUser = async (firebase_uid, userData) => {
   // 🔥 FIXED: Default role is "tenant" not "user"
   const newUser = {
-    firebase_uid: firebaseUid,
+    firebase_uid: firebase_uid,
 
     name:
       userData.name ||
@@ -144,7 +144,7 @@ exports.updatePGStatus = async (req, res) => {
     }
 
     const ownerId = ownerRows[0].id;
-    const firebaseUid = ownerRows[0].firebase_uid;
+    const firebase_uid= ownerRows[0].firebase_uid;
 
     let title = "";
     let message = "";
@@ -171,7 +171,7 @@ exports.updatePGStatus = async (req, res) => {
       [ownerId, title, message, type]
     );
     
-    console.log(`✅ Notification sent to owner: ${firebaseUid || ownerId}`);
+    console.log(`✅ Notification sent to owner: ${firebase_uid|| ownerId}`);
     res.json({ success: true, status });
 
   } catch (err) {
@@ -238,7 +238,7 @@ exports.addPG = async (req, res) => {
 
     // 🔐 OWNER MUST COME FROM JWT
     const numericOwnerId = req.user.id;   // ✅ MySQL user id
-    const firebaseUid = req.user.uid;          // ✅ only for notifications
+    const firebase_uid= req.user.uid;          // ✅ only for notifications
 
     console.log('Got numeric user ID:', numericOwnerId);
 
@@ -1185,13 +1185,13 @@ exports.createUser = async (req, res) => {
 };
 
 /* ================= GET USER BY FIREBASE UID ================= */
-exports.getUserByFirebaseUid = async (req, res) => {
+exports.getUserByfirebase_uid= async (req, res) => {
   try {
-    const { firebaseUid } = req.params;
+    const { firebase_uid} = req.params;
 
     const [rows] = await db.query(
       'SELECT * FROM users WHERE firebase_uid = ?',
-      [firebaseUid]
+      [firebase_uid]
     );
 
     if (rows.length === 0) {

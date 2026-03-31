@@ -5,7 +5,7 @@ exports.registerUser = async (req, res) => {
   try {
     const { name, phone, role } = req.body;
 
-    const firebaseUid = req.user.uid; // 🔐 from verifyToken middleware
+    const firebase_uid= req.user.uid; // 🔐 from verifyToken middleware
 
     if (!name || !phone || !role) {
       return res.status(400).json({ message: "All fields required" });
@@ -14,7 +14,7 @@ exports.registerUser = async (req, res) => {
     /* 🔎 CHECK USER ALREADY EXISTS */
     const [existing] = await db.query(
       "SELECT * FROM users WHERE firebase_uid = ?",
-      [firebaseUid]
+      [firebase_uid]
     );
 
     if (existing.length > 0) {
@@ -28,7 +28,7 @@ exports.registerUser = async (req, res) => {
     const [result] = await db.query(
       `INSERT INTO users (name, phone, role, firebase_uid)
        VALUES (?, ?, ?, ?)`,
-      [name, phone, role, firebaseUid]
+      [name, phone, role, firebase_uid]
     );
 
     /* 📦 RETURN CREATED USER */

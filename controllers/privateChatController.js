@@ -6,7 +6,7 @@ const crypto = require("crypto");
 ========================================================= */
 async function getMe(firebaseUser) {
 
-  const uid = firebaseUser.uid || firebaseUser.firebaseUid;
+  const uid = firebaseUser.uid || firebaseUser.firebase_uid;
   const name = firebaseUser.name || "User";
   const email = firebaseUser.email || null;
   const phone = firebaseUser.phone_number || firebaseUser.phone || null;

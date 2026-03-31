@@ -2,12 +2,12 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 
-router.get("/:firebaseUid", (req, res) => {
-  const { firebaseUid } = req.params;
+router.get("/:firebase_uid", (req, res) => {
+  const { firebase_uid} = req.params;
 
   db.query(
     `SELECT id FROM users WHERE firebase_uid = ?`,
-    [firebaseUid],
+    [firebase_uid],
     (err, rows) => {
       if (err || !rows.length) {
         return res.json({ success: true, data: [] });

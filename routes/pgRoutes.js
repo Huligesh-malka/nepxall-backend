@@ -122,7 +122,7 @@ router.get("/search/advanced", controller.advancedSearchPG);
 /* =================================================
    USER HELPERS
 ================================================= */
-router.get("/user/:firebaseUid", auth, controller.getUserByFirebaseUid);
+router.get("/user/:firebase_uid", auth, controller.getUserByfirebase_uid);
 
 router.get("/user-by-id/:id", auth, async (req, res) => {
   try {

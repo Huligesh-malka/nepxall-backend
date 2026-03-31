@@ -4,7 +4,7 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    console.log("🛡️ AdminMiddleware UID:", req.user.firebaseUid);
+    console.log("🛡️ AdminMiddleware UID:", req.user.firebase_uid);
 
     if (req.user.role !== "admin") {
       console.log("⛔ Not admin, role =", req.user.role);
