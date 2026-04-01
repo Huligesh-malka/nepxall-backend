@@ -4,37 +4,42 @@ const ownerController = require("../controllers/ownerPaymentController");
 const auth = require("../middlewares/authMiddleware");
 
 /**
+ * =================================================================
  * --- PROTECTED ROUTES ---
- * These require a valid JWT token in the Authorization header.
- * Used for the main Owner Dashboard views.
+ * Requires a valid JWT token (Owner must be logged in).
+ * Used for the internal Dashboard and Management views.
+ * =================================================================
  */
-// Fetch all payments/bookings for the logged-in owner
+
+// 1. Fetch all bookings and payment details for the logged-in owner
 router.get("/payments", auth, ownerController.getOwnerPayments);
 
-// Get total earnings and booking count summary
+// 2. Get high-level settlement summary (Total bookings, Total earned)
 router.get("/settlements/summary", auth, ownerController.getOwnerSettlementSummary);
 
-// Mark a specific agreement as 'Viewed' when the owner opens the draft
+// 3. Track when an owner views a draft agreement (Audit Log)
 router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 
 
 /**
+ * =================================================================
  * --- PUBLIC / SECURE SIGNING ROUTES ---
- * These do not require a login token because they are part of the 
- * external signing flow. Security is handled by Mobile/OTP verification.
+ * No JWT required. Security is enforced via:
+ * 1. Booking ID lookup
+ * 2. Registered Mobile matching
+ * 3. Firebase OTP Verification (handled on frontend)
+ * =================================================================
  */
 
-/** 
- * 1. PRE-VERIFICATION
- * Checks if the entered mobile number matches the owner_id linked to the booking.
- * Returns 403 "This mobile number is not registered for this booking" if it fails.
+/** * 1. PRE-SIGNING VERIFICATION
+ * Verifies if the provided mobile number matches the owner assigned to the booking.
+ * Required before the frontend triggers the Firebase OTP flow.
  */
 router.post("/agreements/verify-owner", ownerController.verifyOwnerForBooking);
 
-/** 
- * 2. FINAL SIGNATURE & CLOUDINARY UPLOAD
- * Processes the signature, overlays it on the PDF, and updates the database.
- * Also stores the IP and Device Info for the legal audit trail.
+/** * 2. FINAL DIGITAL SIGNATURE & AUDIT TRAIL
+ * Processes the signature, overlays IP/Date/Mobile on the PDF, 
+ * uploads to Cloudinary, and saves IP/Device Info to the database.
  */
 router.post("/agreements/sign", ownerController.signOwnerAgreement);
 

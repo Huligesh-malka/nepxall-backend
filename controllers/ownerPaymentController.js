@@ -10,7 +10,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= NEW: PRE-OTP VERIFICATION ================= */
+/* ================= PRE-OTP VERIFICATION ================= */
 exports.verifyOwnerForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   try {
@@ -35,41 +35,21 @@ exports.verifyOwnerForBooking = async (req, res) => {
   }
 };
 
-/* ================= TENANT SIDE: SUBMIT FORM ================= */
-// Call this when the user/tenant submits their initial details
-exports.submitTenantAgreement = async (req, res) => {
-  const { booking_id, full_name, tenant_mobile /* other tenant fields */ } = req.body;
-  
-  // Capture Tenant Device Info
-  const tenantIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
-  const tenantDevice = req.headers["user-agent"] || "Unknown Device";
-
-  try {
-    await db.query(`
-      UPDATE agreements_form 
-      SET full_name = ?, 
-          tenant_mobile = ?, 
-          tenant_ip_address = ?, 
-          tenant_device_info = ?, 
-          agreement_status = 'pending_owner'
-      WHERE booking_id = ?
-    `, [full_name, tenant_mobile, tenantIp.split(",")[0], tenantDevice, booking_id]);
-
-    res.json({ success: true, message: "Tenant details saved." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Update failed" });
-  }
-};
-
 /* ================= OWNER SIDE: SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms } = req.body;
+  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
+
+    // Capture Owner IP Address (handling proxies)
+    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "0.0.0.0";
+    const ownerIp = rawIp.split(",")[0].trim();
+    
+    // Capture Device Info (use frontend data or fallback to User-Agent)
+    const deviceDetail = owner_device_info || req.headers["user-agent"] || "Unknown Device";
 
     const [verification] = await db.query(`
       SELECT af.signed_pdf, af.final_pdf, u.phone 
@@ -81,10 +61,6 @@ exports.signOwnerAgreement = async (req, res) => {
 
     if (!verification.length) return res.status(404).json({ success: false, message: "Agreement not found" });
 
-    // Capture Owner Device Info
-    const ownerIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
-    const ownerDevice = req.headers["user-agent"] || "Unknown Device";
-    
     const formattedDate = new Intl.DateTimeFormat("en-IN", {
       timeZone: "Asia/Kolkata",
       day: "2-digit", month: "2-digit", year: "numeric",
@@ -102,11 +78,11 @@ exports.signOwnerAgreement = async (req, res) => {
     const yPos = metadata.height - 200;
 
     const svgOverlay = `<svg width="350" height="120">
-  <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
-  <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile: ${owner_mobile}</text>
-  <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
-  <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">Location: India</text>
-</svg>`;
+      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">IP: ${ownerIp}</text>
+      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
+      <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">Auth: OTP Verified</text>
+    </svg>`;
 
     const finalImageBuffer = await sharp(baseImage)
       .composite([
@@ -119,7 +95,7 @@ exports.signOwnerAgreement = async (req, res) => {
       { folder: "signed_agreements" }
     );
 
-    // Update Database with specific OWNER columns
+    // Update Database with IP and Device Info
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
@@ -130,7 +106,7 @@ exports.signOwnerAgreement = async (req, res) => {
           owner_device_info = ?, 
           terms_accepted = 1
       WHERE booking_id = ?
-    `, [owner_signature, upload.secure_url, ownerIp.split(",")[0], ownerDevice, booking_id]);
+    `, [owner_signature, upload.secure_url, ownerIp, deviceDetail, booking_id]);
 
     res.json({ success: true, message: "Signed successfully", signed_pdf: upload.secure_url });
 
