@@ -37,22 +37,22 @@ exports.verifyOwnerForBooking = async (req, res) => {
 
 /* ================= OWNER SIDE: SIGN AGREEMENT ================= */
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info } = req.body;
+  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info, owner_location } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    // Capture Owner IP Address (handling proxies)
+    // 1. Capture Metadata
     const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "0.0.0.0";
     const ownerIp = rawIp.split(",")[0].trim();
-    
-    // Capture Device Info (use frontend data or fallback to User-Agent)
     const deviceDetail = owner_device_info || req.headers["user-agent"] || "Unknown Device";
+    const location = owner_location || "Bangalore, Karnataka"; // Fallback if frontend doesn't send geo
 
+    // 2. Fetch Existing Agreement
     const [verification] = await db.query(`
-      SELECT af.signed_pdf, af.final_pdf, u.phone 
+      SELECT af.final_pdf, u.phone 
       FROM agreements_form af
       JOIN bookings b ON af.booking_id = b.id
       JOIN users u ON b.owner_id = u.id
@@ -61,41 +61,45 @@ exports.signOwnerAgreement = async (req, res) => {
 
     if (!verification.length) return res.status(404).json({ success: false, message: "Agreement not found" });
 
+    // 3. Format Date/Time (IST)
     const formattedDate = new Intl.DateTimeFormat("en-IN", {
       timeZone: "Asia/Kolkata",
       day: "2-digit", month: "2-digit", year: "numeric",
       hour: "2-digit", minute: "2-digit", hour12: true
-    }).format(new Date());
+    }).format(new Date()).replace(',', ''); // Clean up comma
 
-    // Image Processing
+    // 4. Image Processing (PDF as Image)
     const response = await axios.get(verification[0].final_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const signatureBuffer = Buffer.from(owner_signature.split(",")[1], "base64");
-    const resizedSignature = await sharp(signatureBuffer).resize(220, 90).png().toBuffer();
+    const resizedSignature = await sharp(signatureBuffer).resize(200, 70).png().toBuffer();
     const metadata = await sharp(baseImage).metadata();
     
     const xPos = metadata.width - 380;
-    const yPos = metadata.height - 200;
+    const yPos = metadata.height - 220;
 
-    const svgOverlay = `<svg width="350" height="120">
-      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Owner</text>
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">IP: ${ownerIp}</text>
-      <text x="0" y="58" font-family="Arial" font-size="11" fill="#444">Date: ${formattedDate}</text>
-      <text x="0" y="78" font-family="Arial" font-size="11" fill="#444">Auth: OTP Verified</text>
+    // 5. Construct Visual Digital Stamp (SVG)
+    const svgOverlay = `<svg width="350" height="150">
+      <text x="0" y="20" font-family="Arial" font-size="14" fill="black" font-weight="bold">Digitally Signed by Owner</text>
+      <text x="0" y="40" font-family="Arial" font-size="12" fill="#333">Mobile: ${owner_mobile}</text>
+      <text x="0" y="60" font-family="Arial" font-size="12" fill="#333">Location: ${location}</text>
+      <text x="0" y="80" font-family="Arial" font-size="12" fill="#333">Date: ${formattedDate}</text>
+      <text x="0" y="100" font-family="Arial" font-size="12" fill="#333" font-weight="bold">Auth: OTP Verified</text>
     </svg>`;
 
     const finalImageBuffer = await sharp(baseImage)
       .composite([
-        { input: Buffer.from(svgOverlay), top: yPos - 120, left: xPos },
-        { input: resizedSignature, top: yPos - 50, left: xPos }
+        { input: Buffer.from(svgOverlay), top: yPos - 110, left: xPos },
+        { input: resizedSignature, top: yPos + 10, left: xPos }
       ]).png().toBuffer();
 
+    // 6. Upload to Cloudinary
     const upload = await cloudinary.uploader.upload(
       `data:image/png;base64,${finalImageBuffer.toString("base64")}`,
       { folder: "signed_agreements" }
     );
 
-    // Update Database with IP and Device Info
+    // 7. Update Database with Full Audit Trail
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
