@@ -10,10 +10,6 @@ cloudinary.config({
 });
 
 /* ================= PRE-OTP VERIFICATION (USING USERS TABLE) ================= */
-/**
- * Verifies if the mobile number provided for OTP matches the 
- * registered phone number in the 'users' table.
- */
 exports.verifyTenantForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   
@@ -22,7 +18,6 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 
   try {
-    // JOIN with users table to fetch the official 'phone' number
     const [rows] = await db.query(
       `SELECT u.phone 
        FROM agreements_form af
@@ -35,11 +30,8 @@ exports.verifyTenantForBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: "No record found for this booking or user." });
     }
 
-    // Clean both numbers to compare only digits
     const registeredPhone = rows[0].phone.replace(/\D/g, '');
     const inputMobile = mobile.replace(/\D/g, '');
-
-    // Check if input matches the registered phone (checking last 10 digits for safety)
     const isMatch = registeredPhone.endsWith(inputMobile) && inputMobile.length >= 10;
 
     if (isMatch) {
@@ -59,10 +51,16 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 };
 
-/* ================= TENANT FINAL SIGNING (STRICT USER CHECK) ================= */
+/* ================= TENANT FINAL SIGNING (UPDATED WITH IP & DEVICE) ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
+
+    // Capture IP Address (checks for proxy headers first, then remote address)
+    const ip_address = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+    
+    // Capture Device Info (User Agent)
+    const device_info = req.headers['user-agent'] || "Unknown Device";
     
     // Fetch draft PDF and official user phone
     const [rows] = await db.query(
@@ -77,7 +75,6 @@ exports.tenantFinalSign = async (req, res) => {
 
     if (!data?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
     
-    // Security check against User Table phone
     const dbPhone = data.phone.replace(/\D/g, '');
     const inputMobile = tenant_mobile.replace(/\D/g, '');
     
@@ -116,14 +113,17 @@ exports.tenantFinalSign = async (req, res) => {
       { folder: "signed_agreements" }
     );
 
+    // Updated Query to include tenant_ip_address and tenant_device_info
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, 
            agreement_status = 'completed', 
            tenant_final_signature = ?, 
-           tenant_mobile = ? 
+           tenant_mobile = ?,
+           tenant_ip_address = ?,
+           tenant_device_info = ?
        WHERE booking_id = ?`, 
-      [upload.secure_url, tenant_signature, tenant_mobile, booking_id]
+      [upload.secure_url, tenant_signature, tenant_mobile, ip_address, device_info, booking_id]
     );
 
     res.json({ success: true, url: upload.secure_url });
@@ -133,7 +133,7 @@ exports.tenantFinalSign = async (req, res) => {
   }
 };
 
-/* ================= USER: GET STATUS (INCLUDES REG PHONE) ================= */
+/* ================= USER: GET STATUS ================= */
 exports.getAgreementByBookingId = async (req, res) => {
   try {
     const { bookingId } = req.params;
