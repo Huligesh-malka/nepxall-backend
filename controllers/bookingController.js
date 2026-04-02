@@ -6,7 +6,7 @@ const db = require("../db");
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const { name, check_in_date, room_type, phone } = req.body;
+    const { check_in_date, room_type } = req.body;  // Removed name and phone
     const userId = req.user.id;
 
     if (!check_in_date || !room_type) {
@@ -26,7 +26,7 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // 👤 USER - Fetching ID to use as Register Number
+    // 👤 USER - Fetch user details for name, email, phone
     const [[user]] = await db.query(
       "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
@@ -74,11 +74,12 @@ exports.createBooking = async (req, res) => {
     const deposit = pg.deposit_amount || pg.security_deposit || 0;
     const maintenance = pg.maintenance_amount || 0;
 
-    const finalName = name?.trim() || user.name;
-    const finalPhone = phone?.trim() || user.phone;
+    // Use user's name and phone from database
+    const finalName = user.name;
+    const finalPhone = user.phone;
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT (Including register_number)
+    // 📝 INSERT (register_number = user.id)
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO bookings 
@@ -93,7 +94,7 @@ exports.createBooking = async (req, res) => {
         finalName,
         user.email,
         finalPhone,
-        user.id, // Storing User ID as the Register Number
+        user.id, // User ID as Register Number
         check_in_date,
         room_type,
         rent,
