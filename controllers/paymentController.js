@@ -157,58 +157,65 @@ exports.getAdminPayments = async (req, res) => {
 // ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 exports.verifyPayment = async (req, res) => {
-
   try {
-
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success:false });
+      return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
     const { orderId } = req.params;
 
+    // 1. Fetch payment and related booking details
     const [[payment]] = await db.query(
-      `SELECT booking_id, amount FROM payments WHERE order_id=?`,
+      `SELECT p.booking_id, p.amount, b.pg_id, b.user_id, b.owner_id, b.room_id 
+       FROM payments p
+       JOIN bookings b ON b.id = p.booking_id
+       WHERE p.order_id = ?`,
       [orderId]
     );
 
     if (!payment) {
-      return res.status(404).json({
-        success:false,
-        message:"Payment not found"
-      });
+      return res.status(404).json({ success: false, message: "Payment not found" });
     }
 
-    // mark payment paid
+    // 2. Mark payment as 'paid'
     await db.query(
-      `UPDATE payments SET status='paid' WHERE order_id=?`,
+      `UPDATE payments SET status='paid', verified_by_admin=TRUE WHERE order_id=?`,
       [orderId]
     );
 
-    // update booking automatically
+    // 3. Update booking to 'confirmed'
     await db.query(
-      `UPDATE bookings
-       SET status='confirmed',
-           owner_amount=?,
-           owner_settlement='PENDING'
+      `UPDATE bookings 
+       SET status='confirmed', 
+           owner_amount=?, 
+           owner_settlement='PENDING' 
        WHERE id=?`,
       [payment.amount, payment.booking_id]
     );
 
+    // 4. 🔥 NEW: Update / Create Active Stay (pg_users)
+    // This makes the stay appear in "Active Stay" immediately
+    await db.query(
+      `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status)
+       VALUES (?, ?, ?, ?, 'ACTIVE')
+       ON DUPLICATE KEY UPDATE status='ACTIVE', room_id = VALUES(room_id)`,
+      [
+        payment.pg_id,
+        payment.room_id || null,
+        payment.user_id,
+        payment.owner_id
+      ]
+    );
+
     res.json({
-      success:true,
-      message:"Payment verified and settlement created"
+      success: true,
+      message: "Payment verified, booking confirmed, and active stay updated."
     });
 
   } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json({
-      success:false
-    });
-
+    console.error("VERIFY PAYMENT ERROR:", err);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
-
 };
 
 //////////////////////////////////////////////////////
