@@ -122,10 +122,6 @@ exports.confirmPayment = async (req, res) => {
 
 //////////////////////////////////////////////////////
 // GET ADMIN PAYMENTS (DETAILED VERSION)
-//////////////////////////////////////////////////////
-//////////////////////////////////////////////////////
-// GET ADMIN PAYMENTS (DETAILED VERSION)
-//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -139,15 +135,12 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
 
-        /* User/Registration Details - Aliased for Frontend Compatibility */
-        u.id AS reg_id,
-        u.name AS reg_name,
-        u.phone AS reg_phone,
+        /* Fix: Use 'u.name' and 'u.phone' from your verified users table */
+        COALESCE(u.name, 'Guest User') AS reg_name,
+        COALESCE(u.phone, 'No Phone') AS reg_phone,
+        u.id AS user_registration_id,
 
-        /* Booking Breakdown Details */
-        b.rent_amount,
-        b.security_deposit,
-        b.maintenance_amount,
+        /* Booking Details */
         b.room_type AS sharing,
 
         /* PG Details */
@@ -155,7 +148,8 @@ exports.getAdminPayments = async (req, res) => {
 
       FROM payments p
       LEFT JOIN bookings b ON b.id = p.booking_id
-      LEFT JOIN users u ON u.id = b.user_id
+      /* Ensure this join matches your 'users' table structure */
+      LEFT JOIN users u ON u.id = b.user_id 
       LEFT JOIN pgs pg ON pg.id = b.pg_id
       ORDER BY p.created_at DESC
     `);
@@ -164,16 +158,11 @@ exports.getAdminPayments = async (req, res) => {
       success: true,
       data: rows
     });
-
   } catch (err) {
     console.error("❌ ADMIN PAYMENTS ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to load detailed payments"
-    });
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
-
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
