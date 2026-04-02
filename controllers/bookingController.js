@@ -206,14 +206,14 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 //////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS (UPDATED)
+// 💳 PAYMENT SUCCESS
 //////////////////////////////////////////////////////
 exports.markPaymentDone = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    // Extract order_id and payment_date from the request body
-    const { room_id, order_id, payment_date } = req.body; 
+    const { room_id } = req.body;
     const userId = req.user.id;
 
     const [[booking]] = await db.query(
@@ -224,24 +224,11 @@ exports.markPaymentDone = async (req, res) => {
     if (!booking)
       return res.status(404).json({ message: "Booking not found" });
 
-    // 1. Update Booking with Order ID, Payment Date, and Room
-    // We use the payment_date provided or fallback to current timestamp
     await db.query(
-      `UPDATE bookings 
-       SET status='confirmed', 
-           room_id=?, 
-           order_id=?, 
-           updated_at=? 
-       WHERE id=?`,
-      [
-        room_id || null, 
-        order_id || null, 
-        payment_date || new Date(), 
-        bookingId
-      ]
+      "UPDATE bookings SET status='confirmed', room_id=? WHERE id=?",
+      [room_id || null, bookingId]
     );
 
-    // 2. Update Room Occupancy
     if (room_id) {
       await db.query(
         "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
@@ -249,7 +236,7 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
-    // 3. Insert/Update into Active Tenants (pg_users)
+    // 🔥 Added join_date (booking.check_in_date) to fix "Field join_date doesn't have a default value"
     await db.query(
       `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status, join_date)
        VALUES (?, ?, ?, ?, 'ACTIVE', ?)
@@ -263,11 +250,7 @@ exports.markPaymentDone = async (req, res) => {
       ]
     );
 
-    res.json({ 
-        success: true, 
-        message: "Payment recorded and booking confirmed",
-        order_id: order_id 
-    });
+    res.json({ success: true });
 
   } catch (err) {
     console.error("PAYMENT DONE ERROR:", err);
