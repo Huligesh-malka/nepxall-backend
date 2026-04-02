@@ -290,14 +290,13 @@ exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 🔥 Changed from [[stay]] to [rows] to return an ARRAY
-    // 🔥 Removed LIMIT 1 to show everything
     const [rows] = await db.query(
       `
       SELECT 
         b.id,
         p.pg_name,
         pr.room_no,
+        b.room_type,            -- Fetching the sharing type (e.g., 'Single Sharing')
         b.check_in_date AS join_date,
         b.rent_amount,
         b.security_deposit AS deposit_amount,
@@ -313,9 +312,7 @@ exports.getUserActiveStay = async (req, res) => {
       [userId]
     );
 
-    // Returns [] if no stays, or [{}, {}] if multiple stays
     res.json(rows);
-
   } catch (err) {
     console.error("GET ACTIVE STAY ERROR:", err);
     res.status(500).json({ message: err.message });
