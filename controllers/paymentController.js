@@ -157,16 +157,15 @@ exports.getAdminPayments = async (req, res) => {
 // ADMIN VERIFY PAYMENT
 //////////////////////////////////////////////////////
 exports.verifyPayment = async (req, res) => {
+
   try {
 
-    // 🔐 Admin check
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({ success:false });
     }
 
     const { orderId } = req.params;
 
-    // 🔍 Get payment details
     const [[payment]] = await db.query(
       `SELECT booking_id, amount FROM payments WHERE order_id=?`,
       [orderId]
@@ -174,47 +173,18 @@ exports.verifyPayment = async (req, res) => {
 
     if (!payment) {
       return res.status(404).json({
-        success: false,
-        message: "Payment not found"
+        success:false,
+        message:"Payment not found"
       });
     }
 
-    // 🔍 Get booking (to know user_id)
-    const [[booking]] = await db.query(
-      `SELECT user_id FROM bookings WHERE id=?`,
-      [payment.booking_id]
-    );
-
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found"
-      });
-    }
-
-    const userId = booking.user_id;
-
-    //////////////////////////////////////////////////////
-    // ✅ STEP 1: MARK PAYMENT AS PAID
-    //////////////////////////////////////////////////////
+    // mark payment paid
     await db.query(
       `UPDATE payments SET status='paid' WHERE order_id=?`,
       [orderId]
     );
 
-    //////////////////////////////////////////////////////
-    // 🔥 STEP 2: REMOVE OLD ACTIVE STAY
-    //////////////////////////////////////////////////////
-    await db.query(
-      `UPDATE bookings 
-       SET status='completed' 
-       WHERE user_id=? AND status='confirmed'`,
-      [userId]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ STEP 3: CONFIRM NEW BOOKING
-    //////////////////////////////////////////////////////
+    // update booking automatically
     await db.query(
       `UPDATE bookings
        SET status='confirmed',
@@ -224,25 +194,23 @@ exports.verifyPayment = async (req, res) => {
       [payment.amount, payment.booking_id]
     );
 
-    //////////////////////////////////////////////////////
-    // 🎯 DONE
-    //////////////////////////////////////////////////////
     res.json({
-      success: true,
-      message: "Payment verified → Stay activated successfully"
+      success:true,
+      message:"Payment verified and settlement created"
     });
 
   } catch (err) {
 
-    console.error("VERIFY PAYMENT ERROR:", err);
+    console.error(err);
 
     res.status(500).json({
-      success: false,
-      message: "Server error"
+      success:false
     });
 
   }
+
 };
+
 //////////////////////////////////////////////////////
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
