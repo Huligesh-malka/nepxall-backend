@@ -144,7 +144,7 @@ exports.getAgreementByBookingId = async (req, res) => {
   }
 };
 
-/* ================= USER: SUBMIT FORM (UPDATED) ================= */
+/* ================= USER: SUBMIT FORM (FIXED FOR DB CONSTRAINTS) ================= */
 exports.submitAgreementForm = async (req, res) => {
   try {
     const { 
@@ -155,18 +155,31 @@ exports.submitAgreementForm = async (req, res) => {
 
     const files = req.files || {};
     const toSafeInt = (v) => (isNaN(parseInt(v)) ? 0 : parseInt(v));
+    
+    // Default values for mandatory DB fields removed from frontend
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const defaultEmail = `${mobile}@placeholder.com`;
+    const defaultPan = "NOT_PROVIDED";
+    const defaultMonths = 11;
+    const defaultDeposit = 0;
 
-    // Removed email, pan_number, checkin_date, agreement_months, deposit from SQL
     const sql = `
       INSERT INTO agreements_form 
-      (user_id, booking_id, full_name, father_name, mobile, address, city, state, pincode, aadhaar_last4, rent, maintenance, signature, aadhaar_front, aadhaar_back, pan_card, agreement_status) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
+      (
+        user_id, booking_id, full_name, father_name, mobile, 
+        address, city, state, pincode, aadhaar_last4, 
+        rent, maintenance, 
+        email, pan_number, checkin_date, agreement_months, deposit,
+        signature, aadhaar_front, aadhaar_back, pan_card, 
+        agreement_status
+      ) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
 
     const values = [
       toSafeInt(user_id), 
       toSafeInt(booking_id), 
       full_name, 
-      father_name, 
+      father_name || "Not Specified", 
       mobile, 
       address, 
       city, 
@@ -174,7 +187,12 @@ exports.submitAgreementForm = async (req, res) => {
       pincode, 
       aadhaar_last4, 
       toSafeInt(rent), 
-      toSafeInt(maintenance), 
+      toSafeInt(maintenance),
+      defaultEmail,
+      defaultPan,
+      today, // Fixes checkin_date error
+      defaultMonths,
+      defaultDeposit,
       files["signature"]?.[0]?.path || null, 
       files["aadhaar_front"]?.[0]?.path || null, 
       files["aadhaar_back"]?.[0]?.path || null, 
@@ -185,7 +203,11 @@ exports.submitAgreementForm = async (req, res) => {
     res.json({ success: true, insertId: result.insertId });
   } catch (error) {
     console.error("Form Submission Error:", error);
-    res.status(500).json({ success: false, message: "Failed to submit form" });
+    // Provide specific DB error in response for easier debugging
+    res.status(500).json({ 
+      success: false, 
+      message: error.sqlMessage || "Failed to submit form" 
+    });
   }
 };
 
