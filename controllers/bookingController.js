@@ -313,20 +313,27 @@ exports.getUserActiveStay = async (req, res) => {
       `
       SELECT 
         b.id,
-        p.pg_name,
+        p.order_id,               -- 👈 Now fetching from payments table
+        pg.pg_name,
         pr.room_no,
-        b.room_type,            -- Fetching the sharing type (e.g., 'Single Sharing')
+        b.room_type,
         b.check_in_date AS join_date,
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
+        p.submitted_at AS paid_date, -- 👈 Exact time user submitted payment
         'ACTIVE' AS status
       FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
+      JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      WHERE b.user_id = ? AND b.status = 'confirmed'
+      -- 🔗 JOIN with payments table to get the actual Order ID
+      LEFT JOIN payments p ON p.booking_id = b.id 
+      WHERE b.user_id = ? 
+        AND b.status = 'confirmed' 
+        AND (p.status = 'paid' OR p.status = 'submitted')
       ORDER BY b.updated_at DESC
+      LIMIT 1
       `,
       [userId]
     );
