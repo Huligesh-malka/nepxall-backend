@@ -157,16 +157,13 @@ exports.getAdminPayments = async (req, res) => {
         p.booking_id,
         p.utr,
         p.screenshot,
-        p.verified_by_admin,
         
-        /* Tenant details */
-        b.name AS tenant_name,
+        /* Pulling REGISTRATION name/phone from users table */
+        u.name AS reg_name,
+        u.phone AS reg_phone,
+
+        /* Pulling specific booking details */
         b.room_type AS sharing, 
-
-        /* Phone from USERS table (The Registration Number) */
-        u.phone AS phone,
-
-        /* PG Details */
         pg.pg_name
 
       FROM payments p
@@ -176,16 +173,12 @@ exports.getAdminPayments = async (req, res) => {
       ORDER BY p.created_at DESC
     `);
 
-    res.json({
-      success: true,
-      data: rows
-    });
-
+    res.json({ success: true, data: rows });
   } catch (err) {
-    console.error("❌ ADMIN PAYMENTS ERROR:", err);
     res.status(500).json({ success: false, message: "Failed to load payments" });
   }
 };
+
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
