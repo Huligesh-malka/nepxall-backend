@@ -313,7 +313,7 @@ exports.getUserActiveStay = async (req, res) => {
       `
       SELECT 
         b.id,
-        p.order_id,               -- 👈 Now fetching from payments table
+        p.order_id,               
         pg.pg_name,
         pr.room_no,
         b.room_type,
@@ -322,22 +322,25 @@ exports.getUserActiveStay = async (req, res) => {
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        p.submitted_at AS paid_date, -- 👈 Exact time user submitted payment
+        p.submitted_at AS paid_date, 
         'ACTIVE' AS status
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      -- 🔗 JOIN with payments table to get the actual Order ID
+      -- JOIN with payments to get the order details for each booking
       LEFT JOIN payments p ON p.booking_id = b.id 
       WHERE b.user_id = ? 
         AND b.status = 'confirmed' 
+        -- This ensures we only show bookings that have been paid/submitted
         AND (p.status = 'paid' OR p.status = 'submitted')
+      -- Group by booking ID to avoid duplicate rows if there are multiple payment attempts
+      GROUP BY b.id
       ORDER BY b.updated_at DESC
-      LIMIT 1
       `,
       [userId]
     );
 
+    // Send the full array of rows
     res.json(rows);
   } catch (err) {
     console.error("GET ACTIVE STAY ERROR:", err);
