@@ -285,6 +285,7 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 };
 
 
+
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -295,27 +296,16 @@ exports.getUserActiveStay = async (req, res) => {
         b.id,
         p.pg_name,
         pr.room_no,
-        b.room_type,
+        b.room_type,            -- Fetching the sharing type (e.g., 'Single Sharing')
         b.check_in_date AS join_date,
-        -- ✅ Fetching the actual submission date from payments table
-        pay.submitted_at AS paid_date,           
-        DATE_ADD(b.check_in_date, INTERVAL 1 MONTH) AS next_due_date, 
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        b.status,
-        pay.order_id                           -- Added for the receipt
+        'ACTIVE' AS status
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      -- ✅ Joining with payments table to get user paid date
-      LEFT JOIN (
-          SELECT booking_id, submitted_at, order_id 
-          FROM payments 
-          WHERE status = 'paid' 
-          ORDER BY submitted_at DESC LIMIT 1
-      ) pay ON pay.booking_id = b.id
       WHERE b.user_id = ? AND b.status = 'confirmed'
       ORDER BY b.updated_at DESC
       `,
