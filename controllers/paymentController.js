@@ -141,51 +141,39 @@ exports.confirmPayment = async (req, res) => {
 };
 
 
+// Inside your payments controller (Admin fetch)
 exports.getAdminPayments = async (req, res) => {
-
   try {
-
     const [rows] = await db.query(`
       SELECT 
         p.order_id,
         p.amount,
         p.status,
-        p.created_at,
-        p.booking_id,
-
-        b.name AS tenant_name,
-        b.phone,
-        b.owner_id,
-
-        pg.pg_name
-
+        p.submitted_at AS paid_date,
+        u.name AS tenant_name,
+        u.phone,
+        pg.pg_name,
+        b.room_type,
+        b.rent_amount,
+        b.maintenance_amount,
+        b.security_deposit AS deposit_amount,
+        pr.room_no
       FROM payments p
+      JOIN bookings b ON p.booking_id = b.id
+      JOIN users u ON b.user_id = u.id
+      JOIN pgs pg ON b.pg_id = pg.id
+      LEFT JOIN pg_rooms pr ON b.room_id = pr.id
+      WHERE pg.owner_id = ?
+      ORDER BY p.submitted_at DESC
+    `, [req.user.id]);
 
-      LEFT JOIN bookings b
-        ON b.id = p.booking_id
-
-      LEFT JOIN pgs pg
-        ON pg.id = b.pg_id
-
-      ORDER BY p.created_at DESC
-    `);
-
-    res.json({
-      success:true,
-      data:rows
-    });
-
-  } catch(err){
-
-    console.error(err);
-
-    res.status(500).json({
-      success:false
-    });
-
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
-
 };
+
+
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
