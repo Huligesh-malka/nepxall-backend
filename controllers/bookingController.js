@@ -284,10 +284,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 
 
 
-
-//////////////////////////////////////////////////////
-// 🏠 GET USER ACTIVE STAY
-//////////////////////////////////////////////////////
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -308,6 +304,10 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
       WHERE b.user_id = ? AND b.status = 'confirmed'
+      
+      -- 🔥 ADD THIS LINE
+      ORDER BY b.updated_at DESC
+      
       LIMIT 1
       `,
       [userId]
@@ -316,7 +316,6 @@ exports.getUserActiveStay = async (req, res) => {
     res.json(stay || null);
 
   } catch (err) {
-    console.error("ACTIVE STAY ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
