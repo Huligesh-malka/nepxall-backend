@@ -322,28 +322,27 @@ exports.getUserActiveStay = async (req, res) => {
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        p.submitted_at AS paid_date, 
+        MAX(p.submitted_at) AS paid_date, -- Get the latest payment date if multiple exist
         'ACTIVE' AS status
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      -- JOIN with payments to get the order details for each booking
+      -- JOIN with payments to fetch order details
       LEFT JOIN payments p ON p.booking_id = b.id 
       WHERE b.user_id = ? 
         AND b.status = 'confirmed' 
-        -- This ensures we only show bookings that have been paid/submitted
         AND (p.status = 'paid' OR p.status = 'submitted')
-      -- Group by booking ID to avoid duplicate rows if there are multiple payment attempts
+      -- Grouping by booking ID ensures one card per room/stay
       GROUP BY b.id
       ORDER BY b.updated_at DESC
       `,
       [userId]
     );
 
-    // Send the full array of rows
+    // This now returns an array of all matches
     res.json(rows);
   } catch (err) {
-    console.error("GET ACTIVE STAY ERROR:", err);
+    console.error("GET ALL ACTIVE STAYS ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
