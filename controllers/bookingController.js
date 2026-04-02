@@ -236,22 +236,24 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
-    // 🔐 prevent duplicate active tenant
+    // 🔥 Added join_date (booking.check_in_date) to fix "Field join_date doesn't have a default value"
     await db.query(
-      `INSERT INTO pg_users (pg_id,room_id,user_id,owner_id,status)
-       VALUES (?,?,?,?, 'ACTIVE')
-       ON DUPLICATE KEY UPDATE status='ACTIVE'`,
+      `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status, join_date)
+       VALUES (?, ?, ?, ?, 'ACTIVE', ?)
+       ON DUPLICATE KEY UPDATE status='ACTIVE', join_date=VALUES(join_date)`,
       [
         booking.pg_id,
         room_id || null,
         booking.user_id,
         booking.owner_id,
+        booking.check_in_date 
       ]
     );
 
     res.json({ success: true });
 
   } catch (err) {
+    console.error("PAYMENT DONE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -288,7 +290,9 @@ exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const [[stay]] = await db.query(
+    // 🔥 Changed from [[stay]] to [rows] to return an ARRAY
+    // 🔥 Removed LIMIT 1 to show everything
+    const [rows] = await db.query(
       `
       SELECT 
         b.id,
@@ -304,18 +308,16 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
       WHERE b.user_id = ? AND b.status = 'confirmed'
-      
-      -- 🔥 ADD THIS LINE
       ORDER BY b.updated_at DESC
-      
-      LIMIT 1
       `,
       [userId]
     );
 
-    res.json(stay || null);
+    // Returns [] if no stays, or [{}, {}] if multiple stays
+    res.json(rows);
 
   } catch (err) {
+    console.error("GET ACTIVE STAY ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
