@@ -6,7 +6,6 @@ const db = require("../db");
 //////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
-
     const { bookingId } = req.body;
 
     if (!bookingId) {
@@ -16,8 +15,41 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    const amount = 1; // testing
+    // ✅ 1. Get real booking data
+    const [[booking]] = await db.query(
+      `SELECT 
+        rent_amount, 
+        security_deposit, 
+        maintenance_amount, 
+        platform_fee 
+       FROM bookings 
+       WHERE id = ?`,
+      [bookingId]
+    );
 
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    // ✅ 2. Calculate TOTAL REAL AMOUNT
+    const amount =
+      (booking.rent_amount || 0) +
+      (booking.security_deposit || 0) +
+      (booking.maintenance_amount || 0) +
+      (booking.platform_fee || 0);
+
+    // ✅ Safety check
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid amount"
+      });
+    }
+
+    // ✅ 3. Create Order
     const orderId = `order_${bookingId}_${Date.now()}`;
 
     const upiId = "huligeshmalka-1@oksbi";
@@ -33,6 +65,7 @@ exports.createPayment = async (req, res) => {
 
     const qr = await QRCode.toDataURL(upiLink);
 
+    // ✅ 4. Save payment
     await db.query(
       `INSERT INTO payments (booking_id, order_id, amount, status, created_at)
        VALUES (?, ?, ?, 'pending', NOW())`,
@@ -42,18 +75,17 @@ exports.createPayment = async (req, res) => {
     res.json({
       success: true,
       orderId,
+      amount, // ✅ send real amount
       upiLink,
       qr
     });
 
   } catch (err) {
-
     console.error("CREATE PAYMENT ERROR:", err);
 
     res.status(500).json({
       success: false
     });
-
   }
 };
 
