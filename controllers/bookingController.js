@@ -318,3 +318,42 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+exports.getReceiptDetails = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user.id;
+
+    const [rows] = await db.query(
+      `SELECT 
+        b.id AS receipt_no,
+        b.order_id, 
+        b.updated_at AS verified_date,
+        u.name AS tenant_name,
+        u.phone AS tenant_phone,
+        p.pg_name,
+        pr.room_no,
+        b.room_type,
+        p.location,
+        (b.rent_amount + b.maintenance_amount) AS amount_paid,
+        b.status
+      FROM bookings b
+      JOIN users u ON u.id = b.user_id
+      JOIN pgs p ON p.id = b.pg_id
+      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+      WHERE b.id = ? AND b.user_id = ? AND b.status = 'confirmed'`,
+      [bookingId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Receipt not found or not yet verified." });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
