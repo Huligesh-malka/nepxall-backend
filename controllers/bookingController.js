@@ -313,7 +313,7 @@ exports.getUserActiveStay = async (req, res) => {
       `
       SELECT 
         b.id,
-        p.order_id,               
+        MAX(p.order_id) AS order_id,       -- Wrapped in MAX to satisfy GROUP BY
         pg.pg_name,
         pr.room_no,
         b.room_type,
@@ -322,27 +322,32 @@ exports.getUserActiveStay = async (req, res) => {
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        MAX(p.submitted_at) AS paid_date, -- Get the latest payment date if multiple exist
+        MAX(p.submitted_at) AS paid_date,  -- Wrapped in MAX to satisfy GROUP BY
         'ACTIVE' AS status
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      -- JOIN with payments to fetch order details
       LEFT JOIN payments p ON p.booking_id = b.id 
       WHERE b.user_id = ? 
         AND b.status = 'confirmed' 
         AND (p.status = 'paid' OR p.status = 'submitted')
-      -- Grouping by booking ID ensures one card per room/stay
-      GROUP BY b.id
+      GROUP BY 
+        b.id, 
+        pg.pg_name, 
+        pr.room_no, 
+        b.room_type, 
+        b.check_in_date, 
+        b.rent_amount, 
+        b.security_deposit, 
+        b.maintenance_amount
       ORDER BY b.updated_at DESC
       `,
       [userId]
     );
 
-    // This now returns an array of all matches
     res.json(rows);
   } catch (err) {
-    console.error("GET ALL ACTIVE STAYS ERROR:", err);
+    console.error("GET ACTIVE STAY ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
