@@ -120,9 +120,8 @@ exports.confirmPayment = async (req, res) => {
 };
 
 
-
 //////////////////////////////////////////////////////
-// GET ADMIN PAYMENTS (JOINED WITH USERS TABLE)
+// GET ADMIN PAYMENTS (DETAILED VERSION)
 //////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
@@ -133,16 +132,22 @@ exports.getAdminPayments = async (req, res) => {
         p.status,
         p.created_at,
         p.submitted_at,
-        p.booking_id,
         p.utr,
         p.screenshot,
-        
-        /* Pulling REGISTRATION name/phone from users table */
-        u.name AS reg_name,
-        u.phone AS reg_phone,
+        p.verified_by_admin,
 
-        /* Pulling specific booking details */
-        b.room_type AS sharing, 
+        /* User/Registration Details */
+        u.id AS reg_number,
+        u.name AS tenant_name,
+        u.phone AS tenant_phone,
+
+        /* Booking Breakdown Details */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+        b.room_type AS sharing,
+
+        /* PG Details */
         pg.pg_name
 
       FROM payments p
@@ -152,9 +157,17 @@ exports.getAdminPayments = async (req, res) => {
       ORDER BY p.created_at DESC
     `);
 
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load payments" });
+    console.error("❌ ADMIN PAYMENTS ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load detailed payments"
+    });
   }
 };
 
