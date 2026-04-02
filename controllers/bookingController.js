@@ -306,21 +306,20 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
+
     const [rows] = await db.query(
       `
       SELECT 
         b.id,
-        b.order_id,             -- Fetching the actual transaction ID
         p.pg_name,
         pr.room_no,
-        b.room_type,
+        b.room_type,            -- Fetching the sharing type (e.g., 'Single Sharing')
         b.check_in_date AS join_date,
-        b.updated_at AS paid_date, -- Using updated_at as the payment confirmation date
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        b.status
+        'ACTIVE' AS status
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
@@ -329,6 +328,7 @@ exports.getUserActiveStay = async (req, res) => {
       `,
       [userId]
     );
+
     res.json(rows);
   } catch (err) {
     console.error("GET ACTIVE STAY ERROR:", err);
