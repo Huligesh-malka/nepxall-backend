@@ -15,7 +15,7 @@ exports.createBooking = async (req, res) => {
 
     // 🔐 PREVENT DOUBLE CLICK (CHECK FIRST)
     const [[existing]] = await db.query(
-      `SELECT id FROM bookings
+      `SELECT id FROM bookings 
        WHERE user_id=? AND pg_id=? AND check_in_date=? LIMIT 1`,
       [userId, pgId, check_in_date]
     );
@@ -26,9 +26,9 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // 👤 USER
+    // 👤 USER - Fetching ID to use as Register Number
     const [[user]] = await db.query(
-      "SELECT name, email, phone FROM users WHERE id=?",
+      "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
     );
 
@@ -78,14 +78,14 @@ exports.createBooking = async (req, res) => {
     const finalPhone = phone?.trim() || user.phone;
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT
+    // 📝 INSERT (Including register_number)
     //////////////////////////////////////////////////////
     await db.query(
-      `INSERT INTO bookings
-      (pg_id, user_id, owner_id, name, email, phone,
-       check_in_date, room_type,
-       rent_amount, security_deposit, maintenance_amount, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`,
+      `INSERT INTO bookings 
+      (pg_id, user_id, owner_id, name, email, phone, register_number,
+       check_in_date, room_type, 
+       rent_amount, security_deposit, maintenance_amount, status) 
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')`,
       [
         pgId,
         userId,
@@ -93,6 +93,7 @@ exports.createBooking = async (req, res) => {
         finalName,
         user.email,
         finalPhone,
+        user.id, // Storing User ID as the Register Number
         check_in_date,
         room_type,
         rent,
@@ -104,20 +105,18 @@ exports.createBooking = async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-
     // 🔥 UNIQUE CONSTRAINT PROTECTION
     if (err.code === "ER_DUP_ENTRY") {
-  return res.status(200).json({
-    alreadyBooked: true,
-    message: "You have already sent a request for this property"
-  });
-}
+      return res.status(200).json({
+        alreadyBooked: true,
+        message: "You have already sent a request for this property"
+      });
+    }
 
     console.error("CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
 //////////////////////////////////////////////////////
 // 📜 USER BOOKINGS
 //////////////////////////////////////////////////////
