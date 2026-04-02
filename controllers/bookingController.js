@@ -210,25 +210,37 @@ exports.updateBookingStatus = async (req, res) => {
 //////////////////////////////////////////////////////
 // 💳 PAYMENT SUCCESS
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// 💳 PAYMENT SUCCESS → UPDATED TO HANDLE ORDER_ID
+//////////////////////////////////////////////////////
 exports.markPaymentDone = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { room_id } = req.body;
+    const { room_id, order_id } = req.body; // 👈 Capture order_id from request body
     const userId = req.user.id;
 
+    // 1. Verify the booking exists for this user
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
     );
 
-    if (!booking)
+    if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
+    // 2. Update Booking: Set status to confirmed, assign room, and SAVE order_id
     await db.query(
-      "UPDATE bookings SET status='confirmed', room_id=? WHERE id=?",
-      [room_id || null, bookingId]
+      `UPDATE bookings 
+       SET status='confirmed', 
+           room_id=?, 
+           order_id=? 
+       WHERE id=?`,
+      [room_id || null, order_id || booking.order_id, bookingId] 
+      // Note: order_id || booking.order_id ensures we don't overwrite with null if it already exists
     );
 
+    // 3. Update Room Occupancy
     if (room_id) {
       await db.query(
         "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
@@ -236,11 +248,14 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
-    // 🔥 Added join_date (booking.check_in_date) to fix "Field join_date doesn't have a default value"
+    // 4. Sync with pg_users table for Active Stay tracking
     await db.query(
       `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status, join_date)
        VALUES (?, ?, ?, ?, 'ACTIVE', ?)
-       ON DUPLICATE KEY UPDATE status='ACTIVE', join_date=VALUES(join_date)`,
+       ON DUPLICATE KEY UPDATE 
+          status='ACTIVE', 
+          room_id=VALUES(room_id), 
+          join_date=VALUES(join_date)`,
       [
         booking.pg_id,
         room_id || null,
@@ -250,7 +265,11 @@ exports.markPaymentDone = async (req, res) => {
       ]
     );
 
-    res.json({ success: true });
+    res.json({ 
+      success: true, 
+      message: "Payment verified and order ID updated",
+      orderId: order_id 
+    });
 
   } catch (err) {
     console.error("PAYMENT DONE ERROR:", err);
@@ -344,13 +363,12 @@ exports.getReceiptDetails = async (req, res) => {
       JOIN users u ON u.id = b.user_id
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      WHERE b.id = ? AND b.user_id = ? 
-      AND b.status IN ('confirmed', 'approved')`, // Change: allow 'approved' too
+      WHERE b.id = ? AND b.user_id = ? AND b.status = 'confirmed'`,
       [bookingId, userId]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ message: "Receipt not available for this status." });
+      return res.status(404).json({ message: "Receipt not found or not yet verified." });
     }
 
     res.json(rows[0]);
