@@ -120,24 +120,60 @@ exports.confirmPayment = async (req, res) => {
 };
 
 
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (DETAILED VERSION)
+//////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (DETAILED VERSION)
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        p.order_id, p.amount, p.status, p.created_at, p.submitted_at,
-        p.booking_id, p.utr, p.screenshot, p.verified_by_admin,
-        b.name AS tenant_name, b.phone, b.owner_id, pg.pg_name
+        p.order_id,
+        p.amount,
+        p.status,
+        p.created_at,
+        p.submitted_at,
+        p.utr,
+        p.screenshot,
+        p.verified_by_admin,
+
+        /* User/Registration Details - Aliased for Frontend Compatibility */
+        u.id AS reg_id,
+        u.name AS reg_name,
+        u.phone AS reg_phone,
+
+        /* Booking Breakdown Details */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+        b.room_type AS sharing,
+
+        /* PG Details */
+        pg.pg_name
+
       FROM payments p
       LEFT JOIN bookings b ON b.id = p.booking_id
+      LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
       ORDER BY p.created_at DESC
     `);
-    res.json({ success: true, data: rows });
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
   } catch (err) {
     console.error("❌ ADMIN PAYMENTS ERROR:", err);
-    res.status(500).json({ success: false, message: "Failed to load payments" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to load detailed payments"
+    });
   }
 };
+
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
