@@ -9,7 +9,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/* ================= PRE-OTP VERIFICATION (USING USERS TABLE) ================= */
+/* ================= PRE-OTP VERIFICATION ================= */
 exports.verifyTenantForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   
@@ -51,18 +51,14 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 };
 
-/* ================= TENANT FINAL SIGNING (UPDATED WITH IP & DEVICE) ================= */
+/* ================= TENANT FINAL SIGNING ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
 
-    // Capture IP Address (checks for proxy headers first, then remote address)
     const ip_address = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
-    
-    // Capture Device Info (User Agent)
     const device_info = req.headers['user-agent'] || "Unknown Device";
     
-    // Fetch draft PDF and official user phone
     const [rows] = await db.query(
       `SELECT af.signed_pdf, af.city, af.state, u.phone 
        FROM agreements_form af
@@ -82,7 +78,6 @@ exports.tenantFinalSign = async (req, res) => {
         return res.status(403).json({ message: "Mobile number mismatch with registered profile." });
     }
 
-    // PDF Overlay Logic
     const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
     const baseImage = Buffer.from(response.data);
     const metadata = await sharp(baseImage).metadata();
@@ -97,7 +92,7 @@ exports.tenantFinalSign = async (req, res) => {
     const svgText = `
     <svg width="350" height="160">
       <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Reg. Mobile: ${tenant_mobile}</text>
+      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile ${tenant_mobile}</text>
       <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
       <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
     </svg>`;
@@ -113,7 +108,6 @@ exports.tenantFinalSign = async (req, res) => {
       { folder: "signed_agreements" }
     );
 
-    // Updated Query to include tenant_ip_address and tenant_device_info
     await db.query(
       `UPDATE agreements_form 
        SET signed_pdf = ?, 
@@ -151,17 +145,50 @@ exports.getAgreementByBookingId = async (req, res) => {
   }
 };
 
-/* ================= USER: SUBMIT FORM ================= */
-exports.submitAgreementForm = async (req) => {
-  const { user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance } = req.body;
-  const files = req.files || {};
-  const toSafeInt = (v) => isNaN(parseInt(v)) ? 0 : parseInt(v);
+/* ================= USER: SUBMIT FORM (UPDATED: REMOVED NULL COLUMNS) ================= */
+exports.submitAgreementForm = async (req, res) => {
+  try {
+    const { 
+      user_id, booking_id, full_name, father_name, mobile, 
+      email, address, city, state, pincode, aadhaar_last4, pan_number 
+    } = req.body;
 
-  const sql = `INSERT INTO agreements_form (user_id, booking_id, full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, agreement_months, rent, deposit, maintenance, signature, aadhaar_front, aadhaar_back, pan_card, agreement_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
-  const values = [toSafeInt(user_id), toSafeInt(booking_id), full_name, father_name, mobile, email, address, city, state, pincode, aadhaar_last4, pan_number, checkin_date, toSafeInt(agreement_months), toSafeInt(rent), toSafeInt(deposit), toSafeInt(maintenance), files["signature"]?.[0]?.path, files["aadhaar_front"]?.[0]?.path, files["aadhaar_back"]?.[0]?.path, files["pan_card"]?.[0]?.path];
+    const files = req.files || {};
+    const toSafeInt = (v) => isNaN(parseInt(v)) ? 0 : parseInt(v);
 
-  const [result] = await db.query(sql, values);
-  return { insertId: result.insertId };
+    // REMOVED: checkin_date, agreement_months, rent, deposit, maintenance
+    const sql = `
+      INSERT INTO agreements_form (
+        user_id, booking_id, full_name, father_name, mobile, email, 
+        address, city, state, pincode, aadhaar_last4, pan_number, 
+        signature, aadhaar_front, aadhaar_back, pan_card, agreement_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`;
+
+    const values = [
+      toSafeInt(user_id), 
+      toSafeInt(booking_id), 
+      full_name, 
+      father_name, 
+      mobile, 
+      email, 
+      address, 
+      city, 
+      state, 
+      pincode, 
+      aadhaar_last4, 
+      pan_number, 
+      files["signature"]?.[0]?.path, 
+      files["aadhaar_front"]?.[0]?.path, 
+      files["aadhaar_back"]?.[0]?.path, 
+      files["pan_card"]?.[0]?.path
+    ];
+
+    const [result] = await db.query(sql, values);
+    res.json({ success: true, insertId: result.insertId });
+  } catch (error) {
+    console.error("Submission Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 /* ================= ADMIN LOGIC ================= */
