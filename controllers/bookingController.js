@@ -206,14 +206,14 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 //////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS
+// 💳 PAYMENT SUCCESS (UPDATED)
 //////////////////////////////////////////////////////
 exports.markPaymentDone = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { room_id } = req.body;
+    // Extract order_id and payment_date from the request body
+    const { room_id, order_id, payment_date } = req.body; 
     const userId = req.user.id;
 
     const [[booking]] = await db.query(
@@ -224,11 +224,24 @@ exports.markPaymentDone = async (req, res) => {
     if (!booking)
       return res.status(404).json({ message: "Booking not found" });
 
+    // 1. Update Booking with Order ID, Payment Date, and Room
+    // We use the payment_date provided or fallback to current timestamp
     await db.query(
-      "UPDATE bookings SET status='confirmed', room_id=? WHERE id=?",
-      [room_id || null, bookingId]
+      `UPDATE bookings 
+       SET status='confirmed', 
+           room_id=?, 
+           order_id=?, 
+           updated_at=? 
+       WHERE id=?`,
+      [
+        room_id || null, 
+        order_id || null, 
+        payment_date || new Date(), 
+        bookingId
+      ]
     );
 
+    // 2. Update Room Occupancy
     if (room_id) {
       await db.query(
         "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
@@ -236,7 +249,7 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
-    // 🔥 Added join_date (booking.check_in_date) to fix "Field join_date doesn't have a default value"
+    // 3. Insert/Update into Active Tenants (pg_users)
     await db.query(
       `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status, join_date)
        VALUES (?, ?, ?, ?, 'ACTIVE', ?)
@@ -250,7 +263,11 @@ exports.markPaymentDone = async (req, res) => {
       ]
     );
 
-    res.json({ success: true });
+    res.json({ 
+        success: true, 
+        message: "Payment recorded and booking confirmed",
+        order_id: order_id 
+    });
 
   } catch (err) {
     console.error("PAYMENT DONE ERROR:", err);
@@ -289,20 +306,21 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const [rows] = await db.query(
       `
       SELECT 
         b.id,
+        b.order_id,             -- Fetching the actual transaction ID
         p.pg_name,
         pr.room_no,
-        b.room_type,            -- Fetching the sharing type (e.g., 'Single Sharing')
+        b.room_type,
         b.check_in_date AS join_date,
+        b.updated_at AS paid_date, -- Using updated_at as the payment confirmation date
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
-        'ACTIVE' AS status
+        b.status
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
@@ -311,7 +329,6 @@ exports.getUserActiveStay = async (req, res) => {
       `,
       [userId]
     );
-
     res.json(rows);
   } catch (err) {
     console.error("GET ACTIVE STAY ERROR:", err);
