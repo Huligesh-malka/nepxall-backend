@@ -142,6 +142,9 @@ exports.confirmPayment = async (req, res) => {
 
 
 
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (JOINED WITH USERS TABLE)
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -156,11 +159,11 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
         
-        /* Tenant details from bookings */
+        /* Tenant details */
         b.name AS tenant_name,
         b.room_type AS sharing, 
 
-        /* Phone from USERS table (Registration Number) */
+        /* Phone from USERS table (The Registration Number) */
         u.phone AS phone,
 
         /* PG Details */
