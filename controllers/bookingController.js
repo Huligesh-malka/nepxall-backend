@@ -281,3 +281,42 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+//////////////////////////////////////////////////////
+// 🏠 GET USER ACTIVE STAY
+//////////////////////////////////////////////////////
+exports.getUserActiveStay = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [[stay]] = await db.query(
+      `
+      SELECT 
+        b.id,
+        p.pg_name,
+        pr.room_no,
+        b.check_in_date AS join_date,
+        b.rent_amount,
+        b.security_deposit AS deposit_amount,
+        b.maintenance_amount,
+        (b.rent_amount + b.maintenance_amount) AS monthly_total,
+        'ACTIVE' AS status
+      FROM bookings b
+      JOIN pgs p ON p.id = b.pg_id
+      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+      WHERE b.user_id = ? AND b.status = 'confirmed'
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    res.json(stay || null);
+
+  } catch (err) {
+    console.error("ACTIVE STAY ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
