@@ -121,7 +121,7 @@ exports.confirmPayment = async (req, res) => {
 
 
 //////////////////////////////////////////////////////
-// GET ADMIN PAYMENTS (DETAILED VERSION)
+// GET ADMIN PAYMENTS (FIXED VERSION)
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -135,9 +135,12 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
 
-        /* Fix: Use 'u.name' and 'u.phone' from your verified users table */
-        COALESCE(u.name, 'Guest User') AS reg_name,
-        COALESCE(u.phone, 'No Phone') AS reg_phone,
+        /* FIX: Check 'users' table first, then 'bookings' table, 
+           then default to 'Guest User' / 'N/A' 
+        */
+        COALESCE(u.name, b.name, 'Guest User') AS reg_name,
+        COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
+        
         u.id AS user_registration_id,
 
         /* Booking Details */
@@ -148,7 +151,6 @@ exports.getAdminPayments = async (req, res) => {
 
       FROM payments p
       LEFT JOIN bookings b ON b.id = p.booking_id
-      /* Ensure this join matches your 'users' table structure */
       LEFT JOIN users u ON u.id = b.user_id 
       LEFT JOIN pgs pg ON pg.id = b.pg_id
       ORDER BY p.created_at DESC
@@ -163,6 +165,7 @@ exports.getAdminPayments = async (req, res) => {
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
+
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
