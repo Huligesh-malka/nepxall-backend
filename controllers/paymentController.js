@@ -34,12 +34,13 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    // ✅ 2. Calculate TOTAL REAL AMOUNT
-    const amount =
-      (booking.rent_amount || 0) +
-      (booking.security_deposit || 0) +
-      (booking.maintenance_amount || 0) +
-      (booking.platform_fee || 0);
+    // ✅ FIXED (convert string → number)
+const rent = parseFloat(booking.rent_amount) || 0;
+const deposit = parseFloat(booking.security_deposit) || 0;
+const maintenance = parseFloat(booking.maintenance_amount) || 0;
+const platformFee = parseFloat(booking.platform_fee) || 0;
+
+const amount = rent + deposit + maintenance + platformFee;
 
     // ✅ Safety check
     if (amount <= 0) {
