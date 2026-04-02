@@ -344,12 +344,13 @@ exports.getReceiptDetails = async (req, res) => {
       JOIN users u ON u.id = b.user_id
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      WHERE b.id = ? AND b.user_id = ? AND b.status = 'confirmed'`,
+      WHERE b.id = ? AND b.user_id = ? 
+      AND b.status IN ('confirmed', 'approved')`, // Change: allow 'approved' too
       [bookingId, userId]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ message: "Receipt not found or not yet verified." });
+      return res.status(404).json({ message: "Receipt not available for this status." });
     }
 
     res.json(rows[0]);
