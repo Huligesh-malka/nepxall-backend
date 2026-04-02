@@ -6,7 +6,7 @@ const db = require("../db");
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const { check_in_date, room_type } = req.body;  // Removed name and phone
+    const { check_in_date, room_type } = req.body;
     const userId = req.user.id;
 
     if (!check_in_date || !room_type) {
@@ -26,7 +26,7 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // 👤 USER - Fetch user details for name, email, phone
+    // 👤 USER - Fetch user details
     const [[user]] = await db.query(
       "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
@@ -75,18 +75,18 @@ exports.createBooking = async (req, res) => {
     const maintenance = pg.maintenance_amount || 0;
 
     // Use user's name and phone from database
-    const finalName = user.name;
-    const finalPhone = user.phone;
+    const finalName = user.name || user.email?.split('@')[0] || 'User';
+    const finalPhone = user.phone || '';
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT (register_number = user.id)
+    // 📝 INSERT (Without register_number)
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO bookings 
-      (pg_id, user_id, owner_id, name, email, phone, register_number,
+      (pg_id, user_id, owner_id, name, email, phone,
        check_in_date, room_type, 
        rent_amount, security_deposit, maintenance_amount, status) 
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`,
       [
         pgId,
         userId,
@@ -94,7 +94,6 @@ exports.createBooking = async (req, res) => {
         finalName,
         user.email,
         finalPhone,
-        user.id, // User ID as Register Number
         check_in_date,
         room_type,
         rent,
@@ -103,7 +102,7 @@ exports.createBooking = async (req, res) => {
       ]
     );
 
-    res.json({ success: true });
+    res.json({ success: true, message: "Booking request sent successfully" });
 
   } catch (err) {
     // 🔥 UNIQUE CONSTRAINT PROTECTION
@@ -118,6 +117,7 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 //////////////////////////////////////////////////////
 // 📜 USER BOOKINGS
 //////////////////////////////////////////////////////
