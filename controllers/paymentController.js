@@ -166,7 +166,7 @@ exports.verifyPayment = async (req, res) => {
 
     // 1. Fetch payment and related booking details
     const [[payment]] = await db.query(
-      `SELECT p.booking_id, p.amount, b.pg_id, b.user_id, b.owner_id, b.room_id 
+      `SELECT p.booking_id, p.amount, b.pg_id, b.user_id, b.owner_id 
        FROM payments p
        JOIN bookings b ON b.id = p.booking_id
        WHERE p.order_id = ?`,
@@ -193,15 +193,14 @@ exports.verifyPayment = async (req, res) => {
       [payment.amount, payment.booking_id]
     );
 
-    // 4. 🔥 NEW: Update / Create Active Stay (pg_users)
-    // This makes the stay appear in "Active Stay" immediately
+    // 4. Update / Create Active Stay (pg_users) 
+    // REMOVED room_id to fix the ER_BAD_FIELD_ERROR
     await db.query(
-      `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status)
-       VALUES (?, ?, ?, ?, 'ACTIVE')
-       ON DUPLICATE KEY UPDATE status='ACTIVE', room_id = VALUES(room_id)`,
+      `INSERT INTO pg_users (pg_id, user_id, owner_id, status)
+       VALUES (?, ?, ?, 'ACTIVE')
+       ON DUPLICATE KEY UPDATE status='ACTIVE'`,
       [
         payment.pg_id,
-        payment.room_id || null,
         payment.user_id,
         payment.owner_id
       ]
@@ -209,12 +208,15 @@ exports.verifyPayment = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Payment verified, booking confirmed, and active stay updated."
+      message: "Payment verified and active stay updated."
     });
 
   } catch (err) {
     console.error("VERIFY PAYMENT ERROR:", err);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    res.status(500).json({ 
+      success: false, 
+      message: "Database Error: " + err.sqlMessage 
+    });
   }
 };
 
