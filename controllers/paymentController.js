@@ -123,6 +123,9 @@ exports.confirmPayment = async (req, res) => {
 //////////////////////////////////////////////////////
 // GET ADMIN PAYMENTS (DETAILED VERSION)
 //////////////////////////////////////////////////////
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (DETAILED VERSION)
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -136,10 +139,10 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
 
-        /* User/Registration Details */
-        u.id AS reg_number,
-        u.name AS tenant_name,
-        u.phone AS tenant_phone,
+        /* User/Registration Details - Aliased for Frontend Compatibility */
+        u.id AS reg_id,
+        u.name AS reg_name,
+        u.phone AS reg_phone,
 
         /* Booking Breakdown Details */
         b.rent_amount,
