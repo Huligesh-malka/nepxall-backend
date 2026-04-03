@@ -124,16 +124,43 @@ exports.signOwnerAgreement = async (req, res) => {
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT b.id AS booking_id, b.name AS tenant_name, b.owner_amount, af.final_pdf, af.signed_pdf, af.viewed_by_owner
+      SELECT 
+        b.id AS booking_id,
+        b.name AS tenant_name,
+        b.owner_amount,
+        b.owner_settlement,       -- ✅ ADD THIS
+        b.settlement_date,        -- ✅ ADD THIS
+
+        af.final_pdf,
+        af.signed_pdf,
+        af.viewed_by_owner
+
       FROM bookings b
-      INNER JOIN payments p ON b.id = p.booking_id
-      LEFT JOIN agreements_form af ON b.id = af.booking_id
-      WHERE b.owner_id = ? AND p.status = 'paid'
+
+      INNER JOIN payments p 
+        ON b.id = p.booking_id
+
+      LEFT JOIN agreements_form af 
+        ON b.id = af.booking_id
+
+      WHERE b.owner_id = ?
+      AND p.status = 'paid'
+
       ORDER BY p.created_at DESC
     `, [req.user.id]);
-    res.json({ success: true, data: rows });
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false });
+    console.error("Owner payments error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load owner payments"
+    });
   }
 };
 
