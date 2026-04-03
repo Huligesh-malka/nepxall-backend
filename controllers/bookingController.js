@@ -406,6 +406,7 @@ exports.requestRefund = async (req, res) => {
     const { bookingId, reason, upi_id } = req.body;
     const userId = req.user.id;
 
+    // ✅ CHECK BOOKING
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -415,25 +416,57 @@ exports.requestRefund = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // ❌ REMOVED PAYMENT CHECK
+    // 🔥 CHECK EXISTING REFUND
+    const [[existing]] = await db.query(
+      "SELECT * FROM refunds WHERE booking_id=?",
+      [bookingId]
+    );
 
+    // ❌ BLOCK if already requested (except rejected)
+    if (existing && existing.status !== "rejected") {
+      return res.status(400).json({
+        message: "Refund already requested",
+        status: existing.status
+      });
+    }
+
+    // 🔁 IF REJECTED → UPDATE INSTEAD OF INSERT
+    if (existing && existing.status === "rejected") {
+      await db.query(
+        `UPDATE refunds 
+         SET reason=?, upi_id=?, status='pending', created_at=NOW()
+         WHERE booking_id=?`,
+        [reason, upi_id, bookingId]
+      );
+
+      return res.json({
+        success: true,
+        message: "Refund re-request submitted",
+        status: "pending"
+      });
+    }
+
+    // ✅ CALCULATE AMOUNT SAFELY
     const amount =
-  (Number(booking.rent_amount) || 0) +
-  (Number(booking.security_deposit) || 0) +
-  (Number(booking.maintenance_amount) || 0);
+      (Number(booking.rent_amount) || 0) +
+      (Number(booking.security_deposit) || 0) +
+      (Number(booking.maintenance_amount) || 0);
 
+    // ✅ INSERT NEW REFUND
     await db.query(
       `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
        VALUES (?,?,?,?,?)`,
       [bookingId, userId, amount, reason, upi_id]
     );
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      message: "Refund request submitted",
+      status: "pending"
+    });
 
   } catch (err) {
-    console.error("REFUND ERROR:", err);
+    console.error("❌ REFUND ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
-
