@@ -433,7 +433,6 @@ exports.viewPaymentScreenshot = async (req, res) => {
 };
 
 
-
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -448,13 +447,23 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
 
-        /* IMPORTANT FIX */
+        /* USER */
         COALESCE(u.name, b.name, 'Guest User') AS reg_name,
         COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
 
+        /* BOOKING */
         b.room_type AS sharing,
         b.check_in_date,
 
+        /* 🔥 ADD THESE (IMPORTANT) */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        /* TOTAL */
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+
+        /* PG */
         pg.pg_name
 
       FROM payments p
