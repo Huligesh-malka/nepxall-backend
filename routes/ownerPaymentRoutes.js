@@ -21,6 +21,9 @@ router.get("/settlements/summary", auth, ownerController.getOwnerSettlementSumma
 router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 
 
+router.get("/receipt/:bookingId", auth, ownerController.getOwnerReceiptDetails);
+
+
 /**
  * =================================================================
  * --- PUBLIC / SECURE SIGNING ROUTES ---

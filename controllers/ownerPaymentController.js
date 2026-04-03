@@ -182,3 +182,55 @@ exports.getOwnerSettlementSummary = async (req, res) => {
     res.json({ success: true, data: rows[0] });
   } catch (err) { res.status(500).json({ success: false }); }
 };
+
+
+
+
+exports.getOwnerReceiptDetails = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const [rows] = await db.query(
+      `SELECT 
+        b.id AS receipt_no,
+        b.order_id, 
+        b.updated_at AS verified_date,
+        b.name AS tenant_name,
+        b.phone AS tenant_phone,
+        p.pg_name,
+        pr.room_no,
+        b.room_type,
+        p.location,
+
+        /* AMOUNTS */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        /* TOTAL */
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+
+        b.status
+
+      FROM bookings b
+      JOIN pgs p ON p.id = b.pg_id
+      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+
+      WHERE b.id = ? 
+      AND b.owner_settlement = 'DONE'   -- ✅ ONLY CONDITION
+      `,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Receipt not available (Not settled yet)"
+      });
+    }
+
+    res.json(rows[0]);
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
