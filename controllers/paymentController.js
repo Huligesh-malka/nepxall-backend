@@ -120,51 +120,6 @@ exports.confirmPayment = async (req, res) => {
 };
 
 
-exports.getAdminPayments = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT 
-        p.id AS payment_id,
-        p.order_id,
-        p.amount,
-        p.status,
-        p.created_at,
-        p.submitted_at,
-        p.utr,
-        p.screenshot,
-        p.verified_by_admin,
-
-        /* User Details: Prioritize the registered user record, then booking data */
-        COALESCE(u.name, b.name, 'Guest User') AS reg_name,
-        COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
-        u.id AS user_registration_id,
-
-        /* Booking Details: This fixes the "N/A Sharing" issue */
-        b.room_type AS sharing,
-        b.check_in_date,
-
-        /* PG Details */
-        pg.pg_name,
-        pg.city,
-        pg.area
-
-      FROM payments p
-      LEFT JOIN bookings b ON b.id = p.booking_id
-      LEFT JOIN users u ON u.id = b.user_id 
-      LEFT JOIN pgs pg ON pg.id = b.pg_id
-      ORDER BY p.created_at DESC
-    `);
-
-    res.json({
-      success: true,
-      data: rows
-    });
-  } catch (err) {
-    console.error("❌ ADMIN PAYMENTS ERROR:", err);
-    res.status(500).json({ success: true, message: "Server Error" });
-  }
-};
-
 exports.verifyPayment = async (req, res) => {
   try {
     // 1. Admin Authorization Check
@@ -477,9 +432,8 @@ exports.viewPaymentScreenshot = async (req, res) => {
   }
 };
 
-//////////////////////////////////////////////////////
-// GET ADMIN PAYMENTS (UPDATED for your table)
-//////////////////////////////////////////////////////
+
+
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -493,12 +447,21 @@ exports.getAdminPayments = async (req, res) => {
         p.utr,
         p.screenshot,
         p.verified_by_admin,
-        b.name AS tenant_name,
-        b.phone,
-        b.owner_id,
+
+        /* USER DETAILS */
+        COALESCE(u.name, b.name, 'Guest User') AS tenant_name,
+        COALESCE(u.phone, b.phone, 'N/A') AS phone,
+
+        /* BOOKING DETAILS */
+        b.room_type AS sharing,
+        b.check_in_date,
+
+        /* PG DETAILS */
         pg.pg_name
+
       FROM payments p
       LEFT JOIN bookings b ON b.id = p.booking_id
+      LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
       ORDER BY p.created_at DESC
     `);
