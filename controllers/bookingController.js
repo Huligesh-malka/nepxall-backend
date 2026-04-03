@@ -398,3 +398,42 @@ exports.getReceiptDetails = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+exports.requestRefund = async (req, res) => {
+  try {
+    const { bookingId, reason, upi_id } = req.body;
+    const userId = req.user.id;
+
+    const [[booking]] = await db.query(
+      "SELECT * FROM bookings WHERE id=? AND user_id=?",
+      [bookingId, userId]
+    );
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (!booking.order_id) {
+      return res.status(400).json({ message: "Payment not completed" });
+    }
+
+    const amount =
+      (booking.rent_amount || 0) +
+      (booking.security_deposit || 0) +
+      (booking.maintenance_amount || 0);
+
+    await db.query(
+      `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
+       VALUES (?,?,?,?,?)`,
+      [bookingId, userId, amount, reason, upi_id]
+    );
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
