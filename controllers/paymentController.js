@@ -502,15 +502,22 @@ exports.getAllRefunds = async (req, res) => {
         u.name,
         u.phone,
         p.pg_name,
-
-        /* 🔥 NEW FIELDS */
         b.id AS booking_id,
-        b.order_id
+        pay.order_id
 
       FROM refunds r
       JOIN users u ON u.id = r.user_id
       JOIN bookings b ON b.id = r.booking_id
       JOIN pgs p ON p.id = b.pg_id
+
+      LEFT JOIN payments pay 
+      ON pay.booking_id = b.id
+      AND pay.created_at = (
+        SELECT MAX(created_at) 
+        FROM payments 
+        WHERE booking_id = b.id
+      )
+
       ORDER BY r.created_at DESC
     `);
 
