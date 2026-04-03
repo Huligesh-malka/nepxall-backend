@@ -561,22 +561,3 @@ exports.updateRefundStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
-
-
-exports.updateRefundStatus = async (req, res) => {
-  try {
-    const { refundId } = req.params;
-    const { status } = req.body;
-
-    await db.query(
-      "UPDATE refunds SET status=? WHERE id=?",
-      [status, refundId]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
