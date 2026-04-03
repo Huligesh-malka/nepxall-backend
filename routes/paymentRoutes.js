@@ -126,4 +126,31 @@ router.put(
   paymentController.rejectPayment
 );
 
+
+
+//////////////////////////////////////////////////////
+// REFUND ROUTES (USER + ADMIN)
+//////////////////////////////////////////////////////
+
+// ✅ USER REQUEST REFUND
+router.post(
+  "/refunds/request",
+  verifyFirebaseToken,
+  paymentController.requestRefund
+);
+
+// ✅ ADMIN GET ALL REFUNDS
+router.get(
+  "/admin/refunds",
+  verifyFirebaseToken,
+  paymentController.getAllRefunds
+);
+
+// ✅ ADMIN UPDATE REFUND STATUS
+router.put(
+  "/admin/refunds/:refundId",
+  verifyFirebaseToken,
+  paymentController.updateRefundStatus
+);
+
 module.exports = router;

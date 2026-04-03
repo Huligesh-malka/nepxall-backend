@@ -486,3 +486,49 @@ exports.getAdminPayments = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+exports.getAllRefunds = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        r.*,
+        u.name,
+        u.phone,
+        p.pg_name
+      FROM refunds r
+      JOIN users u ON u.id = r.user_id
+      JOIN bookings b ON b.id = r.booking_id
+      JOIN pgs p ON p.id = b.pg_id
+      ORDER BY r.created_at DESC
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+
+exports.updateRefundStatus = async (req, res) => {
+  try {
+    const { refundId } = req.params;
+    const { status } = req.body;
+
+    await db.query(
+      "UPDATE refunds SET status=? WHERE id=?",
+      [status, refundId]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
