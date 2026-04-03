@@ -415,9 +415,7 @@ exports.requestRefund = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    if (!booking.order_id) {
-      return res.status(400).json({ message: "Payment not completed" });
-    }
+    // ❌ REMOVED PAYMENT CHECK
 
     const amount =
       (booking.rent_amount || 0) +
