@@ -448,15 +448,13 @@ exports.getAdminPayments = async (req, res) => {
         p.screenshot,
         p.verified_by_admin,
 
-        /* USER DETAILS */
-        COALESCE(u.name, b.name, 'Guest User') AS tenant_name,
-        COALESCE(u.phone, b.phone, 'N/A') AS phone,
+        /* IMPORTANT FIX */
+        COALESCE(u.name, b.name, 'Guest User') AS reg_name,
+        COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
 
-        /* BOOKING DETAILS */
         b.room_type AS sharing,
         b.check_in_date,
 
-        /* PG DETAILS */
         pg.pg_name
 
       FROM payments p
