@@ -493,6 +493,7 @@ exports.getAdminPayments = async (req, res) => {
 
 
 
+// ================= GET ALL REFUNDS =================
 exports.getAllRefunds = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -500,7 +501,12 @@ exports.getAllRefunds = async (req, res) => {
         r.*,
         u.name,
         u.phone,
-        p.pg_name
+        p.pg_name,
+
+        /* 🔥 NEW FIELDS */
+        b.id AS booking_id,
+        b.order_id
+
       FROM refunds r
       JOIN users u ON u.id = r.user_id
       JOIN bookings b ON b.id = r.booking_id
@@ -509,7 +515,49 @@ exports.getAllRefunds = async (req, res) => {
     `);
 
     res.json(rows);
+
   } catch (err) {
+    console.error("❌ GET REFUNDS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+// ================= UPDATE REFUND STATUS =================
+exports.updateRefundStatus = async (req, res) => {
+  try {
+    const { refundId } = req.params;
+    const { status } = req.body;
+
+    // 🔥 VALID STATUS CHECK
+    const validStatuses = ["pending", "approved", "paid", "rejected"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    // 🔥 CHECK REFUND EXISTS
+    const [[refund]] = await db.query(
+      "SELECT * FROM refunds WHERE id=?",
+      [refundId]
+    );
+
+    if (!refund) {
+      return res.status(404).json({ message: "Refund not found" });
+    }
+
+    // 🔥 UPDATE STATUS
+    await db.query(
+      "UPDATE refunds SET status=? WHERE id=?",
+      [status, refundId]
+    );
+
+    res.json({
+      success: true,
+      message: `Refund ${status} successfully`
+    });
+
+  } catch (err) {
+    console.error("❌ UPDATE REFUND ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
