@@ -418,9 +418,9 @@ exports.requestRefund = async (req, res) => {
     // ❌ REMOVED PAYMENT CHECK
 
     const amount =
-      (booking.rent_amount || 0) +
-      (booking.security_deposit || 0) +
-      (booking.maintenance_amount || 0);
+  (Number(booking.rent_amount) || 0) +
+  (Number(booking.security_deposit) || 0) +
+  (Number(booking.maintenance_amount) || 0);
 
     await db.query(
       `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
