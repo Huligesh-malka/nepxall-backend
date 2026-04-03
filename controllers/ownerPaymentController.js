@@ -185,7 +185,6 @@ exports.getOwnerSettlementSummary = async (req, res) => {
 
 
 
-
 exports.getOwnerReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -195,12 +194,29 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         b.id AS receipt_no,
         b.order_id, 
         b.updated_at AS verified_date,
+        b.settlement_date,
+
+        /* TENANT */
         b.name AS tenant_name,
         b.phone AS tenant_phone,
+
+        /* PROPERTY */
         p.pg_name,
+        p.location,
         pr.room_no,
         b.room_type,
-        p.location,
+
+        /* OWNER */
+        u.id AS owner_id,
+        u.name AS owner_name,
+        u.phone AS owner_phone,
+
+        /* BANK DETAILS */
+        obd.account_holder_name,
+        obd.account_number,
+        obd.ifsc,
+        obd.bank_name,
+        obd.branch,
 
         /* AMOUNTS */
         b.rent_amount,
@@ -210,27 +226,56 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         /* TOTAL */
         (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
 
-        b.status
+        b.status,
+        b.owner_settlement
 
       FROM bookings b
+
+      /* PROPERTY */
       JOIN pgs p ON p.id = b.pg_id
+
+      /* ROOM */
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
+      /* OWNER */
+      LEFT JOIN users u ON u.id = b.owner_id
+
+      /* OWNER BANK */
+      LEFT JOIN owner_bank_details obd 
+        ON obd.owner_id = b.owner_id
+
       WHERE b.id = ? 
-      AND b.owner_settlement = 'DONE'   -- ✅ ONLY CONDITION
+      AND b.owner_settlement = 'DONE'
       `,
       [bookingId]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({
+        success: false,
         message: "Receipt not available (Not settled yet)"
       });
     }
 
-    res.json(rows[0]);
+    const data = rows[0];
+
+    /* 🔐 MASK ACCOUNT NUMBER */
+    if (data.account_number) {
+      const last4 = data.account_number.slice(-4);
+      data.account_number = "XXXX" + last4;
+    }
+
+    res.json({
+      success: true,
+      data
+    });
 
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("❌ OWNER RECEIPT ERROR:", err);
+
+    res.status(500).json({
+      success: false,
+      message: err.sqlMessage || err.message
+    });
   }
 };
