@@ -21,7 +21,11 @@ router.get("/settlements/summary", auth, ownerController.getOwnerSettlementSumma
 router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 
 
-router.get("/receipt/:bookingId", auth, ownerController.getOwnerReceiptDetails);
+// Change this line:
+// router.get("/receipt/:bookingId", auth, ownerController.getOwnerReceiptDetails);
+
+// To this:
+router.get("/receipt-details/:bookingId", auth, ownerController.getOwnerReceiptDetails);
 
 
 /**
