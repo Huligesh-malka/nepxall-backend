@@ -201,8 +201,8 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         b.phone AS tenant_phone,
 
         /* PROPERTY */
-        p.pg_name,
-        p.location,
+        pg.pg_name,
+        pg.location,
         pr.room_no,
         b.room_type,
 
@@ -231,8 +231,11 @@ exports.getOwnerReceiptDetails = async (req, res) => {
 
       FROM bookings b
 
+      /* ✅ PAYMENT JOIN (IMPORTANT) */
+      JOIN payments pay ON pay.booking_id = b.id
+
       /* PROPERTY */
-      JOIN pgs p ON p.id = b.pg_id
+      JOIN pgs pg ON pg.id = b.pg_id
 
       /* ROOM */
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
@@ -240,20 +243,21 @@ exports.getOwnerReceiptDetails = async (req, res) => {
       /* OWNER */
       LEFT JOIN users u ON u.id = b.owner_id
 
-      /* OWNER BANK */
+      /* BANK */
       LEFT JOIN owner_bank_details obd 
         ON obd.owner_id = b.owner_id
 
-      WHERE b.id = ? 
-      AND b.owner_settlement = 'DONE'
+      WHERE b.id = ?
+      AND pay.status = 'paid'
       `,
       [bookingId]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Receipt not available (Not settled yet)"
+    // ✅ If no data, return empty (NOT error)
+    if (!rows.length) {
+      return res.json({
+        success: true,
+        data: null
       });
     }
 
