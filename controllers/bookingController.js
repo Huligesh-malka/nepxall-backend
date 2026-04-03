@@ -371,7 +371,15 @@ exports.getReceiptDetails = async (req, res) => {
         pr.room_no,
         b.room_type,
         p.location,
-        (b.rent_amount + b.maintenance_amount) AS amount_paid,
+
+        /* SEND ALL AMOUNTS */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        /* TOTAL */
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+
         b.status
       FROM bookings b
       JOIN users u ON u.id = b.user_id
