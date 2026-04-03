@@ -206,7 +206,7 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         pr.room_no,
         b.room_type,
 
-        /* OWNER */
+        /* OWNER - Fetching via PG table to be safer */
         u.id AS owner_id,
         u.name AS owner_name,
         u.phone AS owner_phone,
@@ -219,41 +219,32 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         obd.branch,
 
         /* AMOUNTS */
-        b.rent_amount,
-        b.security_deposit,
-        b.maintenance_amount,
+        COALESCE(b.rent_amount, 0) as rent_amount,
+        COALESCE(b.security_deposit, 0) as security_deposit,
+        COALESCE(b.maintenance_amount, 0) as maintenance_amount,
 
         /* TOTAL */
-        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+        (COALESCE(b.rent_amount, 0) + COALESCE(b.security_deposit, 0) + COALESCE(b.maintenance_amount, 0)) AS total_amount,
 
         b.status,
         b.owner_settlement
 
       FROM bookings b
-
-      /* PROPERTY */
       JOIN pgs p ON p.id = b.pg_id
-
-      /* ROOM */
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-
-      /* OWNER */
-      LEFT JOIN users u ON u.id = b.owner_id
-
-      /* OWNER BANK */
-      LEFT JOIN owner_bank_details obd 
-        ON obd.owner_id = b.owner_id
+      /* Join owner via the PG table if b.owner_id is unreliable */
+      LEFT JOIN users u ON u.id = p.owner_id 
+      LEFT JOIN owner_bank_details obd ON obd.owner_id = u.id
 
       WHERE b.id = ? 
-      AND b.owner_settlement = 'DONE'
-      `,
+      AND b.owner_settlement = 'DONE'`,
       [bookingId]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Receipt not available (Not settled yet)"
+        message: "Receipt not available or settlement not marked as DONE"
       });
     }
 
@@ -261,8 +252,9 @@ exports.getOwnerReceiptDetails = async (req, res) => {
 
     /* 🔐 MASK ACCOUNT NUMBER */
     if (data.account_number) {
-      const last4 = data.account_number.slice(-4);
-      data.account_number = "XXXX" + last4;
+      // Ensure it's a string before slicing
+      const accStr = String(data.account_number);
+      data.account_number = "XXXX" + accStr.slice(-4);
     }
 
     res.json({
@@ -272,10 +264,9 @@ exports.getOwnerReceiptDetails = async (req, res) => {
 
   } catch (err) {
     console.error("❌ OWNER RECEIPT ERROR:", err);
-
     res.status(500).json({
       success: false,
-      message: err.sqlMessage || err.message
+      message: "Internal Server Error"
     });
   }
 };
