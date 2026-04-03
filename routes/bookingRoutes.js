@@ -3,7 +3,6 @@ const router = express.Router();
 
 const firebaseAuth = require("../middlewares/authMiddleware");
 const bookingController = require("../controllers/bookingController");
-const refundController = require("../controllers/refundController"); // 🔥 ADD THIS
 
 // ================= BOOKINGS =================
 
@@ -31,16 +30,10 @@ router.put("/owner/bookings/:bookingId", firebaseAuth, bookingController.updateB
 router.get("/owner/tenants", firebaseAuth, bookingController.getActiveTenantsByOwner);
 
 
-// ================= 🔥 REFUND =================
+// ================= 🔥 REFUND (ADD THIS ONLY) =================
 
 // ✅ USER REQUEST REFUND
-router.post("/refunds/request", firebaseAuth, refundController.requestRefund);
-
-// ✅ ADMIN VIEW REFUNDS
-router.get("/refunds", firebaseAuth, refundController.getAllRefunds);
-
-// ✅ ADMIN APPROVE / REJECT / PAID
-router.put("/refunds/:refundId", firebaseAuth, refundController.updateRefundStatus);
+router.post("/refunds/request", firebaseAuth, bookingController.requestRefund);
 
 
 module.exports = router;
