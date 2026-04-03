@@ -184,6 +184,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
 };
 
 
+
 exports.getOwnerReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -195,22 +196,22 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         b.updated_at AS verified_date,
         b.settlement_date,
 
-        /* TENANT DETAILS */
+        /* TENANT */
         b.name AS tenant_name,
         b.phone AS tenant_phone,
 
-        /* PROPERTY DETAILS */
+        /* PROPERTY */
         p.pg_name,
         p.location,
         pr.room_no,
         b.room_type,
 
-        /* OWNER DETAILS - Linked via bookings.owner_id */
+        /* OWNER */
         u.id AS owner_id,
         u.name AS owner_name,
         u.phone AS owner_phone,
 
-        /* BANK DETAILS - Linked via owner_id */
+        /* BANK DETAILS */
         obd.account_holder_name,
         obd.account_number,
         obd.ifsc,
@@ -218,40 +219,50 @@ exports.getOwnerReceiptDetails = async (req, res) => {
         obd.branch,
 
         /* AMOUNTS */
-        COALESCE(b.rent_amount, 0) AS rent_amount,
-        COALESCE(b.security_deposit, 0) AS security_deposit,
-        COALESCE(b.maintenance_amount, 0) AS maintenance_amount,
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
 
-        /* TOTAL CALCULATION */
-        (COALESCE(b.rent_amount, 0) + COALESCE(b.security_deposit, 0) + COALESCE(b.maintenance_amount, 0)) AS total_amount,
+        /* TOTAL */
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
 
         b.status,
         b.owner_settlement
 
       FROM bookings b
+
+      /* PROPERTY */
       JOIN pgs p ON p.id = b.pg_id
+
+      /* ROOM */
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+
+      /* OWNER */
       LEFT JOIN users u ON u.id = b.owner_id
-      LEFT JOIN owner_bank_details obd ON obd.owner_id = b.owner_id
+
+      /* OWNER BANK */
+      LEFT JOIN owner_bank_details obd 
+        ON obd.owner_id = b.owner_id
 
       WHERE b.id = ? 
-      AND b.owner_settlement = 'DONE'`,
+      AND b.owner_settlement = 'DONE'
+      `,
       [bookingId]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Receipt details not found or settlement is not marked as DONE."
+        message: "Receipt not available (Not settled yet)"
       });
     }
 
     const data = rows[0];
 
-    // Masking the Bank Account Number for security
+    /* 🔐 MASK ACCOUNT NUMBER */
     if (data.account_number) {
-      const accStr = String(data.account_number);
-      data.account_number = "XXXX" + accStr.slice(-4);
+      const last4 = data.account_number.slice(-4);
+      data.account_number = "XXXX" + last4;
     }
 
     res.json({
@@ -261,9 +272,10 @@ exports.getOwnerReceiptDetails = async (req, res) => {
 
   } catch (err) {
     console.error("❌ OWNER RECEIPT ERROR:", err);
+
     res.status(500).json({
       success: false,
-      message: "Database error: " + err.message
+      message: err.sqlMessage || err.message
     });
   }
 };
