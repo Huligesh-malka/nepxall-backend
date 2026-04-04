@@ -11,12 +11,20 @@ const {
 router.get("/bookings", firebaseAuth, getOwnerBookings);
 router.put("/bookings/:bookingId", firebaseAuth, updateBookingStatus);
 router.get("/tenants", firebaseAuth, getActiveTenantsByOwner);
+router.get(
+  "/vacate/requests",
+  firebaseAuth,
+  getVacateRequests
+);
 
 router.post(
   "/vacate/approve/:bookingId",
   firebaseAuth,
   approveVacateRequest
 );
+
+
+
 
 
 module.exports = router;

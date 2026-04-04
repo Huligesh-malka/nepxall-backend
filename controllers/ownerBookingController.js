@@ -252,3 +252,38 @@ exports.approveVacateRequest = async (req, res) => {
     connection.release();
   }
 };
+
+
+
+
+
+
+exports.getVacateRequests = async (req, res) => {
+  try {
+    const owner = await getOwner(req.user.firebase_uid);
+    if (!owner) return res.status(403).json({ message: "Not an owner" });
+
+    const [rows] = await db.query(
+      `SELECT 
+        b.id AS booking_id,
+        p.pg_name,
+        u.name AS user_name,
+        pu.move_out_date,
+        b.security_deposit
+      FROM pg_users pu
+      JOIN bookings b 
+        ON b.pg_id = pu.pg_id AND b.user_id = pu.user_id
+      JOIN users u ON u.id = pu.user_id
+      JOIN pgs p ON p.id = pu.pg_id
+      WHERE pu.owner_id=? 
+        AND pu.vacate_status='requested'`,
+      [owner.id]
+    );
+
+    res.json(rows);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+};
