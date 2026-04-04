@@ -261,29 +261,49 @@ exports.approveVacateRequest = async (req, res) => {
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
-    if (!owner) return res.status(403).json({ message: "Not an owner" });
+    if (!owner) {
+      return res.status(403).json({ message: "Not an owner" });
+    }
 
     const [rows] = await db.query(
-      `SELECT 
+      `
+      SELECT 
         b.id AS booking_id,
         p.pg_name,
         u.name AS user_name,
         pu.move_out_date,
-        b.security_deposit
+        b.security_deposit,
+
+        r.amount AS refund_amount,
+        r.status AS refund_status
+
       FROM pg_users pu
+
+      -- ✅ GET ONLY LATEST BOOKING PER USER + PG
       JOIN bookings b 
-        ON b.pg_id = pu.pg_id AND b.user_id = pu.user_id
+        ON b.id = (
+          SELECT MAX(id)
+          FROM bookings 
+          WHERE user_id = pu.user_id 
+          AND pg_id = pu.pg_id
+        )
+
       JOIN users u ON u.id = pu.user_id
       JOIN pgs p ON p.id = pu.pg_id
-      WHERE pu.owner_id=? 
-        AND pu.vacate_status='requested'`,
+
+      -- ✅ GET REFUND DATA
+      LEFT JOIN refunds r ON r.booking_id = b.id
+
+      WHERE pu.owner_id = ?
+      AND pu.vacate_status = 'requested'
+      `,
       [owner.id]
     );
 
     res.json(rows);
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ GET VACATE REQUESTS:", err);
     res.status(500).json({ message: err.message });
   }
 };
