@@ -284,6 +284,7 @@ exports.getVacateRequests = async (req, res) => {
 
         r.amount AS refund_amount,
         r.status AS refund_status,
+        r.user_approval,
         r.created_at
 
       FROM refunds r
