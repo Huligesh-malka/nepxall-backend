@@ -319,6 +319,46 @@ exports.getVacateRequests = async (req, res) => {
 
 
 
+exports.rejectVacateRequest = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const owner = await getOwner(req.user.firebase_uid);
+    if (!owner) return res.status(403).json({ message: "Not owner" });
+
+    const [[refund]] = await db.query(
+      `SELECT r.*, b.owner_id 
+       FROM refunds r
+       JOIN bookings b ON b.id = r.booking_id
+       WHERE r.booking_id=?`,
+      [bookingId]
+    );
+
+    if (!refund) {
+      return res.status(404).json({ message: "Refund not found" });
+    }
+
+    if (refund.owner_id !== owner.id) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    await db.query(
+      `UPDATE refunds 
+       SET status='rejected'
+       WHERE booking_id=?`,
+      [bookingId]
+    );
+
+    res.json({ success: true, message: "Refund rejected by owner" });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+
 
 
 /* ======================================================
