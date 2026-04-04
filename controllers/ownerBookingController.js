@@ -264,7 +264,6 @@ exports.approveVacateRequest = async (req, res) => {
 };
 
 
-
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -278,25 +277,27 @@ exports.getVacateRequests = async (req, res) => {
         b.id AS booking_id,
         p.pg_name,
         u.name AS user_name,
-        pu.move_out_date,
+
+        pu.move_out_date, -- optional (may be null)
+
         b.security_deposit,
 
         r.amount AS refund_amount,
-        r.status AS refund_status
+        r.status AS refund_status,
+        r.created_at
 
       FROM refunds r
 
-      -- ✅ ONLY VACATE REQUESTS
+      -- ✅ MAIN SOURCE
       JOIN bookings b ON b.id = r.booking_id
-
-      -- ✅ ONLY CURRENT LEAVING USER (IMPORTANT FIX)
-      JOIN pg_users pu 
-        ON pu.user_id = b.user_id 
-        AND pu.pg_id = b.pg_id
-        AND pu.status = 'LEAVING'
 
       JOIN users u ON u.id = b.user_id
       JOIN pgs p ON p.id = b.pg_id
+
+      -- ❗ OPTIONAL JOIN (DON'T FILTER BY STATUS)
+      LEFT JOIN pg_users pu 
+        ON pu.user_id = b.user_id 
+        AND pu.pg_id = b.pg_id
 
       WHERE b.owner_id = ?
       AND r.refund_type = 'DEPOSIT'
