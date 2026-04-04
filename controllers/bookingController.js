@@ -314,6 +314,10 @@ exports.getUserActiveStay = async (req, res) => {
       SELECT 
         b.id,
 
+        /* ✅ VACATE DATA (FIX ADDED) */
+        pu.vacate_status,
+        pu.move_out_date AS vacate_date,
+
         /* PAYMENT */
         MAX(p.order_id) AS order_id,
         MAX(p.submitted_at) AS paid_date,
@@ -330,7 +334,7 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* 🔥 FIXED REFUND DATA */
+        /* REFUND DATA */
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
@@ -339,13 +343,19 @@ exports.getUserActiveStay = async (req, res) => {
 
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
+
+      /* ✅ JOIN PG USERS (VERY IMPORTANT) */
+      LEFT JOIN pg_users pu 
+        ON pu.user_id = b.user_id 
+        AND pu.pg_id = b.pg_id
+
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
       /* PAYMENT JOIN */
       LEFT JOIN payments p 
         ON p.booking_id = b.id 
 
-      /* 🔥 REFUND JOIN (LATEST ONLY) */
+      /* REFUND JOIN (LATEST ONLY) */
       LEFT JOIN refunds r 
         ON r.booking_id = b.id
         AND r.created_at = (
@@ -360,6 +370,8 @@ exports.getUserActiveStay = async (req, res) => {
 
       GROUP BY 
         b.id,
+        pu.vacate_status,
+        pu.move_out_date,
         pg.pg_name,
         pr.room_no,
         b.room_type,
