@@ -330,8 +330,10 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* 🔥 ADD THIS (IMPORTANT) */
+        /* 🔥 FIXED REFUND DATA */
         r.status AS refund_status,
+        r.user_approval,
+        r.amount AS refund_amount,
 
         'ACTIVE' AS status
 
@@ -365,11 +367,12 @@ exports.getUserActiveStay = async (req, res) => {
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
-        r.status
+        r.status,
+        r.user_approval,
+        r.amount
 
       ORDER BY b.updated_at DESC
-      `
-      ,
+      `,
       [userId]
     );
 
