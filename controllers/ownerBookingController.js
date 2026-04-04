@@ -184,3 +184,71 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+
+
+exports.approveVacateRequest = async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { bookingId } = req.params;
+    const { damage_amount = 0, pending_dues = 0 } = req.body;
+
+    // ✅ Get owner
+    const owner = await getOwner(req.user.firebase_uid);
+    if (!owner) throw new Error("Not an owner");
+
+    // ✅ Get booking
+    const [[booking]] = await connection.query(
+      "SELECT * FROM bookings WHERE id=? AND owner_id=?",
+      [bookingId, owner.id]
+    );
+
+    if (!booking) throw new Error("Booking not found");
+
+    // ✅ Get deposit
+    const deposit = Number(booking.security_deposit) || 0;
+
+    // ✅ Calculate refund
+    let refundAmount = deposit - damage_amount - pending_dues;
+    if (refundAmount < 0) refundAmount = 0;
+
+    // ✅ Update refund table
+    await connection.query(
+      `UPDATE refunds 
+       SET 
+         amount=?, 
+         status='approved',
+         damage_amount=?,
+         reason = CONCAT(reason, ' | Damage: ₹', ?, ' | Dues: ₹', ?)
+       WHERE booking_id=?`,
+      [refundAmount, damage_amount, damage_amount, pending_dues, bookingId]
+    );
+
+    // ✅ Update pg_users → mark LEFT
+    await connection.query(
+      `UPDATE pg_users 
+       SET status='LEFT', vacate_status='completed'
+       WHERE user_id=? AND pg_id=?`,
+      [booking.user_id, booking.pg_id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Vacate approved & refund calculated",
+      refundAmount
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("❌ VACATE APPROVE ERROR:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    connection.release();
+  }
+};
