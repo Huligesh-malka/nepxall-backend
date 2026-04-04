@@ -229,32 +229,6 @@ exports.approveRefund = async (req, res) => {
 
 
 
-exports.rejectRefund = async (req, res) => {
-  try {
-    const { bookingId, reason } = req.body;
-
-    const owner = await getOwner(req.user.firebase_uid);
-    if (!owner) return res.status(403).json({ message: "Not owner" });
-
-    await db.query(
-      `UPDATE refunds 
-       SET status='rejected', reason=? 
-       WHERE booking_id=?`,
-      [reason || "Rejected by owner", bookingId]
-    );
-
-    res.json({
-      success: true,
-      message: "Refund rejected"
-    });
-
-  } catch (err) {
-    console.error("❌ OWNER REJECT REFUND:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
-
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
