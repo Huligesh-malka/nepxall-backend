@@ -279,25 +279,26 @@ exports.getVacateRequests = async (req, res) => {
         p.pg_name,
         u.name AS user_name,
 
-        pu.move_out_date, -- optional (may be null)
+        pu.move_out_date,
 
         b.security_deposit,
 
         r.amount AS refund_amount,
         r.status AS refund_status,
         r.user_approval,
-       
+
+        r.reason,
+        r.upi_id,
+        r.account_number,
+        r.ifsc_code,
+        r.damage_amount,
+
         r.created_at
 
       FROM refunds r
-
-      -- ✅ MAIN SOURCE
       JOIN bookings b ON b.id = r.booking_id
-
       JOIN users u ON u.id = b.user_id
       JOIN pgs p ON p.id = b.pg_id
-
-      -- ❗ OPTIONAL JOIN (DON'T FILTER BY STATUS)
       LEFT JOIN pg_users pu 
         ON pu.user_id = b.user_id 
         AND pu.pg_id = b.pg_id
@@ -317,7 +318,6 @@ exports.getVacateRequests = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 
 exports.rejectVacateRequest = async (req, res) => {
