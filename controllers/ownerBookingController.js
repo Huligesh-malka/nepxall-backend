@@ -230,6 +230,7 @@ exports.approveVacateRequest = async (req, res) => {
        SET 
          amount=?, 
          status='approved',
+         user_approval='pending',
          damage_amount=?,
          reason = CONCAT(reason, ' | Damage: ₹', ?, ' | Dues: ₹', ?)
        WHERE booking_id=?`,
