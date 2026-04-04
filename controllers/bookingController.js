@@ -514,14 +514,14 @@ exports.requestVacate = async (req, res) => {
 
     const userId = req.user.id;
 
-    // ✅ 1. VALIDATION
+    // ✅ VALIDATION
     if (!bookingId || !vacate_date || !reason) {
       return res.status(400).json({
         message: "Booking ID, vacate date and reason are required"
       });
     }
 
-    // ✅ 2. CHECK BOOKING
+    // ✅ CHECK BOOKING
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -531,17 +531,20 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // ❌ 3. PREVENT DUPLICATE VACATE
+    // ✅ 🚀 IMPORTANT: CHECK ONLY THIS BOOKING
     const [[existing]] = await db.query(
-      "SELECT * FROM pg_users WHERE user_id=? AND pg_id=? AND vacate_status IS NOT NULL",
-      [userId, booking.pg_id]
+      `SELECT * FROM refunds 
+       WHERE booking_id=? AND refund_type='DEPOSIT'`,
+      [bookingId]
     );
 
     if (existing) {
-      return res.status(400).json({ message: "Vacate already requested" });
+      return res.status(400).json({
+        message: "Vacate already requested for this booking"
+      });
     }
 
-    // ✅ 4. UPDATE USER STATUS → LEAVING
+    // ✅ UPDATE ONLY ACTIVE STAY
     await db.query(
       `UPDATE pg_users 
        SET 
@@ -550,11 +553,13 @@ exports.requestVacate = async (req, res) => {
          vacate_reason=?,
          vacate_request_date=NOW(),
          move_out_date=? 
-       WHERE user_id=? AND pg_id=?`,
+       WHERE user_id=? 
+       AND pg_id=? 
+       AND status='ACTIVE'`,
       [reason, vacate_date, userId, booking.pg_id]
     );
 
-    // ✅ 5. CREATE REFUND ENTRY (AMOUNT = 0 NOW)
+    // ✅ CREATE REFUND ENTRY
     await db.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
@@ -570,14 +575,13 @@ exports.requestVacate = async (req, res) => {
       ]
     );
 
-    // ✅ SUCCESS RESPONSE
     res.json({
       success: true,
       message: "Vacate request submitted successfully"
     });
 
   } catch (err) {
-    console.error("VACATE ERROR:", err);
+    console.error("❌ VACATE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

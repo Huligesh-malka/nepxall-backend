@@ -197,11 +197,11 @@ exports.approveVacateRequest = async (req, res) => {
     const { bookingId } = req.params;
     const { damage_amount = 0, pending_dues = 0 } = req.body;
 
-    // ✅ Get owner
+    // ✅ OWNER CHECK
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
-    // ✅ Get booking
+    // ✅ BOOKING CHECK
     const [[booking]] = await connection.query(
       "SELECT * FROM bookings WHERE id=? AND owner_id=?",
       [bookingId, owner.id]
@@ -209,14 +209,22 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!booking) throw new Error("Booking not found");
 
-    // ✅ Get deposit
-    const deposit = Number(booking.security_deposit) || 0;
+    // ✅ GET REFUND ENTRY (IMPORTANT)
+    const [[refund]] = await connection.query(
+      "SELECT * FROM refunds WHERE booking_id=? AND refund_type='DEPOSIT'",
+      [bookingId]
+    );
 
-    // ✅ Calculate refund
+    if (!refund) {
+      throw new Error("Vacate request not found");
+    }
+
+    // ✅ CALCULATE REFUND
+    const deposit = Number(booking.security_deposit) || 0;
     let refundAmount = deposit - damage_amount - pending_dues;
     if (refundAmount < 0) refundAmount = 0;
 
-    // ✅ Update refund table
+    // ✅ UPDATE REFUND
     await connection.query(
       `UPDATE refunds 
        SET 
@@ -228,11 +236,13 @@ exports.approveVacateRequest = async (req, res) => {
       [refundAmount, damage_amount, damage_amount, pending_dues, bookingId]
     );
 
-    // ✅ Update pg_users → mark LEFT
+    // ✅ UPDATE ONLY CURRENT LEAVING USER
     await connection.query(
       `UPDATE pg_users 
        SET status='LEFT', vacate_status='completed'
-       WHERE user_id=? AND pg_id=?`,
+       WHERE user_id=? 
+       AND pg_id=? 
+       AND status='LEAVING'`,
       [booking.user_id, booking.pg_id]
     );
 
@@ -252,8 +262,6 @@ exports.approveVacateRequest = async (req, res) => {
     connection.release();
   }
 };
-
-
 
 
 
@@ -280,21 +288,20 @@ exports.getVacateRequests = async (req, res) => {
 
       -- ✅ ONLY VACATE REQUESTS
       JOIN bookings b ON b.id = r.booking_id
+
+      -- ✅ ONLY CURRENT LEAVING USER (IMPORTANT FIX)
       JOIN pg_users pu 
-        ON pu.user_id = b.user_id AND pu.pg_id = b.pg_id
+        ON pu.user_id = b.user_id 
+        AND pu.pg_id = b.pg_id
+        AND pu.status = 'LEAVING'
+
       JOIN users u ON u.id = b.user_id
       JOIN pgs p ON p.id = b.pg_id
 
       WHERE b.owner_id = ?
       AND r.refund_type = 'DEPOSIT'
 
-      -- ✅ ONLY LATEST BOOKING PER USER+PG
-      AND b.id = (
-        SELECT MAX(b2.id)
-        FROM bookings b2
-        WHERE b2.user_id = b.user_id
-        AND b2.pg_id = b.pg_id
-      )
+      ORDER BY r.created_at DESC
       `,
       [owner.id]
     );
