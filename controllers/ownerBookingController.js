@@ -257,7 +257,6 @@ exports.approveVacateRequest = async (req, res) => {
 
 
 
-
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -277,26 +276,25 @@ exports.getVacateRequests = async (req, res) => {
         r.amount AS refund_amount,
         r.status AS refund_status
 
-      FROM pg_users pu
+      FROM refunds r
 
-      -- ✅ GET ONLY LATEST PAID BOOKING
-      JOIN bookings b 
-        ON b.id = (
-          SELECT MAX(id)
-          FROM bookings 
-          WHERE user_id = pu.user_id 
-          AND pg_id = pu.pg_id
-          AND payment_status = 'paid'
-        )
+      -- ✅ ONLY VACATE REQUESTS
+      JOIN bookings b ON b.id = r.booking_id
+      JOIN pg_users pu 
+        ON pu.user_id = b.user_id AND pu.pg_id = b.pg_id
+      JOIN users u ON u.id = b.user_id
+      JOIN pgs p ON p.id = b.pg_id
 
-      JOIN users u ON u.id = pu.user_id
-      JOIN pgs p ON p.id = pu.pg_id
+      WHERE b.owner_id = ?
+      AND r.refund_type = 'DEPOSIT'
 
-      -- ✅ REFUND DATA
-      LEFT JOIN refunds r ON r.booking_id = b.id
-
-      WHERE pu.owner_id = ?
-      AND pu.vacate_status = 'requested'
+      -- ✅ ONLY LATEST BOOKING PER USER+PG
+      AND b.id = (
+        SELECT MAX(b2.id)
+        FROM bookings b2
+        WHERE b2.user_id = b.user_id
+        AND b2.pg_id = b.pg_id
+      )
       `,
       [owner.id]
     );
