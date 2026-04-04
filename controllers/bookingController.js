@@ -324,17 +324,13 @@ exports.getUserActiveStay = async (req, res) => {
         b.room_type,
         b.check_in_date AS join_date,
 
-        /* ✅ VACATE DATA (FIXED) */
-        pu.vacate_status,
-        pu.move_out_date AS vacate_date,
-
         /* AMOUNTS */
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* REFUND */
+        /* 🔥 FIXED REFUND DATA */
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
@@ -342,20 +338,14 @@ exports.getUserActiveStay = async (req, res) => {
         'ACTIVE' AS status
 
       FROM bookings b
-
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-
-      /* ✅ ADD THIS JOIN (VERY IMPORTANT) */
-      LEFT JOIN pg_users pu 
-        ON pu.user_id = b.user_id 
-        AND pu.pg_id = b.pg_id
 
       /* PAYMENT JOIN */
       LEFT JOIN payments p 
         ON p.booking_id = b.id 
 
-      /* REFUND JOIN (LATEST ONLY) */
+      /* 🔥 REFUND JOIN (LATEST ONLY) */
       LEFT JOIN refunds r 
         ON r.booking_id = b.id
         AND r.created_at = (
@@ -374,8 +364,6 @@ exports.getUserActiveStay = async (req, res) => {
         pr.room_no,
         b.room_type,
         b.check_in_date,
-        pu.vacate_status,
-        pu.move_out_date,
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
