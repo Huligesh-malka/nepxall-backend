@@ -28,4 +28,10 @@ router.post(
   approveVacateRequest
 );
 
+
+router.post(
+  "/owner/refund/mark-paid/:bookingId",
+  auth,
+  ownerController.markRefundPaid
+);
 module.exports = router;

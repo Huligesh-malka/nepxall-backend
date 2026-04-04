@@ -598,7 +598,6 @@ exports.acceptRefund = async (req, res) => {
     const { bookingId } = req.body;
     const userId = req.user.id;
 
-    // ✅ CHECK REFUND EXISTS
     const [[refund]] = await db.query(
       "SELECT * FROM refunds WHERE booking_id=? AND user_id=?",
       [bookingId, userId]
@@ -608,24 +607,23 @@ exports.acceptRefund = async (req, res) => {
       return res.status(404).json({ message: "Refund not found" });
     }
 
-    // ❌ ONLY ALLOW IF OWNER APPROVED
     if (refund.status !== "approved") {
       return res.status(400).json({
         message: "Refund not approved by owner yet"
       });
     }
 
-    // ✅ UPDATE STATUS → FINAL PAID
+    // ✅ CHANGE HERE
     await db.query(
       `UPDATE refunds 
-       SET status='paid', user_approval='accepted'
+       SET user_approval='accepted', status='pending'
        WHERE booking_id=? AND user_id=?`,
       [bookingId, userId]
     );
 
     res.json({
       success: true,
-      message: "Refund accepted & marked as paid"
+      message: "Refund accepted. Waiting for owner payment"
     });
 
   } catch (err) {
