@@ -514,7 +514,14 @@ exports.requestVacate = async (req, res) => {
 
     const userId = req.user.id;
 
-    // ✅ Check booking
+    // ✅ 1. VALIDATION
+    if (!bookingId || !vacate_date || !reason) {
+      return res.status(400).json({
+        message: "Booking ID, vacate date and reason are required"
+      });
+    }
+
+    // ✅ 2. CHECK BOOKING
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -524,7 +531,7 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // ❌ Already requested check
+    // ❌ 3. PREVENT DUPLICATE VACATE
     const [[existing]] = await db.query(
       "SELECT * FROM pg_users WHERE user_id=? AND pg_id=? AND vacate_status IS NOT NULL",
       [userId, booking.pg_id]
@@ -534,18 +541,20 @@ exports.requestVacate = async (req, res) => {
       return res.status(400).json({ message: "Vacate already requested" });
     }
 
-    // ✅ Save vacate request
+    // ✅ 4. UPDATE USER STATUS → LEAVING
     await db.query(
       `UPDATE pg_users 
-       SET vacate_status='requested',
-           vacate_reason=?,
-           vacate_request_date=NOW(),
-           move_out_date=? 
+       SET 
+         status='LEAVING',
+         vacate_status='requested',
+         vacate_reason=?,
+         vacate_request_date=NOW(),
+         move_out_date=? 
        WHERE user_id=? AND pg_id=?`,
       [reason, vacate_date, userId, booking.pg_id]
     );
 
-    // ✅ Save bank details in refunds table (TEMP - amount later)
+    // ✅ 5. CREATE REFUND ENTRY (AMOUNT = 0 NOW)
     await db.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
@@ -553,7 +562,7 @@ exports.requestVacate = async (req, res) => {
       [
         bookingId,
         userId,
-        0, // amount calculated later by owner
+        0,
         "Vacate deposit refund",
         upi_id || null,
         account_number || null,
@@ -561,10 +570,14 @@ exports.requestVacate = async (req, res) => {
       ]
     );
 
-    res.json({ success: true, message: "Vacate request submitted" });
+    // ✅ SUCCESS RESPONSE
+    res.json({
+      success: true,
+      message: "Vacate request submitted successfully"
+    });
 
   } catch (err) {
+    console.error("VACATE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
