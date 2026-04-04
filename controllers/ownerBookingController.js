@@ -279,19 +279,20 @@ exports.getVacateRequests = async (req, res) => {
 
       FROM pg_users pu
 
-      -- ✅ GET ONLY LATEST BOOKING PER USER + PG
+      -- ✅ GET ONLY LATEST PAID BOOKING
       JOIN bookings b 
         ON b.id = (
           SELECT MAX(id)
           FROM bookings 
           WHERE user_id = pu.user_id 
           AND pg_id = pu.pg_id
+          AND payment_status = 'paid'
         )
 
       JOIN users u ON u.id = pu.user_id
       JOIN pgs p ON p.id = pu.pg_id
 
-      -- ✅ GET REFUND DATA
+      -- ✅ REFUND DATA
       LEFT JOIN refunds r ON r.booking_id = b.id
 
       WHERE pu.owner_id = ?
@@ -303,7 +304,7 @@ exports.getVacateRequests = async (req, res) => {
     res.json(rows);
 
   } catch (err) {
-    console.error("❌ GET VACATE REQUESTS:", err);
+    console.error("❌ VACATE FETCH ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
