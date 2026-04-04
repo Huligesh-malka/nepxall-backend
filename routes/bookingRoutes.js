@@ -34,6 +34,10 @@ router.get("/owner/tenants", firebaseAuth, bookingController.getActiveTenantsByO
 
 // ✅ USER REQUEST REFUND
 router.post("/refunds/request", firebaseAuth, bookingController.requestRefund);
+// ================= 🔥 VACATE (ADD THIS) =================
+
+// ✅ USER REQUEST VACATE
+router.post("/vacate/request", firebaseAuth, bookingController.requestVacate);
 
 
 module.exports = router;

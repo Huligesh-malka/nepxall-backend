@@ -498,3 +498,73 @@ exports.requestRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+exports.requestVacate = async (req, res) => {
+  try {
+    const {
+      bookingId,
+      vacate_date,
+      reason,
+      account_number,
+      ifsc_code,
+      upi_id
+    } = req.body;
+
+    const userId = req.user.id;
+
+    // ✅ Check booking
+    const [[booking]] = await db.query(
+      "SELECT * FROM bookings WHERE id=? AND user_id=?",
+      [bookingId, userId]
+    );
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // ❌ Already requested check
+    const [[existing]] = await db.query(
+      "SELECT * FROM pg_users WHERE user_id=? AND pg_id=? AND vacate_status IS NOT NULL",
+      [userId, booking.pg_id]
+    );
+
+    if (existing) {
+      return res.status(400).json({ message: "Vacate already requested" });
+    }
+
+    // ✅ Save vacate request
+    await db.query(
+      `UPDATE pg_users 
+       SET vacate_status='requested',
+           vacate_reason=?,
+           vacate_request_date=NOW(),
+           move_out_date=? 
+       WHERE user_id=? AND pg_id=?`,
+      [reason, vacate_date, userId, booking.pg_id]
+    );
+
+    // ✅ Save bank details in refunds table (TEMP - amount later)
+    await db.query(
+      `INSERT INTO refunds 
+      (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
+      VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending')`,
+      [
+        bookingId,
+        userId,
+        0, // amount calculated later by owner
+        "Vacate deposit refund",
+        upi_id || null,
+        account_number || null,
+        ifsc_code || null
+      ]
+    );
+
+    res.json({ success: true, message: "Vacate request submitted" });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
