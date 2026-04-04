@@ -29,15 +29,20 @@ router.put("/owner/bookings/:bookingId", firebaseAuth, bookingController.updateB
 // ✅ OWNER TENANTS
 router.get("/owner/tenants", firebaseAuth, bookingController.getActiveTenantsByOwner);
 
-
-// ================= 🔥 REFUND (ADD THIS ONLY) =================
+// ================= 🔥 REFUND =================
 
 // ✅ USER REQUEST REFUND
 router.post("/refunds/request", firebaseAuth, bookingController.requestRefund);
-// ================= 🔥 VACATE (ADD THIS) =================
+
+// ✅ USER ACCEPT REFUND  🔥 NEW
+router.post("/refunds/accept", firebaseAuth, bookingController.acceptRefund);
+
+// ✅ USER REJECT REFUND  🔥 NEW
+router.post("/refunds/reject", firebaseAuth, bookingController.rejectRefund);
+
+// ================= 🔥 VACATE =================
 
 // ✅ USER REQUEST VACATE
 router.post("/vacate/request", firebaseAuth, bookingController.requestVacate);
-
 
 module.exports = router;

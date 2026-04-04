@@ -585,3 +585,93 @@ exports.requestVacate = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+
+exports.acceptRefund = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    const userId = req.user.id;
+
+    // ✅ CHECK REFUND EXISTS
+    const [[refund]] = await db.query(
+      "SELECT * FROM refunds WHERE booking_id=? AND user_id=?",
+      [bookingId, userId]
+    );
+
+    if (!refund) {
+      return res.status(404).json({ message: "Refund not found" });
+    }
+
+    // ❌ ONLY ALLOW IF OWNER APPROVED
+    if (refund.status !== "approved") {
+      return res.status(400).json({
+        message: "Refund not approved by owner yet"
+      });
+    }
+
+    // ✅ UPDATE STATUS → FINAL PAID
+    await db.query(
+      `UPDATE refunds 
+       SET status='paid', user_approval='accepted'
+       WHERE booking_id=? AND user_id=?`,
+      [bookingId, userId]
+    );
+
+    res.json({
+      success: true,
+      message: "Refund accepted & marked as paid"
+    });
+
+  } catch (err) {
+    console.error("❌ ACCEPT REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+
+
+exports.rejectRefund = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    const userId = req.user.id;
+
+    // ✅ CHECK REFUND
+    const [[refund]] = await db.query(
+      "SELECT * FROM refunds WHERE booking_id=? AND user_id=?",
+      [bookingId, userId]
+    );
+
+    if (!refund) {
+      return res.status(404).json({ message: "Refund not found" });
+    }
+
+    // ❌ ONLY IF APPROVED
+    if (refund.status !== "approved") {
+      return res.status(400).json({
+        message: "Refund not approved yet"
+      });
+    }
+
+    // ✅ UPDATE → REJECTED
+    await db.query(
+      `UPDATE refunds 
+       SET user_approval='rejected', status='pending'
+       WHERE booking_id=? AND user_id=?`,
+      [bookingId, userId]
+    );
+
+    res.json({
+      success: true,
+      message: "Refund rejected. Owner will review again"
+    });
+
+  } catch (err) {
+    console.error("❌ REJECT REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
