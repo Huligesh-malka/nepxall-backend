@@ -4,7 +4,7 @@ let io;
 
 /* =========================================================
    ONLINE USERS MAP
-   firebase_uid-> Set(socketIds)
+   firebase_uid -> Set(socketIds)
 ========================================================= */
 const onlineUsers = new Map();
 
@@ -45,16 +45,31 @@ const initSocket = (server) => {
 
       if (!firebase_uid) return;
 
+      console.log("📝 User registered:", firebase_uid);
+
       if (!onlineUsers.has(firebase_uid)) {
         onlineUsers.set(firebase_uid, new Set());
       }
 
       onlineUsers.get(firebase_uid).add(socket.id);
-
       socket.firebase_uid = firebase_uid;
 
+      // Broadcast to all connected clients that this user is online
       io.emit("user_online", firebase_uid);
+      
+      console.log("👤 User online:", firebase_uid);
+      console.log("📊 Current online users:", Array.from(onlineUsers.keys()));
 
+    });
+
+    /* =====================================================
+       GET ONLINE STATUS (for initial load)
+    ===================================================== */
+    socket.on("get_online_status", (firebase_uid) => {
+      if (!firebase_uid) return;
+      
+      const isOnline = onlineUsers.has(firebase_uid) && onlineUsers.get(firebase_uid).size > 0;
+      socket.emit("user_online_status", { firebase_uid, isOnline });
     });
 
     /* =====================================================
@@ -67,7 +82,6 @@ const initSocket = (server) => {
       if (!room) return;
 
       socket.join(room);
-
       console.log("📥 Joined room:", room);
 
     });
@@ -82,6 +96,7 @@ const initSocket = (server) => {
       if (!room) return;
 
       socket.leave(room);
+      console.log("📤 Left room:", room);
 
     });
 
@@ -229,20 +244,19 @@ const initSocket = (server) => {
       if (uid && onlineUsers.has(uid)) {
 
         const sockets = onlineUsers.get(uid);
-
         sockets.delete(socket.id);
 
         if (sockets.size === 0) {
-
           onlineUsers.delete(uid);
-
+          // Broadcast to all connected clients that this user is offline
           io.emit("user_offline", uid);
-
+          console.log("👤 User offline:", uid);
         }
 
       }
 
       console.log("🔴 Disconnected:", socket.id);
+      console.log("📊 Current online users:", Array.from(onlineUsers.keys()));
 
     });
 
