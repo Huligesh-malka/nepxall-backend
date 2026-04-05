@@ -51,7 +51,7 @@ const initSocket = (server) => {
 
       onlineUsers.get(firebase_uid).add(socket.id);
 
-      socket.firebase_uid= firebase_uid;
+      socket.firebase_uid = firebase_uid;
 
       io.emit("user_online", firebase_uid);
 
@@ -120,6 +120,40 @@ const initSocket = (server) => {
       } catch (err) {
 
         console.error("❌ Message error:", err);
+
+      }
+
+    });
+
+    /* =====================================================
+       EDIT PRIVATE MESSAGE
+    ===================================================== */
+    socket.on("edit_private_message", (data) => {
+
+      try {
+
+        const { sender_id, receiver_id, pg_id, messageId, newMessage } = data;
+
+        if (!sender_id || !receiver_id || !pg_id || !messageId) return;
+
+        const room = getPrivateRoom(sender_id, receiver_id, pg_id);
+
+        if (!room) return;
+
+        // Emit to both users in the room
+        io.to(room).emit("message_edited", {
+          messageId,
+          newMessage
+        });
+
+        emitChatListUpdate(data.sender_firebase_uid);
+        emitChatListUpdate(data.receiver_firebase_uid);
+
+        console.log("✏️ Message edited:", messageId);
+
+      } catch (err) {
+
+        console.error("❌ Edit error:", err);
 
       }
 
