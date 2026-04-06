@@ -26,14 +26,17 @@ exports.getPendingSettlements = async (req, res) => {
         obd.bank_name,
         obd.branch,
 
-        /* 🔥 ADD PAYMENT INFO */
+        /* ✅ PAYMENT DETAILS */
+        pay.id AS payment_id,
         pay.order_id,
+        pay.amount AS payment_amount,
         pay.created_at AS payment_date,
-        pay.status AS payment_status
+        pay.status AS payment_status,
+        pay.utr
 
       FROM bookings b
 
-      /* 🔥 JOIN PAYMENTS (IMPORTANT) */
+      /* 🔥 JOIN ALL PAID PAYMENTS */
       INNER JOIN payments pay 
         ON pay.booking_id = b.id
         AND pay.status = 'paid'
