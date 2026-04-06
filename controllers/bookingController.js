@@ -13,34 +13,63 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // 🔐 PREVENT DOUBLE CLICK (CHECK FIRST)
+    //////////////////////////////////////////////////////
+    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS (24 HOURS)
+    //////////////////////////////////////////////////////
+    await db.query(`
+      UPDATE bookings
+      SET status = 'expired'
+      WHERE status = 'pending'
+      AND created_at < NOW() - INTERVAL 24 HOUR
+    `);
+
+    //////////////////////////////////////////////////////
+    // 🔐 STEP 2: PREVENT MULTIPLE BOOKINGS (STRONG CHECK)
+    //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
-      `SELECT id FROM bookings 
-       WHERE user_id=? AND pg_id=? AND check_in_date=? LIMIT 1`,
-      [userId, pgId, check_in_date]
+      `
+      SELECT id FROM bookings 
+      WHERE user_id = ?
+      AND pg_id = ?
+      AND status IN ('pending','approved','confirmed')
+      AND created_at >= NOW() - INTERVAL 24 HOUR
+      LIMIT 1
+      `,
+      [userId, pgId]
     );
 
     if (existing) {
       return res.status(400).json({
-        message: "Your booking is already submitted"
+        message: "You already requested this PG. Try again after 24 hours or wait for owner response."
       });
     }
 
-    // 👤 USER - Fetch user details
+    //////////////////////////////////////////////////////
+    // 👤 STEP 3: USER DETAILS
+    //////////////////////////////////////////////////////
     const [[user]] = await db.query(
       "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
     );
 
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    // 🏠 PG
-    const [[pg]] = await db.query("SELECT * FROM pgs WHERE id=?", [pgId]);
-
-    if (!pg) return res.status(404).json({ message: "PG not found" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     //////////////////////////////////////////////////////
-    // 💰 RENT CALCULATION
+    // 🏠 STEP 4: PG DETAILS
+    //////////////////////////////////////////////////////
+    const [[pg]] = await db.query(
+      "SELECT * FROM pgs WHERE id=?",
+      [pgId]
+    );
+
+    if (!pg) {
+      return res.status(404).json({ message: "PG not found" });
+    }
+
+    //////////////////////////////////////////////////////
+    // 💰 STEP 5: RENT CALCULATION
     //////////////////////////////////////////////////////
     let rent = 0;
 
@@ -54,14 +83,16 @@ exports.createBooking = async (req, res) => {
     }
 
     if (pg.pg_category === "coliving") {
-      if (room_type === "Single Room")
+      if (room_type === "Single Room") {
         rent = pg.co_living_single_room || 0;
+      }
 
       if (
         room_type === "Double Room" ||
         room_type === "Co-Living Double Room"
-      )
+      ) {
         rent = pg.co_living_double_room || 0;
+      }
     }
 
     if (pg.pg_category === "to_let") {
@@ -74,19 +105,25 @@ exports.createBooking = async (req, res) => {
     const deposit = pg.deposit_amount || pg.security_deposit || 0;
     const maintenance = pg.maintenance_amount || 0;
 
-    // Use user's name and phone from database
-    const finalName = user.name || user.email?.split('@')[0] || 'User';
-    const finalPhone = user.phone || '';
+    //////////////////////////////////////////////////////
+    // 👤 STEP 6: FINAL USER DATA
+    //////////////////////////////////////////////////////
+    const finalName =
+      user.name || user.email?.split("@")[0] || "User";
+
+    const finalPhone = user.phone || "";
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT (Without register_number)
+    // 📝 STEP 7: INSERT BOOKING
     //////////////////////////////////////////////////////
     await db.query(
-      `INSERT INTO bookings 
+      `
+      INSERT INTO bookings 
       (pg_id, user_id, owner_id, name, email, phone,
        check_in_date, room_type, 
        rent_amount, security_deposit, maintenance_amount, status) 
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
+      `,
       [
         pgId,
         userId,
@@ -102,22 +139,27 @@ exports.createBooking = async (req, res) => {
       ]
     );
 
-    res.json({ success: true, message: "Booking request sent successfully" });
+    //////////////////////////////////////////////////////
+    // ✅ SUCCESS RESPONSE
+    //////////////////////////////////////////////////////
+    res.json({
+      success: true,
+      message: "Booking request sent successfully (valid for 24 hours)"
+    });
 
   } catch (err) {
-    // 🔥 UNIQUE CONSTRAINT PROTECTION
+    console.error("CREATE BOOKING ERROR:", err);
+
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(200).json({
         alreadyBooked: true,
-        message: "You have already sent a request for this property"
+        message: "Duplicate request detected"
       });
     }
 
-    console.error("CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
 //////////////////////////////////////////////////////
 // 📜 USER BOOKINGS
 //////////////////////////////////////////////////////

@@ -20,12 +20,25 @@ const getOwner = async (firebase_uid) => {
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
-    const owner = await getOwner(req.user.firebase_uid); 
+    const owner = await getOwner(req.user.firebase_uid);
 
     if (!owner) {
       return res.status(403).json({ message: "Not an owner" });
     }
 
+    //////////////////////////////////////////////////////
+    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS (24 HOURS)
+    //////////////////////////////////////////////////////
+    await db.query(`
+      UPDATE bookings
+      SET status = 'expired'
+      WHERE status = 'pending'
+      AND created_at < NOW() - INTERVAL 24 HOUR
+    `);
+
+    //////////////////////////////////////////////////////
+    // 📥 STEP 2: FETCH BOOKINGS (ONLY VALID ONES)
+    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `
       SELECT 
@@ -50,19 +63,26 @@ exports.getOwnerBookings = async (req, res) => {
 
       FROM bookings b
 
-      /* ✅ GET ONLY LATEST BOOKING */
+      /* ✅ ONLY LATEST BOOKING PER USER */
       JOIN (
           SELECT MAX(id) id
           FROM bookings
           WHERE owner_id = ?
-          GROUP BY pg_id, user_id, check_in_date, room_type
+          GROUP BY pg_id, user_id
       ) latest ON latest.id = b.id
 
       JOIN pgs p ON p.id = b.pg_id
 
+      /* 🔥 FILTER EXPIRED + OLD PENDING */
+      WHERE b.owner_id = ?
+      AND (
+        b.status != 'pending'
+        OR b.created_at >= NOW() - INTERVAL 24 HOUR
+      )
+
       ORDER BY b.created_at DESC
       `,
-      [owner.id]
+      [owner.id, owner.id]
     );
 
     res.json(rows);
@@ -72,7 +92,6 @@ exports.getOwnerBookings = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
 /* ======================================================
    ✅ OWNER → APPROVE / REJECT BOOKING
 ====================================================== */
@@ -83,29 +102,28 @@ exports.updateBookingStatus = async (req, res) => {
     await connection.beginTransaction();
 
     const { bookingId } = req.params;
-    const { status, reject_reason, room_id, exit_date } = req.body;
+    const { status, reject_reason } = req.body;
 
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
-    /* 🚨 BLOCK IF NOT VERIFIED */
+    // 🚨 VERIFY OWNER
     if (status === "approved" && owner.owner_verification_status !== "verified") {
       await connection.rollback();
       return res.status(403).json({
-        code: "ONBOARDING_PENDING",
         message: "Complete verification before approving booking"
       });
     }
 
-    /* 🔒 VALIDATE BOOKING */
+    // 🔒 GET BOOKING
     const [[booking]] = await connection.query(
       `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
       [bookingId, owner.id]
     );
 
-    if (!booking) throw new Error("Not your booking");
+    if (!booking) throw new Error("Booking not found");
 
-    /* ✅ UPDATE BOOKING STATUS */
+    // ✅ UPDATE ONLY STATUS (NO pg_users HERE)
     await connection.query(
       `UPDATE bookings
        SET status = ?, reject_reason = ?
@@ -113,37 +131,9 @@ exports.updateBookingStatus = async (req, res) => {
       [status, reject_reason || null, bookingId]
     );
 
-    /* ======================================================
-       🟢 IF APPROVED → ADD TO pg_users
-    ====================================================== */
-    if (status === "approved") {
-
-      const [[existing]] = await connection.query(
-        `SELECT id FROM pg_users
-         WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
-        [booking.user_id, booking.pg_id]
-      );
-
-      if (!existing) {
-        await connection.query(
-          `INSERT INTO pg_users
-           (owner_id, pg_id, user_id, room_no, join_date, exit_date, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
-          [
-            owner.id,
-            booking.pg_id,
-            booking.user_id,
-            room_id || null,
-            booking.check_in_date,
-            exit_date || null
-          ]
-        );
-      }
-    }
-
     await connection.commit();
 
-    res.json({ success: true });
+    res.json({ success: true, message: "Booking updated successfully" });
 
   } catch (err) {
     await connection.rollback();
