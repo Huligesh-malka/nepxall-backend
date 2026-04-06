@@ -28,6 +28,10 @@ router.post("/agreements/viewed", auth, ownerController.markAgreementViewed);
 router.get("/receipt-details/:bookingId", auth, ownerController.getOwnerReceiptDetails);
 
 
+// 🔥 NEW: Owner mark as paid
+router.post("/mark-paid", auth, ownerController.markAsPaid);
+
+
 /**
  * =================================================================
  * --- PUBLIC / SECURE SIGNING ROUTES ---

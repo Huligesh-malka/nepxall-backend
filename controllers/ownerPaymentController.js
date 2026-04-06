@@ -129,6 +129,7 @@ exports.getOwnerPayments = async (req, res) => {
         b.name AS tenant_name,
         b.owner_amount,
         b.owner_settlement,
+        b.admin_settlement,
         b.settlement_date,
         b.room_type,
 
@@ -294,5 +295,29 @@ exports.getOwnerReceiptDetails = async (req, res) => {
       success: false,
       message: err.sqlMessage || err.message
     });
+  }
+};
+
+
+
+
+
+
+exports.markAsPaid = async (req, res) => {
+  try {
+    const { booking_id } = req.body;
+
+    await db.query(`
+      UPDATE bookings 
+      SET owner_settlement = 'DONE',
+          settlement_date = NOW()
+      WHERE id = ?
+    `, [booking_id]);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false });
   }
 };

@@ -75,26 +75,25 @@ exports.getPendingSettlements = async (req, res) => {
 // MARK OWNER SETTLED
 //////////////////////////////////////////////////////
 exports.markAsSettled = async (req, res) => {
-
   try {
 
     const bookingId = req.params.bookingId;
 
     await db.query(
       `UPDATE bookings 
-       SET owner_settlement = 'DONE',
-           settlement_date = NOW()
+       SET 
+         admin_settlement = 'DONE',
+         owner_settlement = 'PENDING'   -- 🔥 FORCE RESET
        WHERE id = ?`,
       [bookingId]
     );
 
     res.json({
       success: true,
-      message: "Settlement completed"
+      message: "Admin marked as settled"
     });
 
   } catch (error) {
-
     console.error(error);
 
     res.status(500).json({
@@ -103,9 +102,6 @@ exports.markAsSettled = async (req, res) => {
     });
   }
 };
-
-
-
 
 exports.getSettlementHistory = async (req, res) => {
   try {
