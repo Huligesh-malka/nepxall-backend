@@ -314,6 +314,13 @@ exports.markAsPaid = async (req, res) => {
       WHERE id = ?
     `, [booking_id]);
 
+    // 🔥 UPDATE HISTORY TABLE ALSO
+    await db.query(`
+      UPDATE settlement_history
+      SET owner_settlement = 'DONE'
+      WHERE booking_id = ?
+    `, [booking_id]);
+
     res.json({ success: true });
 
   } catch (err) {
