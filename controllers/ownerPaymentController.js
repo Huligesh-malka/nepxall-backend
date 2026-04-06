@@ -130,23 +130,31 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_amount,
         b.owner_settlement,
         b.settlement_date,
-
         b.room_type,
 
         af.final_pdf,
         af.signed_pdf,
         af.viewed_by_owner,
 
-        /* ✅ ADD THIS */
-        p.order_id
+        /* ✅ PAYMENT */
+        p.order_id,
+
+        /* 🔥 ADD THIS (VERY IMPORTANT) */
+        pg.pg_name
 
       FROM bookings b
 
+      /* PAYMENT JOIN */
       INNER JOIN payments p 
         ON b.id = p.booking_id
 
+      /* AGREEMENT JOIN */
       LEFT JOIN agreements_form af 
         ON b.id = af.booking_id
+
+      /* 🔥 PG JOIN (FIX FOR UNKNOWN PG) */
+      LEFT JOIN pgs pg 
+        ON pg.id = b.pg_id
 
       WHERE b.owner_id = ?
       AND p.status = 'paid'
@@ -168,7 +176,6 @@ exports.getOwnerPayments = async (req, res) => {
     });
   }
 };
-
 exports.markAgreementViewed = async (req, res) => {
   try {
     await db.query(`UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`, [req.body.booking_id]);
