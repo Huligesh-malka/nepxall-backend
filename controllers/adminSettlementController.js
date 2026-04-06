@@ -111,11 +111,15 @@ exports.getSettlementHistory = async (req, res) => {
         b.id AS booking_id,
         b.owner_amount,
         b.settlement_date,
+
+        /* 🔥 ADD THIS */
+        b.owner_settlement,
+        b.admin_settlement,
+
         u.name AS owner_name,
         u.phone AS owner_phone,
         p.pg_name,
 
-        /* ✅ ADD ORDER_ID */
         pay.order_id
 
       FROM bookings b
@@ -126,12 +130,12 @@ exports.getSettlementHistory = async (req, res) => {
       JOIN pgs p 
         ON p.id = b.pg_id
 
-      /* 🔥 JOIN PAYMENTS */
       LEFT JOIN payments pay 
         ON pay.booking_id = b.id
         AND pay.status = 'paid'
 
-      WHERE b.owner_settlement = 'DONE'
+      /* 🔥 REMOVE FILTER */
+      WHERE b.admin_settlement = 'DONE'
 
       ORDER BY b.settlement_date DESC
     `);
@@ -149,6 +153,5 @@ exports.getSettlementHistory = async (req, res) => {
       success: false,
       message: "Failed to load settlement history"
     });
-
   }
 };
