@@ -176,6 +176,9 @@ exports.getOwnerPayments = async (req, res) => {
     });
   }
 };
+
+
+
 exports.markAgreementViewed = async (req, res) => {
   try {
     await db.query(`UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`, [req.body.booking_id]);
