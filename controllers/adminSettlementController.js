@@ -26,7 +26,6 @@ exports.getPendingSettlements = async (req, res) => {
         obd.bank_name,
         obd.branch,
 
-        /* ✅ PAYMENT DETAILS */
         pay.id AS payment_id,
         pay.order_id,
         pay.amount AS payment_amount,
@@ -36,7 +35,6 @@ exports.getPendingSettlements = async (req, res) => {
 
       FROM bookings b
 
-      /* 🔥 JOIN ALL PAID PAYMENTS */
       INNER JOIN payments pay 
         ON pay.booking_id = b.id
         AND pay.status = 'paid'
@@ -50,7 +48,8 @@ exports.getPendingSettlements = async (req, res) => {
       LEFT JOIN owner_bank_details obd
         ON obd.owner_id = b.owner_id
 
-      WHERE b.owner_settlement = 'PENDING'
+      /* 🔥 FIX APPLIED HERE */
+      WHERE b.admin_settlement = 'PENDING'
       AND b.owner_amount > 0
 
       ORDER BY pay.created_at DESC
@@ -62,7 +61,6 @@ exports.getPendingSettlements = async (req, res) => {
     });
 
   } catch (error) {
-
     console.error("Settlement error:", error);
 
     res.status(500).json({
