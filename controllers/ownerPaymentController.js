@@ -131,11 +131,14 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_settlement,
         b.settlement_date,
 
-        b.room_type,   -- ✅ ADD THIS (IMPORTANT)
+        b.room_type,
 
         af.final_pdf,
         af.signed_pdf,
-        af.viewed_by_owner
+        af.viewed_by_owner,
+
+        /* ✅ ADD THIS */
+        p.order_id
 
       FROM bookings b
 
