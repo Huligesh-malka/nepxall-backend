@@ -187,11 +187,15 @@ exports.approveVacateRequest = async (req, res) => {
     const { bookingId } = req.params;
     const { damage_amount = 0, pending_dues = 0 } = req.body;
 
+    //////////////////////////////////////////////////////
     // ✅ OWNER CHECK
+    //////////////////////////////////////////////////////
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
+    //////////////////////////////////////////////////////
     // ✅ BOOKING CHECK
+    //////////////////////////////////////////////////////
     const [[booking]] = await connection.query(
       "SELECT * FROM bookings WHERE id=? AND owner_id=?",
       [bookingId, owner.id]
@@ -199,7 +203,9 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!booking) throw new Error("Booking not found");
 
-    // ✅ GET REFUND ENTRY (IMPORTANT)
+    //////////////////////////////////////////////////////
+    // ✅ GET REFUND ENTRY
+    //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       "SELECT * FROM refunds WHERE booking_id=? AND refund_type='DEPOSIT'",
       [bookingId]
@@ -209,12 +215,16 @@ exports.approveVacateRequest = async (req, res) => {
       throw new Error("Vacate request not found");
     }
 
-    // ✅ CALCULATE REFUND
+    //////////////////////////////////////////////////////
+    // 💰 CALCULATE REFUND
+    //////////////////////////////////////////////////////
     const deposit = Number(booking.security_deposit) || 0;
     let refundAmount = deposit - damage_amount - pending_dues;
     if (refundAmount < 0) refundAmount = 0;
 
+    //////////////////////////////////////////////////////
     // ✅ UPDATE REFUND
+    //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
        SET 
@@ -227,7 +237,9 @@ exports.approveVacateRequest = async (req, res) => {
       [refundAmount, damage_amount, damage_amount, pending_dues, bookingId]
     );
 
-    // ✅ UPDATE ONLY CURRENT LEAVING USER
+    //////////////////////////////////////////////////////
+    // 🔥 UPDATE pg_users → LEFT
+    //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
        SET status='LEFT', vacate_status='completed'
@@ -237,6 +249,19 @@ exports.approveVacateRequest = async (req, res) => {
       [booking.user_id, booking.pg_id]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔥 IMPORTANT FIX → UPDATE BOOKINGS ALSO
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE bookings 
+       SET status='left' 
+       WHERE id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
     await connection.commit();
 
     res.json({
@@ -253,7 +278,6 @@ exports.approveVacateRequest = async (req, res) => {
     connection.release();
   }
 };
-
 
 exports.getVacateRequests = async (req, res) => {
   try {
