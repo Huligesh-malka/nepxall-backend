@@ -120,7 +120,6 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-/* ================= OTHER UTILITIES ================= */
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -131,7 +130,7 @@ exports.getOwnerPayments = async (req, res) => {
         b.owner_settlement,
         b.settlement_date,
 
-        b.room_type,   -- ✅ ADD THIS (IMPORTANT)
+        b.room_type,
 
         af.final_pdf,
         af.signed_pdf,
@@ -139,16 +138,22 @@ exports.getOwnerPayments = async (req, res) => {
 
       FROM bookings b
 
+      /* 🔥 FIX: Only latest PAID payment per booking */
       INNER JOIN payments p 
-        ON b.id = p.booking_id
+        ON p.id = (
+          SELECT id FROM payments 
+          WHERE booking_id = b.id 
+          AND status = 'paid'
+          ORDER BY created_at DESC 
+          LIMIT 1
+        )
 
       LEFT JOIN agreements_form af 
         ON b.id = af.booking_id
 
       WHERE b.owner_id = ?
-      AND p.status = 'paid'
 
-      ORDER BY p.created_at DESC
+      ORDER BY b.id DESC
     `, [req.user.id]);
 
     res.json({
