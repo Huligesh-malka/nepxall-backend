@@ -212,13 +212,39 @@ exports.rejectPayment = async (req, res) => {
 
     const { orderId } = req.params;
 
+    // 🔥 1. Get booking_id (VERY IMPORTANT)
+    const [rows] = await db.query(
+      `SELECT booking_id FROM payments WHERE order_id=?`,
+      [orderId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+    }
+
+    const bookingId = rows[0].booking_id;
+
+    // 🔥 2. Update payment
     await db.query(
       `UPDATE payments SET status='rejected' WHERE order_id=?`,
       [orderId]
     );
 
+    // 🔥 3. UPDATE SETTLEMENT (THIS IS YOUR MISSING PART)
+    await db.query(
+      `UPDATE bookings 
+       SET owner_settlement = NULL,
+           settlement_date = NULL
+       WHERE id = ?`,
+      [bookingId]
+    );
+
     res.json({
-      success:true
+      success:true,
+      message: "Payment rejected & settlement updated"
     });
 
   } catch (err) {
