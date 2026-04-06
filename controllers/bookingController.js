@@ -559,18 +559,12 @@ exports.requestVacate = async (req, res) => {
 
     const userId = req.user.id;
 
-    //////////////////////////////////////////////////////
-    // ✅ VALIDATION
-    //////////////////////////////////////////////////////
     if (!bookingId || !vacate_date || !reason) {
       return res.status(400).json({
         message: "Booking ID, vacate date and reason are required"
       });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK BOOKING
-    //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -580,9 +574,6 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    //////////////////////////////////////////////////////
-    // 🚫 PREVENT DUPLICATE VACATE REQUEST
-    //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
       `SELECT * FROM refunds 
        WHERE booking_id=? AND refund_type='DEPOSIT'`,
@@ -595,9 +586,7 @@ exports.requestVacate = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 UPDATE ACTIVE STAY → LEAVING
-    //////////////////////////////////////////////////////
+    // ✅ ONLY MARK LEAVING
     await db.query(
       `UPDATE pg_users 
        SET 
@@ -612,19 +601,7 @@ exports.requestVacate = async (req, res) => {
       [reason, vacate_date, userId, booking.pg_id]
     );
 
-    //////////////////////////////////////////////////////
-    // 🔥 IMPORTANT FIX → UPDATE BOOKING STATUS
-    //////////////////////////////////////////////////////
-    await db.query(
-      `UPDATE bookings 
-       SET status='left' 
-       WHERE id=?`,
-      [bookingId]
-    );
-
-    //////////////////////////////////////////////////////
-    // 💰 CREATE REFUND ENTRY
-    //////////////////////////////////////////////////////
+    // ✅ CREATE REFUND
     await db.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
@@ -640,9 +617,6 @@ exports.requestVacate = async (req, res) => {
       ]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS
-    //////////////////////////////////////////////////////
     res.json({
       success: true,
       message: "Vacate request submitted successfully"
