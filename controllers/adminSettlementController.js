@@ -15,24 +15,34 @@ exports.getPendingSettlements = async (req, res) => {
         u.name AS owner_name,
         u.phone AS owner_phone,
 
-        p.id AS pg_id,
-        p.pg_name,
-        p.city,
-        p.area,
+        pg.id AS pg_id,
+        pg.pg_name,
+        pg.city,
+        pg.area,
 
         obd.account_holder_name,
         obd.account_number,
         obd.ifsc,
         obd.bank_name,
-        obd.branch
+        obd.branch,
+
+        /* 🔥 ADD PAYMENT INFO */
+        pay.order_id,
+        pay.created_at AS payment_date,
+        pay.status AS payment_status
 
       FROM bookings b
+
+      /* 🔥 JOIN PAYMENTS (IMPORTANT) */
+      INNER JOIN payments pay 
+        ON pay.booking_id = b.id
+        AND pay.status = 'paid'
 
       LEFT JOIN users u
         ON u.id = b.owner_id
 
-      LEFT JOIN pgs p
-        ON p.id = b.pg_id
+      LEFT JOIN pgs pg
+        ON pg.id = b.pg_id
 
       LEFT JOIN owner_bank_details obd
         ON obd.owner_id = b.owner_id
@@ -40,7 +50,7 @@ exports.getPendingSettlements = async (req, res) => {
       WHERE b.owner_settlement = 'PENDING'
       AND b.owner_amount > 0
 
-      ORDER BY b.id DESC
+      ORDER BY pay.created_at DESC
     `);
 
     res.json({
@@ -58,7 +68,6 @@ exports.getPendingSettlements = async (req, res) => {
     });
   }
 };
-
 //////////////////////////////////////////////////////
 // MARK OWNER SETTLED
 //////////////////////////////////////////////////////
