@@ -397,7 +397,7 @@ exports.getUserActiveStay = async (req, res) => {
         )
 
       WHERE b.user_id = ? 
-        AND b.status = 'confirmed' 
+        AND b.status IN ('confirmed','left')
         AND (p.status = 'paid' OR p.status = 'submitted')
 
       GROUP BY 
