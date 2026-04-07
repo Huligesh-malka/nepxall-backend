@@ -601,7 +601,6 @@ exports.joinPGWithRoom = async (req, res) => {
   try {
     const { pg_id, room_id } = req.body;
 
-    // ✅ FIXED USER ID
     const user_id = req.user.id;
 
     console.log("JOIN USER:", user_id, "PG:", pg_id, "ROOM:", room_id);
@@ -634,43 +633,56 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // CHECK ROOM AVAILABILITY
+    // ✅ FIXED: CHECK ROOM FROM pg_rooms
     //////////////////////////////////////////////////////
     const [room] = await db.query(
-      `SELECT * FROM rooms 
-       WHERE id = ? AND pg_id = ? AND available_beds > 0`,
+      `SELECT * FROM pg_rooms 
+       WHERE room_no = ? AND pg_id = ?`,
       [room_id, pg_id]
     );
 
     if (room.length === 0) {
       return res.json({
         success: false,
-        message: "❌ Room not available"
+        message: "❌ Room not found"
+      });
+    }
+
+    const selectedRoom = room[0];
+
+    // Calculate available beds
+    const availableBeds =
+      selectedRoom.total_seats - selectedRoom.occupied_seats;
+
+    if (availableBeds <= 0) {
+      return res.json({
+        success: false,
+        message: "❌ Room is full"
       });
     }
 
     //////////////////////////////////////////////////////
-    // INSERT INTO pg_users (🔥 MAIN FIX)
+    // INSERT INTO pg_users
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_users 
-       (user_id, pg_id, room_id, status, join_date)
-       VALUES (?, ?, ?, 'ACTIVE', NOW())`,
-      [user_id, pg_id, room_id]
+       (user_id, pg_id, room_id, room_no, status, join_date)
+       VALUES (?, ?, ?, ?, 'ACTIVE', NOW())`,
+      [user_id, pg_id, selectedRoom.id, selectedRoom.room_no]
     );
 
     //////////////////////////////////////////////////////
-    // REDUCE ROOM BED
+    // ✅ UPDATE OCCUPIED SEATS
     //////////////////////////////////////////////////////
     await db.query(
-      `UPDATE rooms 
-       SET available_beds = available_beds - 1 
+      `UPDATE pg_rooms 
+       SET occupied_seats = occupied_seats + 1 
        WHERE id = ?`,
-      [room_id]
+      [selectedRoom.id]
     );
 
     //////////////////////////////////////////////////////
-    // CREATE CHECK-IN ENTRY
+    // INSERT CHECK-IN
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_checkins 
