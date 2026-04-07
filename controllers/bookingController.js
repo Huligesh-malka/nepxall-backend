@@ -258,10 +258,9 @@ exports.updateBookingStatus = async (req, res) => {
 exports.markPaymentDone = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { room_id, order_id } = req.body; // 👈 Capture order_id from request body
+    const { room_id, order_id } = req.body;
     const userId = req.user.id;
 
-    // 1. Verify the booking exists for this user
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -271,18 +270,17 @@ exports.markPaymentDone = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // 2. Update Booking: Set status to confirmed, assign room, and SAVE order_id
+    // ✅ ONLY UPDATE BOOKING
     await db.query(
       `UPDATE bookings 
        SET status='confirmed', 
            room_id=?, 
            order_id=? 
        WHERE id=?`,
-      [room_id || null, order_id || booking.order_id, bookingId] 
-      // Note: order_id || booking.order_id ensures we don't overwrite with null if it already exists
+      [room_id || null, order_id || booking.order_id, bookingId]
     );
 
-    // 3. Update Room Occupancy
+    // ✅ ROOM UPDATE (OPTIONAL KEEP)
     if (room_id) {
       await db.query(
         "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
@@ -290,27 +288,9 @@ exports.markPaymentDone = async (req, res) => {
       );
     }
 
-    // 4. Sync with pg_users table for Active Stay tracking
-    await db.query(
-      `INSERT INTO pg_users (pg_id, room_id, user_id, owner_id, status, join_date)
-       VALUES (?, ?, ?, ?, 'ACTIVE', ?)
-       ON DUPLICATE KEY UPDATE 
-          status='ACTIVE', 
-          room_id=VALUES(room_id), 
-          join_date=VALUES(join_date)`,
-      [
-        booking.pg_id,
-        room_id || null,
-        booking.user_id,
-        booking.owner_id,
-        booking.check_in_date 
-      ]
-    );
-
     res.json({ 
       success: true, 
-      message: "Payment verified and order ID updated",
-      orderId: order_id 
+      message: "Payment submitted successfully"
     });
 
   } catch (err) {
