@@ -480,3 +480,58 @@ exports.getScanStatistics = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+exports.checkAndCheckinUser = async (req, res) => {
+  try {
+    const { user_id, pg_id } = req.body;
+
+    // 1. Check booking
+    const [booking] = await db.query(
+      `SELECT * FROM bookings 
+       WHERE user_id = ? AND pg_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [user_id, pg_id]
+    );
+
+    if (booking.length === 0) {
+      return res.json({
+        success: false,
+        message: "❌ No booking found"
+      });
+    }
+
+    const userBooking = booking[0];
+
+    // 2. Check payment status
+    if (userBooking.payment_status !== "paid") {
+      return res.json({
+        success: false,
+        message: "❌ Payment not completed"
+      });
+    }
+
+    // 3. Store check-in
+    await db.query(
+      `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, ?)`,
+      [user_id, pg_id, userBooking.id, userBooking.payment_status]
+    );
+
+    return res.json({
+      success: true,
+      message: "✅ Check-in successful (Welcome to PG)"
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
