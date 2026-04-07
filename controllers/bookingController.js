@@ -3,6 +3,7 @@ const db = require("../db");
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE
 //////////////////////////////////////////////////////
+
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
@@ -14,7 +15,7 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS (24 HOURS)
+    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS
     //////////////////////////////////////////////////////
     await db.query(`
       UPDATE bookings
@@ -24,52 +25,55 @@ exports.createBooking = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 2: PREVENT MULTIPLE BOOKINGS (STRONG CHECK)
+    // 🔐 STEP 2: BLOCK ONLY APPROVED / CONFIRMED
     //////////////////////////////////////////////////////
-    const [[existing]] = await db.query(
-      `
+    const [[existing]] = await db.query(`
       SELECT id FROM bookings 
       WHERE user_id = ?
       AND pg_id = ?
-      AND status IN ('pending','approved')
-      AND created_at >= NOW() - INTERVAL 24 HOUR
+      AND status IN ('approved','confirmed')
       LIMIT 1
-      `,
-      [userId, pgId]
-    );
+    `, [userId, pgId]);
 
     if (existing) {
       return res.status(400).json({
-        message: "You already requested this PG. Try again after 24 hours or wait for owner response."
+        message: "Booking already approved or active. Complete current booking first."
       });
     }
 
     //////////////////////////////////////////////////////
-    // 👤 STEP 3: USER DETAILS
+    // 🔐 STEP 3: BLOCK IF USER ALREADY STAYING
+    //////////////////////////////////////////////////////
+    const [[activeStay]] = await db.query(`
+      SELECT id FROM pg_users
+      WHERE user_id=? AND status='ACTIVE'
+      LIMIT 1
+    `, [userId]);
+
+    if (activeStay) {
+      return res.status(400).json({
+        message: "You are already staying in a PG. Vacate first."
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // 👤 USER
     //////////////////////////////////////////////////////
     const [[user]] = await db.query(
       "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
     );
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
     //////////////////////////////////////////////////////
-    // 🏠 STEP 4: PG DETAILS
+    // 🏠 PG
     //////////////////////////////////////////////////////
     const [[pg]] = await db.query(
       "SELECT * FROM pgs WHERE id=?",
       [pgId]
     );
 
-    if (!pg) {
-      return res.status(404).json({ message: "PG not found" });
-    }
-
     //////////////////////////////////////////////////////
-    // 💰 STEP 5: RENT CALCULATION
+    // 💰 RENT
     //////////////////////////////////////////////////////
     let rent = 0;
 
@@ -82,55 +86,26 @@ exports.createBooking = async (req, res) => {
       if (room_type === "Double Room") rent = pg.double_room || 0;
     }
 
-    if (pg.pg_category === "coliving") {
-      if (room_type === "Single Room") {
-        rent = pg.co_living_single_room || 0;
-      }
-
-      if (
-        room_type === "Double Room" ||
-        room_type === "Co-Living Double Room"
-      ) {
-        rent = pg.co_living_double_room || 0;
-      }
-    }
-
-    if (pg.pg_category === "to_let") {
-      if (room_type === "1BHK") rent = pg.price_1bhk || 0;
-      if (room_type === "2BHK") rent = pg.price_2bhk || 0;
-      if (room_type === "3BHK") rent = pg.price_3bhk || 0;
-      if (room_type === "4BHK") rent = pg.price_4bhk || 0;
-    }
-
-    const deposit = pg.deposit_amount || pg.security_deposit || 0;
+    const deposit = pg.deposit_amount || 0;
     const maintenance = pg.maintenance_amount || 0;
 
     //////////////////////////////////////////////////////
-    // 👤 STEP 6: FINAL USER DATA
-    //////////////////////////////////////////////////////
-    const finalName =
-      user.name || user.email?.split("@")[0] || "User";
-
-    const finalPhone = user.phone || "";
-
-    //////////////////////////////////////////////////////
-    // 📝 STEP 7: INSERT BOOKING
+    // INSERT
     //////////////////////////////////////////////////////
     await db.query(
       `
       INSERT INTO bookings 
       (pg_id, user_id, owner_id, name, email, phone,
-       check_in_date, room_type, 
-       rent_amount, security_deposit, maintenance_amount, status) 
+       check_in_date, room_type, rent_amount, security_deposit, maintenance_amount, status) 
       VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
       `,
       [
         pgId,
         userId,
         pg.owner_id,
-        finalName,
+        user.name,
         user.email,
-        finalPhone,
+        user.phone,
         check_in_date,
         room_type,
         rent,
@@ -139,24 +114,13 @@ exports.createBooking = async (req, res) => {
       ]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS RESPONSE
-    //////////////////////////////////////////////////////
     res.json({
       success: true,
-      message: "Booking request sent successfully (valid for 24 hours)"
+      message: "Booking created (pending)"
     });
 
   } catch (err) {
-    console.error("CREATE BOOKING ERROR:", err);
-
-    if (err.code === "ER_DUP_ENTRY") {
-      return res.status(200).json({
-        alreadyBooked: true,
-        message: "Duplicate request detected"
-      });
-    }
-
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -238,12 +202,19 @@ exports.updateBookingStatus = async (req, res) => {
     const { bookingId } = req.params;
     const { status } = req.body;
 
+    const validStatuses = ['approved', 'rejected'];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
     await db.query(
       "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
       [status, bookingId, req.user.id]
     );
 
     res.json({ success: true });
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -528,22 +499,8 @@ exports.requestRefund = async (req, res) => {
 
 exports.requestVacate = async (req, res) => {
   try {
-    const {
-      bookingId,
-      vacate_date,
-      reason,
-      account_number,
-      ifsc_code,
-      upi_id
-    } = req.body;
-
+    const { bookingId, vacate_date, reason } = req.body;
     const userId = req.user.id;
-
-    if (!bookingId || !vacate_date || !reason) {
-      return res.status(400).json({
-        message: "Booking ID, vacate date and reason are required"
-      });
-    }
 
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
@@ -554,56 +511,43 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    const [[existing]] = await db.query(
-      `SELECT * FROM refunds 
-       WHERE booking_id=? AND refund_type='DEPOSIT'`,
+    //////////////////////////////////////////////////////
+    // 🔥 UPDATE BOOKING → LEFT
+    //////////////////////////////////////////////////////
+    await db.query(
+      `UPDATE bookings SET status='left' WHERE id=?`,
       [bookingId]
     );
 
-    if (existing) {
-      return res.status(400).json({
-        message: "Vacate already requested for this booking"
-      });
+    //////////////////////////////////////////////////////
+    // 🔥 FREE ROOM
+    //////////////////////////////////////////////////////
+    if (booking.room_id) {
+      await db.query(
+        `UPDATE pg_rooms 
+         SET occupied_seats = occupied_seats - 1 
+         WHERE id=?`,
+        [booking.room_id]
+      );
     }
 
-    // ✅ ONLY MARK LEAVING
+    //////////////////////////////////////////////////////
+    // 🔥 UPDATE PG USERS
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_users 
-       SET 
-         status='LEAVING',
-         vacate_status='requested',
-         vacate_reason=?,
-         vacate_request_date=NOW(),
-         move_out_date=? 
-       WHERE user_id=? 
-       AND pg_id=? 
-       AND status='ACTIVE'`,
-      [reason, vacate_date, userId, booking.pg_id]
-    );
-
-    // ✅ CREATE REFUND
-    await db.query(
-      `INSERT INTO refunds 
-      (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
-      VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending')`,
-      [
-        bookingId,
-        userId,
-        0,
-        "Vacate deposit refund",
-        upi_id || null,
-        account_number || null,
-        ifsc_code || null
-      ]
+       SET status='LEFT' 
+       WHERE user_id=? AND pg_id=?`,
+      [userId, booking.pg_id]
     );
 
     res.json({
       success: true,
-      message: "Vacate request submitted successfully"
+      message: "Vacated successfully"
     });
 
   } catch (err) {
-    console.error("❌ VACATE ERROR:", err);
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
