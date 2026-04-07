@@ -25,7 +25,7 @@ exports.createBooking = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 2: BLOCK ONLY APPROVED / CONFIRMED
+    // 🔐 STEP 2: BLOCK SAME PG DUPLICATE BOOKING
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(`
       SELECT id FROM bookings 
@@ -37,22 +37,22 @@ exports.createBooking = async (req, res) => {
 
     if (existing) {
       return res.status(400).json({
-        message: "Booking already approved or active. Complete current booking first."
+        message: "You already booked this PG. Complete or vacate first."
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 3: BLOCK IF USER ALREADY STAYING
+    // 🔐 STEP 3: BLOCK IF USER ALREADY ACTIVE IN SAME PG
     //////////////////////////////////////////////////////
     const [[activeStay]] = await db.query(`
       SELECT id FROM pg_users
-      WHERE user_id=? AND status='ACTIVE'
+      WHERE user_id=? AND pg_id=? AND status='ACTIVE'
       LIMIT 1
-    `, [userId]);
+    `, [userId, pgId]);
 
     if (activeStay) {
       return res.status(400).json({
-        message: "You are already staying in a PG. Vacate first."
+        message: "You are already staying in this PG."
       });
     }
 
@@ -73,7 +73,7 @@ exports.createBooking = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 💰 RENT
+    // 💰 RENT CALCULATION
     //////////////////////////////////////////////////////
     let rent = 0;
 
@@ -90,7 +90,7 @@ exports.createBooking = async (req, res) => {
     const maintenance = pg.maintenance_amount || 0;
 
     //////////////////////////////////////////////////////
-    // INSERT
+    // 📝 INSERT BOOKING
     //////////////////////////////////////////////////////
     await db.query(
       `
@@ -116,11 +116,11 @@ exports.createBooking = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Booking created (pending)"
+      message: "Booking created successfully (pending)"
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -499,8 +499,22 @@ exports.requestRefund = async (req, res) => {
 
 exports.requestVacate = async (req, res) => {
   try {
-    const { bookingId, vacate_date, reason } = req.body;
+    const {
+      bookingId,
+      vacate_date,
+      reason,
+      account_number,
+      ifsc_code,
+      upi_id
+    } = req.body;
+
     const userId = req.user.id;
+
+    if (!bookingId || !vacate_date || !reason) {
+      return res.status(400).json({
+        message: "Booking ID, vacate date and reason are required"
+      });
+    }
 
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
@@ -511,43 +525,56 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 UPDATE BOOKING → LEFT
-    //////////////////////////////////////////////////////
-    await db.query(
-      `UPDATE bookings SET status='left' WHERE id=?`,
+    const [[existing]] = await db.query(
+      `SELECT * FROM refunds 
+       WHERE booking_id=? AND refund_type='DEPOSIT'`,
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // 🔥 FREE ROOM
-    //////////////////////////////////////////////////////
-    if (booking.room_id) {
-      await db.query(
-        `UPDATE pg_rooms 
-         SET occupied_seats = occupied_seats - 1 
-         WHERE id=?`,
-        [booking.room_id]
-      );
+    if (existing) {
+      return res.status(400).json({
+        message: "Vacate already requested for this booking"
+      });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 UPDATE PG USERS
-    //////////////////////////////////////////////////////
+    // ✅ ONLY MARK LEAVING
     await db.query(
       `UPDATE pg_users 
-       SET status='LEFT' 
-       WHERE user_id=? AND pg_id=?`,
-      [userId, booking.pg_id]
+       SET 
+         status='LEAVING',
+         vacate_status='requested',
+         vacate_reason=?,
+         vacate_request_date=NOW(),
+         move_out_date=? 
+       WHERE user_id=? 
+       AND pg_id=? 
+       AND status='ACTIVE'`,
+      [reason, vacate_date, userId, booking.pg_id]
+    );
+
+    // ✅ CREATE REFUND
+    await db.query(
+      `INSERT INTO refunds 
+      (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
+      VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending')`,
+      [
+        bookingId,
+        userId,
+        0,
+        "Vacate deposit refund",
+        upi_id || null,
+        account_number || null,
+        ifsc_code || null
+      ]
     );
 
     res.json({
       success: true,
-      message: "Vacated successfully"
+      message: "Vacate request submitted successfully"
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ VACATE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
