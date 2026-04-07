@@ -327,7 +327,9 @@ exports.getPGScanData = async (req, res) => {
     pg.available_room_details = roomRows.map(room => ({
       id: room.id,
       sharing_type: room.room_type,
-      room_number: room.room_no,   // ✅ ADD THIS LINE
+      room_number: room.room_no,
+      room_no: room.room_no,
+  // ✅ ADD THIS LINE
       total_seats: room.total_seats,
       occupied_seats: room.occupied_seats,
       available_beds: room.total_seats - room.occupied_seats,
