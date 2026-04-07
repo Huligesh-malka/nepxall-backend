@@ -595,7 +595,6 @@ exports.checkAndCheckinUser = async (req, res) => {
 };
 
 
-
 exports.joinPGWithRoom = async (req, res) => {
   try {
     //////////////////////////////////////////////////////
@@ -661,14 +660,14 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. INSERT INTO pg_users (🔥 FIX HERE)
+    // ✅ 2. INSERT INTO pg_users
     //////////////////////////////////////////////////////
-    await db.query(
+    const [insertUser] = await db.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
        VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
       [
-        room.owner_id || 1, // fallback if not exists
+        room.owner_id || 1,
         pg_id,
         room_id,
         user_id,
@@ -677,7 +676,21 @@ exports.joinPGWithRoom = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ 3. UPDATE ROOM OCCUPANCY
+    // ✅ 3. INSERT INTO pg_checkins (🔥 IMPORTANT FIX)
+    //////////////////////////////////////////////////////
+    await db.query(
+      `INSERT INTO pg_checkins 
+       (user_id, pg_id, booking_id, payment_status, checkin_time)
+       VALUES (?, ?, ?, 'paid', NOW())`,
+      [
+        user_id,
+        pg_id,
+        null // or booking_id if available
+      ]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ 4. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_rooms 
@@ -691,7 +704,7 @@ exports.joinPGWithRoom = async (req, res) => {
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      message: "🎉 Joined successfully with room"
+      message: "🎉 Joined + Check-in successful"
     });
 
   } catch (err) {
