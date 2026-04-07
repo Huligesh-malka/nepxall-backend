@@ -238,19 +238,32 @@ exports.approveVacateRequest = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 UPDATE pg_users → LEFT
+    // 🔥 FIXED: UPDATE pg_users → LEFT (SAFE)
     //////////////////////////////////////////////////////
-    await connection.query(
+    const [pgUserUpdate] = await connection.query(
       `UPDATE pg_users 
-       SET status='LEFT', vacate_status='completed'
-       WHERE user_id=? 
-       AND pg_id=? 
-       AND status='LEAVING'`,
-      [booking.user_id, booking.pg_id]
+       SET status='LEFT', 
+           vacate_status='completed'
+       WHERE booking_id=?`,
+      [bookingId]
     );
 
+    // 🔥 fallback if no row updated
+    if (pgUserUpdate.affectedRows === 0) {
+      await connection.query(
+        `UPDATE pg_users 
+         SET status='LEFT', 
+             vacate_status='completed'
+         WHERE user_id=? 
+         AND pg_id=? 
+         ORDER BY id DESC 
+         LIMIT 1`,
+        [booking.user_id, booking.pg_id]
+      );
+    }
+
     //////////////////////////////////////////////////////
-    // 🔥 IMPORTANT FIX → UPDATE BOOKINGS ALSO
+    // 🔥 UPDATE BOOKINGS ALSO
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
