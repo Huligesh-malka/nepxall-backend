@@ -489,15 +489,20 @@ exports.getScanStatistics = async (req, res) => {
 
 exports.checkAndCheckinUser = async (req, res) => {
   try {
+    //////////////////////////////////////////////////////
+    // ✅ GET DATA
+    //////////////////////////////////////////////////////
     const pg_id = req.body.pg_id;
 
-    // ✅ FIXED USER ID
-    const user_id = req.user.id;
+    const user_id =
+      req.user?.id ||
+      req.user?.uid ||
+      req.user;
 
-    console.log("CHECKIN USER:", user_id, "PG:", pg_id);
+    console.log("USER:", user_id);
 
     //////////////////////////////////////////////////////
-    // VALIDATION
+    // ❌ VALIDATION
     //////////////////////////////////////////////////////
     if (!pg_id) {
       return res.status(400).json({
@@ -506,8 +511,15 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
+    if (!user_id) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated"
+      });
+    }
+
     //////////////////////////////////////////////////////
-    // 1. CHECK JOIN
+    // ✅ 1. CHECK JOIN (pg_users)
     //////////////////////////////////////////////////////
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
@@ -515,6 +527,7 @@ exports.checkAndCheckinUser = async (req, res) => {
       [user_id, pg_id]
     );
 
+    // 🔥 NOT JOINED → SHOW JOIN FLOW
     if (activeStay.length === 0) {
       return res.json({
         success: false,
@@ -524,7 +537,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 2. CHECK PAYMENT
+    // ✅ 2. CHECK PAYMENT (ONLY AFTER JOIN)
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
       `SELECT * FROM bookings 
@@ -559,7 +572,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 3. CHECK IF ALREADY JOINED (ENTRY EXISTS)
+    // ✅ 3. CHECK IF ALREADY JOINED (NO DAILY CHECK)
     //////////////////////////////////////////////////////
     const [existing] = await db.query(
       `SELECT * FROM pg_checkins 
@@ -576,24 +589,32 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 4. READY FOR ROOM SELECTION
+    // ✅ 4. STORE FIRST CHECK-IN ONLY
+    //////////////////////////////////////////////////////
+    await db.query(
+      `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, ?)`,
+      [user_id, pg_id, userBooking.id, "paid"]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ SUCCESS (FIRST TIME ONLY)
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      type: "READY_TO_JOIN",
-      message: "Select a room to join"
+      type: "SUCCESS",
+      message: "✅ Joined successfully 🎉"
     });
 
   } catch (err) {
-    console.error("CHECK-IN ERROR:", err);
+    console.error("🔥 CHECK-IN ERROR:", err);
 
     return res.status(500).json({
       success: false,
-      message: err.message
+      message: err.message || "Server error"
     });
   }
-};
-
+};    
 
 
 exports.joinPGWithRoom = async (req, res) => {
@@ -661,14 +682,14 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. INSERT INTO pg_users (🔥 FIX HERE)
+    // ✅ 2. INSERT INTO pg_users
     //////////////////////////////////////////////////////
-    await db.query(
+    const [insertUser] = await db.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
        VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
       [
-        room.owner_id || 1, // fallback if not exists
+        room.owner_id || 1,
         pg_id,
         room_id,
         user_id,
@@ -677,7 +698,21 @@ exports.joinPGWithRoom = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ 3. UPDATE ROOM OCCUPANCY
+    // ✅ 3. INSERT INTO pg_checkins (🔥 IMPORTANT FIX)
+    //////////////////////////////////////////////////////
+    await db.query(
+      `INSERT INTO pg_checkins 
+       (user_id, pg_id, booking_id, payment_status, checkin_time)
+       VALUES (?, ?, ?, 'paid', NOW())`,
+      [
+        user_id,
+        pg_id,
+        null // or booking_id if available
+      ]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ 4. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_rooms 
@@ -691,7 +726,7 @@ exports.joinPGWithRoom = async (req, res) => {
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      message: "🎉 Joined successfully with room"
+      message: "🎉 Joined + Check-in successful"
     });
 
   } catch (err) {
