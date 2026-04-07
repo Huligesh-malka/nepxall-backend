@@ -493,14 +493,12 @@ exports.checkAndCheckinUser = async (req, res) => {
     //////////////////////////////////////////////////////
     const pg_id = req.body.pg_id;
 
-    // 🔥 FIX: Handle Firebase user correctly
     const user_id =
-      req.user?.id || // if mapped DB user
-      req.user?.uid || // Firebase UID
-      req.user; // fallback
+      req.user?.id ||
+      req.user?.uid ||
+      req.user;
 
-    console.log("USER DEBUG:", req.user);
-    console.log("USER ID USED:", user_id);
+    console.log("USER:", user_id);
 
     //////////////////////////////////////////////////////
     // ❌ VALIDATION
@@ -520,7 +518,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK ACTIVE STAY
+    // ✅ 1. CHECK JOIN (pg_users)
     //////////////////////////////////////////////////////
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
@@ -528,10 +526,12 @@ exports.checkAndCheckinUser = async (req, res) => {
       [user_id, pg_id]
     );
 
+    // 🔥 NOT JOINED
     if (activeStay.length === 0) {
       return res.json({
         success: false,
-        message: "❌ No active stay found"
+        type: "NOT_JOINED",
+        message: "🏠 Please join this PG first"
       });
     }
 
@@ -548,6 +548,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     if (booking.length === 0) {
       return res.json({
         success: false,
+        type: "NO_BOOKING",
         message: "❌ No booking found"
       });
     }
@@ -567,7 +568,8 @@ exports.checkAndCheckinUser = async (req, res) => {
     if (payment.length === 0 || payment[0].status !== "paid") {
       return res.json({
         success: false,
-        message: "❌ Payment not completed"
+        type: "NOT_PAID",
+        message: "❌ You have not paid. Please complete payment"
       });
     }
 
@@ -583,6 +585,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     if (existing.length > 0) {
       return res.json({
         success: true,
+        type: "ALREADY",
         message: "✅ Already checked-in today"
       });
     }
@@ -597,15 +600,16 @@ exports.checkAndCheckinUser = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ SUCCESS RESPONSE
+    // ✅ SUCCESS
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
+      type: "SUCCESS",
       message: "✅ Check-in successful (Welcome 🎉)"
     });
 
   } catch (err) {
-    console.error("🔥 CHECK-IN ERROR FULL:", err);
+    console.error("🔥 CHECK-IN ERROR:", err);
 
     return res.status(500).json({
       success: false,
