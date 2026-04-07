@@ -490,12 +490,14 @@ exports.getScanStatistics = async (req, res) => {
 exports.checkAndCheckinUser = async (req, res) => {
   try {
     const pg_id = req.body.pg_id;
+
+    // ✅ FIXED USER ID
     const user_id = req.user.id;
 
     console.log("CHECKIN USER:", user_id, "PG:", pg_id);
 
     //////////////////////////////////////////////////////
-    // ✅ VALIDATION
+    // VALIDATION
     //////////////////////////////////////////////////////
     if (!pg_id) {
       return res.status(400).json({
@@ -505,7 +507,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK JOIN (must be joined)
+    // 1. CHECK JOIN
     //////////////////////////////////////////////////////
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
@@ -522,7 +524,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. CHECK PAYMENT
+    // 2. CHECK PAYMENT
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
       `SELECT * FROM bookings 
@@ -557,7 +559,24 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 3. ALWAYS ALLOW (NO BLOCKING)
+    // 3. CHECK IF ALREADY JOINED (ENTRY EXISTS)
+    //////////////////////////////////////////////////////
+    const [existing] = await db.query(
+      `SELECT * FROM pg_checkins 
+       WHERE user_id = ? AND pg_id = ?`,
+      [user_id, pg_id]
+    );
+
+    if (existing.length > 0) {
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "✅ You already joined this PG"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // 4. READY FOR ROOM SELECTION
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
@@ -574,6 +593,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     });
   }
 };
+
 
 exports.joinPGWithRoom = async (req, res) => {
   try {
