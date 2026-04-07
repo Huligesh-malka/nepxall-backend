@@ -22,8 +22,14 @@ router.post("/:id/track", qrScanController.trackQRScan);
 // Get scan statistics (owner/admin)
 router.get("/:id/statistics", auth, qrScanController.getScanStatistics);
 
-// ⭐ NEW: Check payment + Check-in user
+
+
+
+// check status
 router.post("/checkin", auth, qrScanController.checkAndCheckinUser);
+
+// join with room
+router.post("/join", auth, qrScanController.joinPGWithRoom);
 
 //////////////////////////////////////////////////////
 

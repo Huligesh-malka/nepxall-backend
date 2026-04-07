@@ -488,9 +488,6 @@ exports.getScanStatistics = async (req, res) => {
 
 exports.checkAndCheckinUser = async (req, res) => {
   try {
-    //////////////////////////////////////////////////////
-    // ✅ GET DATA
-    //////////////////////////////////////////////////////
     const pg_id = req.body.pg_id;
 
     const user_id =
@@ -498,10 +495,8 @@ exports.checkAndCheckinUser = async (req, res) => {
       req.user?.uid ||
       req.user;
 
-    console.log("USER:", user_id);
-
     //////////////////////////////////////////////////////
-    // ❌ VALIDATION
+    // VALIDATION
     //////////////////////////////////////////////////////
     if (!pg_id) {
       return res.status(400).json({
@@ -518,7 +513,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK JOIN (pg_users)
+    // 1. CHECK JOIN
     //////////////////////////////////////////////////////
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
@@ -526,7 +521,6 @@ exports.checkAndCheckinUser = async (req, res) => {
       [user_id, pg_id]
     );
 
-    // 🔥 NOT JOINED
     if (activeStay.length === 0) {
       return res.json({
         success: false,
@@ -536,7 +530,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. CHECK BOOKING
+    // 2. CHECK PAYMENT
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
       `SELECT * FROM bookings 
@@ -548,16 +542,13 @@ exports.checkAndCheckinUser = async (req, res) => {
     if (booking.length === 0) {
       return res.json({
         success: false,
-        type: "NO_BOOKING",
-        message: "❌ No booking found"
+        type: "NOT_PAID",
+        message: "❌ Please complete payment"
       });
     }
 
     const userBooking = booking[0];
 
-    //////////////////////////////////////////////////////
-    // ✅ 3. CHECK PAYMENT
-    //////////////////////////////////////////////////////
     const [payment] = await db.query(
       `SELECT * FROM payments 
        WHERE booking_id = ? 
@@ -569,47 +560,38 @@ exports.checkAndCheckinUser = async (req, res) => {
       return res.json({
         success: false,
         type: "NOT_PAID",
-        message: "❌ You have not paid. Please complete payment"
+        message: "❌ Please complete payment"
       });
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 4. PREVENT DUPLICATE CHECK-IN
+    // 3. CHECK IF ALREADY JOINED (ENTRY CREATED)
     //////////////////////////////////////////////////////
     const [existing] = await db.query(
       `SELECT * FROM pg_checkins 
-       WHERE user_id = ? AND pg_id = ? AND DATE(checkin_time) = CURDATE()`,
+       WHERE user_id = ? AND pg_id = ?`,
       [user_id, pg_id]
     );
 
     if (existing.length > 0) {
       return res.json({
         success: true,
-        type: "ALREADY",
-        message: "✅ Already checked-in today"
+        type: "ALREADY_JOINED",
+        message: "✅ You already joined this PG"
       });
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 5. STORE CHECK-IN
-    //////////////////////////////////////////////////////
-    await db.query(
-      `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status)
-       VALUES (?, ?, ?, ?)`,
-      [user_id, pg_id, userBooking.id, "paid"]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS
+    // 4. FIRST ENTRY SUCCESS
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      type: "SUCCESS",
-      message: "✅ Check-in successful (Welcome 🎉)"
+      type: "READY_TO_JOIN",
+      message: "Proceed to room selection"
     });
 
   } catch (err) {
-    console.error("🔥 CHECK-IN ERROR:", err);
+    console.error("CHECK-IN ERROR:", err);
 
     return res.status(500).json({
       success: false,
