@@ -316,16 +316,16 @@ exports.getPGScanData = async (req, res) => {
 
     // 7. Fetch available rooms from pg_rooms table
     const [roomRows] = await db.query(
-      `SELECT room_no, room_type, total_seats, occupied_seats, rent, deposit
-       FROM pg_rooms 
-       WHERE pg_id = ? AND status != 'full'
-       ORDER BY rent ASC`,
-      [id]
-    );
+  `SELECT id, room_no, room_type, total_seats, occupied_seats, rent, deposit
+   FROM pg_rooms 
+   WHERE pg_id = ? AND status != 'full'
+   ORDER BY rent ASC`,
+  [id]
+);
 
     // 8. Attach room data
     pg.available_room_details = roomRows.map(room => ({
-      room_number: room.room_no,
+      id: room.id,
       sharing_type: room.room_type,
       total_seats: room.total_seats,
       occupied_seats: room.occupied_seats,
@@ -600,7 +600,6 @@ exports.checkAndCheckinUser = async (req, res) => {
 exports.joinPGWithRoom = async (req, res) => {
   try {
     const { pg_id, room_id } = req.body;
-
     const user_id = req.user.id;
 
     console.log("JOIN USER:", user_id, "PG:", pg_id, "ROOM:", room_id);
@@ -633,11 +632,11 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ FIXED: CHECK ROOM FROM pg_rooms
+    // ✅ CORRECT ROOM FETCH (BY ID)
     //////////////////////////////////////////////////////
     const [room] = await db.query(
       `SELECT * FROM pg_rooms 
-       WHERE room_no = ? AND pg_id = ?`,
+       WHERE id = ? AND pg_id = ?`,
       [room_id, pg_id]
     );
 
@@ -650,7 +649,6 @@ exports.joinPGWithRoom = async (req, res) => {
 
     const selectedRoom = room[0];
 
-    // Calculate available beds
     const availableBeds =
       selectedRoom.total_seats - selectedRoom.occupied_seats;
 
@@ -662,7 +660,7 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // INSERT INTO pg_users
+    // INSERT USER
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_users 
@@ -672,7 +670,7 @@ exports.joinPGWithRoom = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ UPDATE OCCUPIED SEATS
+    // UPDATE ROOM
     //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_rooms 
@@ -682,7 +680,7 @@ exports.joinPGWithRoom = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // INSERT CHECK-IN
+    // STORE CHECKIN
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_checkins 
@@ -693,9 +691,6 @@ exports.joinPGWithRoom = async (req, res) => {
 
     console.log("✅ JOIN SUCCESS STORED");
 
-    //////////////////////////////////////////////////////
-    // SUCCESS
-    //////////////////////////////////////////////////////
     return res.json({
       success: true,
       type: "JOIN_SUCCESS",
