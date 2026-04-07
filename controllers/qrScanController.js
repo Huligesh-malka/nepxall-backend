@@ -618,136 +618,84 @@ exports.checkAndCheckinUser = async (req, res) => {
   }
 };    
 
-
 exports.joinPGWithRoom = async (req, res) => {
+  const connection = await db.getConnection(); // Get a connection for transaction
   try {
-    //////////////////////////////////////////////////////
-    // ✅ GET DATA
-    //////////////////////////////////////////////////////
+    await connection.beginTransaction();
+
     const { pg_id, room_id } = req.body;
     const user_id = req.user.id;
 
-    console.log("JOIN USER:", user_id, "PG:", pg_id, "ROOM:", room_id);
-
-    //////////////////////////////////////////////////////
-    // ❌ VALIDATION
-    //////////////////////////////////////////////////////
-    if (!pg_id || !room_id) {
-      return res.status(400).json({
-        success: false,
-        message: "PG ID and Room ID required"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ 1. GET ROOM DATA
-    //////////////////////////////////////////////////////
-    const [rooms] = await db.query(
-      `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ?`,
+    // 1. Fetch Room with a "FOR UPDATE" lock to prevent double-booking
+    const [rooms] = await connection.query(
+      `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ? FOR UPDATE`,
       [room_id, pg_id]
     );
 
     if (rooms.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Room not found"
-      });
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Room not found" });
     }
 
     const room = rooms[0];
 
-    //////////////////////////////////////////////////////
-    // ❌ CHECK ROOM FULL
-    //////////////////////////////////////////////////////
+    // 2. Check Capacity
     if (room.occupied_seats >= room.total_seats) {
-      return res.json({
-        success: false,
-        message: "❌ Room is full"
-      });
+      await connection.rollback();
+      return res.json({ success: false, message: "❌ Room is full" });
     }
 
-    //////////////////////////////////////////////////////
-    // ❌ CHECK ALREADY JOINED
-    //////////////////////////////////////////////////////
-    const [existing] = await db.query(
-      `SELECT * FROM pg_users 
-       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
+    // 3. Check if user already in THIS PG
+    const [existing] = await connection.query(
+      `SELECT id FROM pg_users WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
       [user_id, pg_id]
     );
 
     if (existing.length > 0) {
-      return res.json({
-        success: true,
-        type: "ALREADY_JOINED",
-        message: "✅ Already joined this PG"
-      });
+      await connection.rollback();
+      return res.json({ success: false, message: "Already joined this PG" });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 IMPORTANT: FIX room_no mapping
-    //////////////////////////////////////////////////////
-    const roomNo = room.room_no || room.room_number || null;
+    // 4. FIX: Ensure we use the correct property from your DB
+    // Check if your DB column is room_no, room_number, or room_name
+    const roomNo = room.room_no || room.room_number || room.id; 
 
-    console.log("FINAL ROOM NO:", roomNo);
-
-    //////////////////////////////////////////////////////
-    // ✅ 2. INSERT INTO pg_users (MAIN FIX)
-    //////////////////////////////////////////////////////
-    await db.query(
+    // 5. Insert User
+    await connection.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
        VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
-      [
-        room.owner_id || 1,
-        pg_id,
-        room_id,
-        user_id,
-        roomNo
-      ]
+      [room.owner_id || 1, pg_id, room_id, user_id, roomNo]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ 3. INSERT INTO pg_checkins (ALWAYS INSERT)
-    //////////////////////////////////////////////////////
-    await db.query(
-      `INSERT INTO pg_checkins 
-       (user_id, pg_id, booking_id, payment_status)
-       VALUES (?, ?, ?, ?)`,
-      [
-        user_id,
-        pg_id,
-        null,   // optional booking_id
-        "paid"
-      ]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ 4. UPDATE ROOM OCCUPANCY
-    //////////////////////////////////////////////////////
-    await db.query(
+    // 6. Update Room Occupancy (The "Minus" logic you asked for)
+    await connection.query(
       `UPDATE pg_rooms 
        SET occupied_seats = occupied_seats + 1 
        WHERE id = ?`,
       [room_id]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS
-    //////////////////////////////////////////////////////
+    // 7. Initial Check-in
+    await connection.query(
+      `INSERT INTO pg_checkins (user_id, pg_id, payment_status) VALUES (?, ?, ?)`,
+      [user_id, pg_id, "paid"]
+    );
+
+    // Commit all changes
+    await connection.commit();
+
     return res.json({
       success: true,
-      message: "🎉 Joined + Check-in successful",
-      data: {
-        room_no: roomNo
-      }
+      message: "🎉 Joined successfully",
+      room_no: roomNo
     });
 
   } catch (err) {
+    await connection.rollback();
     console.error("🔥 JOIN ERROR:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Server error"
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    connection.release();
   }
 };
