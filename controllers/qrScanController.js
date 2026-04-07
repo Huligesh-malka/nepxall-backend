@@ -599,3 +599,108 @@ exports.checkAndCheckinUser = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+exports.joinPGWithRoom = async (req, res) => {
+  try {
+    const { pg_id, room_id } = req.body;
+
+    const user_id =
+      req.user?.id ||
+      req.user?.uid ||
+      req.user;
+
+    //////////////////////////////////////////////////////
+    // VALIDATION
+    //////////////////////////////////////////////////////
+    if (!pg_id) {
+      return res.status(400).json({
+        success: false,
+        message: "PG ID required"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // CHECK ALREADY JOINED
+    //////////////////////////////////////////////////////
+    const [existing] = await db.query(
+      `SELECT * FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
+      [user_id, pg_id]
+    );
+
+    if (existing.length > 0) {
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "✅ Already joined this PG"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ROOM OPTIONAL LOGIC
+    //////////////////////////////////////////////////////
+    if (room_id) {
+      const [room] = await db.query(
+        `SELECT * FROM rooms 
+         WHERE id = ? AND pg_id = ? AND available_beds > 0`,
+        [room_id, pg_id]
+      );
+
+      if (room.length === 0) {
+        return res.json({
+          success: false,
+          message: "❌ Room not available"
+        });
+      }
+
+      // reduce bed
+      await db.query(
+        `UPDATE rooms 
+         SET available_beds = available_beds - 1 
+         WHERE id = ?`,
+        [room_id]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // INSERT INTO pg_users
+    //////////////////////////////////////////////////////
+    const [result] = await db.query(
+      `INSERT INTO pg_users 
+       (user_id, pg_id, room_id, status, join_date)
+       VALUES (?, ?, ?, 'ACTIVE', NOW())`,
+      [user_id, pg_id, room_id || null]
+    );
+
+    //////////////////////////////////////////////////////
+    // CREATE FIRST CHECK-IN ENTRY
+    //////////////////////////////////////////////////////
+    await db.query(
+      `INSERT INTO pg_checkins 
+       (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, ?)`,
+      [user_id, pg_id, null, "pending"]
+    );
+
+    //////////////////////////////////////////////////////
+    // SUCCESS
+    //////////////////////////////////////////////////////
+    return res.json({
+      success: true,
+      type: "JOIN_SUCCESS",
+      message: "🎉 Joined successfully"
+    });
+
+  } catch (err) {
+    console.error("JOIN ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
