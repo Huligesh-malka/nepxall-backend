@@ -488,9 +488,41 @@ exports.getScanStatistics = async (req, res) => {
 
 exports.checkAndCheckinUser = async (req, res) => {
   try {
-    const { user_id, pg_id } = req.body;
+    //////////////////////////////////////////////////////
+    // ✅ GET DATA (FIXED)
+    //////////////////////////////////////////////////////
+    const pg_id = req.body.pg_id;
+    const user_id = req.user.id; // 🔥 IMPORTANT FIX
 
-    // 1. Check booking
+    //////////////////////////////////////////////////////
+    // ❌ VALIDATION
+    //////////////////////////////////////////////////////
+    if (!pg_id) {
+      return res.status(400).json({
+        success: false,
+        message: "PG ID is required"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ 1. CHECK ACTIVE STAY (pg_users)
+    //////////////////////////////////////////////////////
+    const [activeStay] = await db.query(
+      `SELECT * FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
+      [user_id, pg_id]
+    );
+
+    if (activeStay.length === 0) {
+      return res.json({
+        success: false,
+        message: "❌ No active stay found"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ 2. CHECK BOOKING
+    //////////////////////////////////////////////////////
     const [booking] = await db.query(
       `SELECT * FROM bookings 
        WHERE user_id = ? AND pg_id = ? 
@@ -507,28 +539,58 @@ exports.checkAndCheckinUser = async (req, res) => {
 
     const userBooking = booking[0];
 
-    // 2. Check payment status
-    if (userBooking.payment_status !== "paid") {
+    //////////////////////////////////////////////////////
+    // ✅ 3. CHECK PAYMENT (FIXED)
+    //////////////////////////////////////////////////////
+    const [payment] = await db.query(
+      `SELECT * FROM payments 
+       WHERE booking_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userBooking.id]
+    );
+
+    if (payment.length === 0 || payment[0].status !== "paid") {
       return res.json({
         success: false,
         message: "❌ Payment not completed"
       });
     }
 
-    // 3. Store check-in
+    //////////////////////////////////////////////////////
+    // ✅ 4. PREVENT DUPLICATE CHECK-IN
+    //////////////////////////////////////////////////////
+    const [existing] = await db.query(
+      `SELECT * FROM pg_checkins 
+       WHERE user_id = ? AND pg_id = ? AND DATE(checkin_time) = CURDATE()`,
+      [user_id, pg_id]
+    );
+
+    if (existing.length > 0) {
+      return res.json({
+        success: true,
+        message: "✅ Already checked-in today"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ 5. STORE CHECK-IN
+    //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status)
        VALUES (?, ?, ?, ?)`,
-      [user_id, pg_id, userBooking.id, userBooking.payment_status]
+      [user_id, pg_id, userBooking.id, "paid"]
     );
 
+    //////////////////////////////////////////////////////
+    // ✅ SUCCESS RESPONSE
+    //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      message: "✅ Check-in successful (Welcome to PG)"
+      message: "✅ Check-in successful (Welcome 🎉)"
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("CHECK-IN ERROR:", err);
     res.status(500).json({
       success: false,
       message: "Server error"
