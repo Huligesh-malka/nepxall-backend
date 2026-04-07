@@ -489,10 +489,18 @@ exports.getScanStatistics = async (req, res) => {
 exports.checkAndCheckinUser = async (req, res) => {
   try {
     //////////////////////////////////////////////////////
-    // ✅ GET DATA (FIXED)
+    // ✅ GET DATA
     //////////////////////////////////////////////////////
     const pg_id = req.body.pg_id;
-    const user_id = req.user.id; // 🔥 IMPORTANT FIX
+
+    // 🔥 FIX: Handle Firebase user correctly
+    const user_id =
+      req.user?.id || // if mapped DB user
+      req.user?.uid || // Firebase UID
+      req.user; // fallback
+
+    console.log("USER DEBUG:", req.user);
+    console.log("USER ID USED:", user_id);
 
     //////////////////////////////////////////////////////
     // ❌ VALIDATION
@@ -504,8 +512,15 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
+    if (!user_id) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated"
+      });
+    }
+
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK ACTIVE STAY (pg_users)
+    // ✅ 1. CHECK ACTIVE STAY
     //////////////////////////////////////////////////////
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
@@ -540,7 +555,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     const userBooking = booking[0];
 
     //////////////////////////////////////////////////////
-    // ✅ 3. CHECK PAYMENT (FIXED)
+    // ✅ 3. CHECK PAYMENT
     //////////////////////////////////////////////////////
     const [payment] = await db.query(
       `SELECT * FROM payments 
@@ -590,10 +605,11 @@ exports.checkAndCheckinUser = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("CHECK-IN ERROR:", err);
-    res.status(500).json({
+    console.error("🔥 CHECK-IN ERROR FULL:", err);
+
+    return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: err.message || "Server error"
     });
   }
 };
