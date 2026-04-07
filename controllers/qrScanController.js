@@ -638,7 +638,7 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK ROOM EXISTS
+    // ✅ 1. GET ROOM DATA
     //////////////////////////////////////////////////////
     const [rooms] = await db.query(
       `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ?`,
@@ -682,9 +682,16 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. INSERT INTO pg_users
+    // 🔥 IMPORTANT: FIX room_no mapping
     //////////////////////////////////////////////////////
-    const [insertUser] = await db.query(
+    const roomNo = room.room_no || room.room_number || null;
+
+    console.log("FINAL ROOM NO:", roomNo);
+
+    //////////////////////////////////////////////////////
+    // ✅ 2. INSERT INTO pg_users (MAIN FIX)
+    //////////////////////////////////////////////////////
+    await db.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
        VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
@@ -693,21 +700,22 @@ exports.joinPGWithRoom = async (req, res) => {
         pg_id,
         room_id,
         user_id,
-        room.room_no
+        roomNo
       ]
     );
 
     //////////////////////////////////////////////////////
-    // ✅ 3. INSERT INTO pg_checkins (🔥 IMPORTANT FIX)
+    // ✅ 3. INSERT INTO pg_checkins (ALWAYS INSERT)
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_checkins 
-       (user_id, pg_id, booking_id, payment_status, checkin_time)
-       VALUES (?, ?, ?, 'paid', NOW())`,
+       (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, ?)`,
       [
         user_id,
         pg_id,
-        null // or booking_id if available
+        null,   // optional booking_id
+        "paid"
       ]
     );
 
@@ -726,11 +734,14 @@ exports.joinPGWithRoom = async (req, res) => {
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      message: "🎉 Joined + Check-in successful"
+      message: "🎉 Joined + Check-in successful",
+      data: {
+        room_no: roomNo
+      }
     });
 
   } catch (err) {
-    console.error("JOIN ERROR:", err);
+    console.error("🔥 JOIN ERROR:", err);
 
     return res.status(500).json({
       success: false,
