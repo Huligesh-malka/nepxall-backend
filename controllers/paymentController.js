@@ -122,15 +122,18 @@ exports.confirmPayment = async (req, res) => {
 
 exports.verifyPayment = async (req, res) => {
   try {
-    // 1. Admin Authorization Check
+    //////////////////////////////////////////////////////
+    // 1. ADMIN CHECK (SECURITY)
+    //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
     const { orderId } = req.params;
 
-    // 2. Fetch all necessary data from Payment joined with Bookings
-    // We fetch check_in_date and room_id to populate pg_users
+    //////////////////////////////////////////////////////
+    // 2. GET PAYMENT + BOOKING DATA
+    //////////////////////////////////////////////////////
     const [[paymentData]] = await db.query(
       `SELECT 
         p.booking_id, 
@@ -147,16 +150,25 @@ exports.verifyPayment = async (req, res) => {
     );
 
     if (!paymentData) {
-      return res.status(404).json({ success: false, message: "Payment record not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Payment record not found"
+      });
     }
 
-    // 3. Update Payment Status
+    //////////////////////////////////////////////////////
+    // 3. UPDATE PAYMENT
+    //////////////////////////////////////////////////////
     await db.query(
-      `UPDATE payments SET status='paid', verified_by_admin=TRUE WHERE order_id=?`,
+      `UPDATE payments 
+       SET status='paid', verified_by_admin=TRUE 
+       WHERE order_id=?`,
       [orderId]
     );
 
-    // 4. Update Booking Status
+    //////////////////////////////////////////////////////
+    // 4. UPDATE BOOKING
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE bookings 
        SET status='confirmed', 
@@ -166,35 +178,51 @@ exports.verifyPayment = async (req, res) => {
       [paymentData.amount, paymentData.booking_id]
     );
 
-    // 5. Create/Update Active Stay in pg_users
-    // Mapping: check_in_date -> join_date
+    //////////////////////////////////////////////////////
+    // 🔥 5. UPDATE pg_users (MAIN LOGIC)
+    //////////////////////////////////////////////////////
+
+    // ✅ STEP 5.1: REMOVE OLD ACTIVE (IMPORTANT)
     await db.query(
-      `INSERT INTO pg_users (owner_id, pg_id, room_id, user_id, join_date, status)
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+      `UPDATE pg_users 
+       SET status='LEFT' 
+       WHERE user_id=? AND pg_id=? AND status='ACTIVE'`,
+      [paymentData.user_id, paymentData.pg_id]
+    );
+
+    // ✅ STEP 5.2: INSERT NEW ACTIVE USER
+    await db.query(
+      `INSERT INTO pg_users 
+       (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
        ON DUPLICATE KEY UPDATE 
-          status='ACTIVE', 
-          join_date = VALUES(join_date),
-          room_id = VALUES(room_id)`,
+          status='ACTIVE',
+          room_id=VALUES(room_id),
+          join_date=VALUES(join_date),
+          booking_id=VALUES(booking_id)`,
       [
         paymentData.owner_id,
         paymentData.pg_id,
         paymentData.room_id || null,
         paymentData.user_id,
-        paymentData.check_in_date
+        paymentData.check_in_date,
+        paymentData.booking_id
       ]
     );
 
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
     res.json({
       success: true,
-      message: "Payment verified. User stay is now ACTIVE."
+      message: "✅ Payment verified → User moved to ACTIVE stay"
     });
 
   } catch (err) {
     console.error("❌ VERIFY PAYMENT ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error",
-      error: err.sqlMessage || err.message 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -203,18 +231,25 @@ exports.verifyPayment = async (req, res) => {
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
 exports.rejectPayment = async (req, res) => {
-
   try {
 
+    //////////////////////////////////////////////////////
+    // 1. ADMIN CHECK
+    //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success:false });
+      return res.status(403).json({ success: false });
     }
 
     const { orderId } = req.params;
 
-    // 🔥 1. Get booking_id (VERY IMPORTANT)
+    //////////////////////////////////////////////////////
+    // 2. GET BOOKING DATA (IMPORTANT)
+    //////////////////////////////////////////////////////
     const [rows] = await db.query(
-      `SELECT booking_id FROM payments WHERE order_id=?`,
+      `SELECT p.booking_id, b.user_id, b.pg_id
+       FROM payments p
+       JOIN bookings b ON b.id = p.booking_id
+       WHERE p.order_id=?`,
       [orderId]
     );
 
@@ -226,39 +261,60 @@ exports.rejectPayment = async (req, res) => {
     }
 
     const bookingId = rows[0].booking_id;
+    const userId = rows[0].user_id;
+    const pgId = rows[0].pg_id;
 
-    // 🔥 2. Update payment
+    //////////////////////////////////////////////////////
+    // 3. UPDATE PAYMENT → REJECTED
+    //////////////////////////////////////////////////////
     await db.query(
-      `UPDATE payments SET status='rejected' WHERE order_id=?`,
+      `UPDATE payments 
+       SET status='rejected' 
+       WHERE order_id=?`,
       [orderId]
     );
 
-    // 🔥 3. UPDATE SETTLEMENT (THIS IS YOUR MISSING PART)
+    //////////////////////////////////////////////////////
+    // 4. UPDATE BOOKING → RESET
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE bookings 
-       SET owner_settlement = NULL,
+       SET status='pending',
+           owner_settlement = NULL,
            settlement_date = NULL
        WHERE id = ?`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔥 5. UPDATE pg_users → REMOVE ACTIVE
+    //////////////////////////////////////////////////////
+    await db.query(
+      `UPDATE pg_users 
+       SET status='LEFT'
+       WHERE user_id=? 
+       AND pg_id=? 
+       AND status='ACTIVE'`,
+      [userId, pgId]
+    );
+
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
     res.json({
-      success:true,
-      message: "Payment rejected & settlement updated"
+      success: true,
+      message: "❌ Payment rejected → User removed from active stay"
     });
 
   } catch (err) {
-
-    console.error(err);
+    console.error("❌ REJECT PAYMENT ERROR:", err);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: "Internal server error"
     });
-
   }
-
 };
-
 
 //////////////////////////////////////////////////////
 // AUTO MATCH BANK TRANSACTION
