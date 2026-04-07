@@ -596,17 +596,18 @@ exports.checkAndCheckinUser = async (req, res) => {
 
 
 
-
-
 exports.joinPGWithRoom = async (req, res) => {
   try {
+    //////////////////////////////////////////////////////
+    // ✅ GET DATA
+    //////////////////////////////////////////////////////
     const { pg_id, room_id } = req.body;
     const user_id = req.user.id;
 
     console.log("JOIN USER:", user_id, "PG:", pg_id, "ROOM:", room_id);
 
     //////////////////////////////////////////////////////
-    // VALIDATION
+    // ❌ VALIDATION
     //////////////////////////////////////////////////////
     if (!pg_id || !room_id) {
       return res.status(400).json({
@@ -616,7 +617,34 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // CHECK ALREADY JOINED
+    // ✅ 1. CHECK ROOM EXISTS
+    //////////////////////////////////////////////////////
+    const [rooms] = await db.query(
+      `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ?`,
+      [room_id, pg_id]
+    );
+
+    if (rooms.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Room not found"
+      });
+    }
+
+    const room = rooms[0];
+
+    //////////////////////////////////////////////////////
+    // ❌ CHECK ROOM FULL
+    //////////////////////////////////////////////////////
+    if (room.occupied_seats >= room.total_seats) {
+      return res.json({
+        success: false,
+        message: "❌ Room is full"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ❌ CHECK ALREADY JOINED
     //////////////////////////////////////////////////////
     const [existing] = await db.query(
       `SELECT * FROM pg_users 
@@ -633,69 +661,37 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ CORRECT ROOM FETCH (BY ID)
-    //////////////////////////////////////////////////////
-    const [room] = await db.query(
-      `SELECT * FROM pg_rooms 
-       WHERE id = ? AND pg_id = ?`,
-      [room_id, pg_id]
-    );
-
-    if (room.length === 0) {
-      return res.json({
-        success: false,
-        message: "❌ Room not found"
-      });
-    }
-
-    const selectedRoom = room[0];
-
-    const availableBeds =
-      selectedRoom.total_seats - selectedRoom.occupied_seats;
-
-    if (availableBeds <= 0) {
-      return res.json({
-        success: false,
-        message: "❌ Room is full"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // INSERT USER
+    // ✅ 2. INSERT INTO pg_users (🔥 FIX HERE)
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO pg_users 
-       (user_id, pg_id, room_id, room_no, status, join_date)
-       VALUES (?, ?, ?, ?, 'ACTIVE', NOW())`,
-      [user_id, pg_id, selectedRoom.id, selectedRoom.room_no]
+       (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
+       VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
+      [
+        room.owner_id || 1, // fallback if not exists
+        pg_id,
+        room_id,
+        user_id,
+        room.room_no
+      ]
     );
 
     //////////////////////////////////////////////////////
-    // UPDATE ROOM
+    // ✅ 3. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_rooms 
        SET occupied_seats = occupied_seats + 1 
        WHERE id = ?`,
-      [selectedRoom.id]
+      [room_id]
     );
 
     //////////////////////////////////////////////////////
-    // STORE CHECKIN
+    // ✅ SUCCESS
     //////////////////////////////////////////////////////
-    await db.query(
-      `INSERT INTO pg_checkins 
-       (user_id, pg_id, booking_id, payment_status)
-       VALUES (?, ?, ?, ?)`,
-      [user_id, pg_id, null, "paid"]
-    );
-
-    console.log("✅ JOIN SUCCESS STORED");
-
     return res.json({
       success: true,
-      type: "JOIN_SUCCESS",
-      message: "🎉 Joined successfully"
+      message: "🎉 Joined successfully with room"
     });
 
   } catch (err) {
@@ -703,7 +699,7 @@ exports.joinPGWithRoom = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: err.message
+      message: err.message || "Server error"
     });
   }
 };
