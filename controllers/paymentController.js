@@ -122,15 +122,18 @@ exports.confirmPayment = async (req, res) => {
 
 exports.verifyPayment = async (req, res) => {
   try {
-    // 1. Admin Authorization Check
+    //////////////////////////////////////////////////////
+    // 1. ADMIN CHECK
+    //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
     const { orderId } = req.params;
 
-    // 2. Fetch all necessary data from Payment joined with Bookings
-    // We fetch check_in_date and room_id to populate pg_users
+    //////////////////////////////////////////////////////
+    // 2. GET PAYMENT + BOOKING DATA
+    //////////////////////////////////////////////////////
     const [[paymentData]] = await db.query(
       `SELECT 
         p.booking_id, 
@@ -147,16 +150,25 @@ exports.verifyPayment = async (req, res) => {
     );
 
     if (!paymentData) {
-      return res.status(404).json({ success: false, message: "Payment record not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Payment record not found"
+      });
     }
 
-    // 3. Update Payment Status
+    //////////////////////////////////////////////////////
+    // 3. UPDATE PAYMENT → PAID
+    //////////////////////////////////////////////////////
     await db.query(
-      `UPDATE payments SET status='paid', verified_by_admin=TRUE WHERE order_id=?`,
+      `UPDATE payments 
+       SET status='paid', verified_by_admin=TRUE 
+       WHERE order_id=?`,
       [orderId]
     );
 
-    // 4. Update Booking Status
+    //////////////////////////////////////////////////////
+    // 4. UPDATE BOOKING → CONFIRMED
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE bookings 
        SET status='confirmed', 
@@ -166,35 +178,73 @@ exports.verifyPayment = async (req, res) => {
       [paymentData.amount, paymentData.booking_id]
     );
 
-    // 5. Create/Update Active Stay in pg_users
-    // Mapping: check_in_date -> join_date
-    await db.query(
-      `INSERT INTO pg_users (owner_id, pg_id, room_id, user_id, join_date, status)
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE')
-       ON DUPLICATE KEY UPDATE 
-          status='ACTIVE', 
-          join_date = VALUES(join_date),
-          room_id = VALUES(room_id)`,
-      [
-        paymentData.owner_id,
-        paymentData.pg_id,
-        paymentData.room_id || null,
-        paymentData.user_id,
-        paymentData.check_in_date
-      ]
+    //////////////////////////////////////////////////////
+    // 🔥 5. INSERT / UPDATE PG_USERS (MAIN FIX)
+    //////////////////////////////////////////////////////
+
+    // Check existing entry
+    const [[existing]] = await db.query(
+      `SELECT id FROM pg_users WHERE booking_id=?`,
+      [paymentData.booking_id]
     );
 
+    if (!existing) {
+      // ✅ INSERT NEW ACTIVE USER
+      await db.query(
+        `INSERT INTO pg_users 
+        (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+        VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
+        [
+          paymentData.owner_id,
+          paymentData.pg_id,
+          paymentData.room_id || null,
+          paymentData.user_id,
+          paymentData.check_in_date,
+          paymentData.booking_id
+        ]
+      );
+    } else {
+      // ✅ UPDATE EXISTING ENTRY
+      await db.query(
+        `UPDATE pg_users 
+         SET status='ACTIVE',
+             room_id=?,
+             join_date=? 
+         WHERE booking_id=?`,
+        [
+          paymentData.room_id || null,
+          paymentData.check_in_date,
+          paymentData.booking_id
+        ]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // 6. UPDATE ROOM OCCUPANCY (IMPORTANT)
+    //////////////////////////////////////////////////////
+    if (paymentData.room_id) {
+      await db.query(
+        `UPDATE pg_rooms 
+         SET occupied_seats = occupied_seats + 1 
+         WHERE id=?`,
+        [paymentData.room_id]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
     res.json({
       success: true,
-      message: "Payment verified. User stay is now ACTIVE."
+      message: "Payment verified. User is now ACTIVE in PG."
     });
 
   } catch (err) {
     console.error("❌ VERIFY PAYMENT ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Internal Server Error",
-      error: err.sqlMessage || err.message 
+      error: err.sqlMessage || err.message
     });
   }
 };
