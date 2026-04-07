@@ -179,17 +179,21 @@ exports.verifyPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 5. INSERT / UPDATE PG_USERS (MAIN FIX)
+    // 🔥 5. INSERT / UPDATE PG_USERS (FIXED LOGIC)
     //////////////////////////////////////////////////////
 
-    // Check existing entry
-    const [[existing]] = await db.query(
-      `SELECT id FROM pg_users WHERE booking_id=?`,
-      [paymentData.booking_id]
+    // 🔍 Check existing user in same PG
+    const [[existingUser]] = await db.query(
+      `SELECT id, status FROM pg_users 
+       WHERE user_id=? AND pg_id=? 
+       ORDER BY id DESC LIMIT 1`,
+      [paymentData.user_id, paymentData.pg_id]
     );
 
-    if (!existing) {
-      // ✅ INSERT NEW ACTIVE USER
+    if (!existingUser) {
+      //////////////////////////////////////////////////////
+      // ✅ FIRST TIME BOOKING → INSERT
+      //////////////////////////////////////////////////////
       await db.query(
         `INSERT INTO pg_users 
         (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
@@ -203,24 +207,38 @@ exports.verifyPayment = async (req, res) => {
           paymentData.booking_id
         ]
       );
-    } else {
-      // ✅ UPDATE EXISTING ENTRY
+
+    } else if (existingUser.status === "LEFT") {
+      //////////////////////////////////////////////////////
+      // 🔥 RE-BOOK SAME PG → UPDATE OLD ROW
+      //////////////////////////////////////////////////////
       await db.query(
         `UPDATE pg_users 
          SET status='ACTIVE',
              room_id=?,
-             join_date=? 
-         WHERE booking_id=?`,
+             join_date=?,
+             booking_id=? 
+         WHERE id=?`,
         [
           paymentData.room_id || null,
           paymentData.check_in_date,
-          paymentData.booking_id
+          paymentData.booking_id,
+          existingUser.id
         ]
       );
+
+    } else {
+      //////////////////////////////////////////////////////
+      // ❌ SAFETY: USER ALREADY ACTIVE
+      //////////////////////////////////////////////////////
+      return res.status(400).json({
+        success: false,
+        message: "User already active in this PG"
+      });
     }
 
     //////////////////////////////////////////////////////
-    // 6. UPDATE ROOM OCCUPANCY (IMPORTANT)
+    // 6. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     if (paymentData.room_id) {
       await db.query(
@@ -248,7 +266,6 @@ exports.verifyPayment = async (req, res) => {
     });
   }
 };
-
 //////////////////////////////////////////////////////
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
