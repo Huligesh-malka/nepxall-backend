@@ -202,24 +202,58 @@ exports.updateBookingStatus = async (req, res) => {
     const { bookingId } = req.params;
     const { status } = req.body;
 
+    //////////////////////////////////////////////////////
+    // ✅ VALID STATUS
+    //////////////////////////////////////////////////////
     const validStatuses = ['approved', 'rejected'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    await db.query(
-      "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
-      [status, bookingId, req.user.id]
+    //////////////////////////////////////////////////////
+    // 🔥 GET CURRENT BOOKING
+    //////////////////////////////////////////////////////
+    const [[booking]] = await db.query(
+      "SELECT status FROM bookings WHERE id=? AND owner_id=?",
+      [bookingId, req.user.id]
     );
 
-    res.json({ success: true });
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    //////////////////////////////////////////////////////
+    // 🔥 LOGIC FIX
+    //////////////////////////////////////////////////////
+    let finalStatus = status;
+
+    if (status === "rejected") {
+      // ❌ DON'T BLOCK USER
+      // 👉 keep booking alive for retry payment
+      finalStatus = "approved"; 
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE BOOKING
+    //////////////////////////////////////////////////////
+    await db.query(
+      "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
+      [finalStatus, bookingId, req.user.id]
+    );
+
+    res.json({
+      success: true,
+      message: status === "rejected"
+        ? "Booking kept approved (user can retry payment)"
+        : "Booking approved"
+    });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
-
 //////////////////////////////////////////////////////
 // 💳 PAYMENT SUCCESS
 //////////////////////////////////////////////////////
