@@ -252,60 +252,101 @@ exports.verifyPayment = async (req, res) => {
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
 exports.rejectPayment = async (req, res) => {
+  const connection = await db.getConnection();
 
   try {
+    await connection.beginTransaction();
 
+    //////////////////////////////////////////////////////
+    // ✅ ADMIN CHECK
+    //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success:false });
+      return res.status(403).json({ success: false });
     }
 
     const { orderId } = req.params;
 
-    // 🔥 1. Get booking_id (VERY IMPORTANT)
-    const [rows] = await db.query(
-      `SELECT booking_id FROM payments WHERE order_id=?`,
+    //////////////////////////////////////////////////////
+    // ✅ GET PAYMENT + BOOKING
+    //////////////////////////////////////////////////////
+    const [[data]] = await connection.query(
+      `SELECT p.booking_id, b.user_id, b.pg_id, b.room_id
+       FROM payments p
+       JOIN bookings b ON b.id = p.booking_id
+       WHERE p.order_id=? FOR UPDATE`,
       [orderId]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found"
-      });
+    if (!data) {
+      throw new Error("Payment not found");
     }
 
-    const bookingId = rows[0].booking_id;
+    const { booking_id, user_id, pg_id, room_id } = data;
 
-    // 🔥 2. Update payment
-    await db.query(
-      `UPDATE payments SET status='rejected' WHERE order_id=?`,
+    //////////////////////////////////////////////////////
+    // ❌ UPDATE PAYMENT
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE payments 
+       SET status='rejected', verified_by_admin=FALSE 
+       WHERE order_id=?`,
       [orderId]
     );
 
-    // 🔥 3. UPDATE SETTLEMENT (THIS IS YOUR MISSING PART)
-    await db.query(
+    //////////////////////////////////////////////////////
+    // ❌ RESET BOOKING
+    //////////////////////////////////////////////////////
+    await connection.query(
       `UPDATE bookings 
-       SET owner_settlement = NULL,
-           settlement_date = NULL
-       WHERE id = ?`,
-      [bookingId]
+       SET status='pending',
+           owner_settlement=NULL,
+           settlement_date=NULL
+       WHERE id=?`,
+      [booking_id]
     );
 
+    //////////////////////////////////////////////////////
+    // ❌ REMOVE USER FROM PG (IMPORTANT)
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `DELETE FROM pg_users 
+       WHERE booking_id=?`,
+      [booking_id]
+    );
+
+    //////////////////////////////////////////////////////
+    // ❌ DECREASE ROOM OCCUPANCY
+    //////////////////////////////////////////////////////
+    if (room_id) {
+      await connection.query(
+        `UPDATE pg_rooms 
+         SET occupied_seats = GREATEST(occupied_seats - 1, 0)
+         WHERE id=?`,
+        [room_id]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
     res.json({
-      success:true,
-      message: "Payment rejected & settlement updated"
+      success: true,
+      message: "Payment rejected and system rolled back successfully"
     });
 
   } catch (err) {
-
-    console.error(err);
+    await connection.rollback();
+    console.error("❌ REJECT ERROR:", err);
 
     res.status(500).json({
-      success:false
+      success: false,
+      message: err.message
     });
-
+  } finally {
+    connection.release();
   }
-
 };
 
 
