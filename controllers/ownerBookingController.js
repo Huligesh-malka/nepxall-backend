@@ -384,9 +384,8 @@ exports.rejectVacateRequest = async (req, res) => {
 
 
 
-
 /* ======================================================
-   💰 OWNER → MARK REFUND AS PAID
+   💰 OWNER → MARK REFUND AS PAID (FINAL FIX)
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
@@ -401,60 +400,64 @@ exports.markRefundPaid = async (req, res) => {
     //////////////////////////////////////////////////////
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) {
-      return res.status(403).json({ message: "Not an owner" });
+      throw new Error("Not an owner");
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET REFUND + BOOKING
+    // ✅ GET LATEST REFUND ONLY (CRITICAL FIX)
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
        FROM refunds r
        JOIN bookings b ON b.id = r.booking_id
-       WHERE r.booking_id=?`,
+       WHERE r.booking_id=? 
+       AND r.refund_type='DEPOSIT'
+       ORDER BY r.id DESC
+       LIMIT 1`,
       [bookingId]
     );
 
     if (!refund) {
-      return res.status(404).json({ message: "Refund not found" });
+      throw new Error("Refund not found");
     }
 
     //////////////////////////////////////////////////////
     // 🔒 SECURITY CHECK
     //////////////////////////////////////////////////////
     if (refund.owner_id !== owner.id) {
-      return res.status(403).json({ message: "Unauthorized" });
+      throw new Error("Unauthorized");
     }
 
     //////////////////////////////////////////////////////
-    // ✅ VALIDATION
+    // ✅ VALIDATION (STRICT)
     //////////////////////////////////////////////////////
     const userApproval = (refund.user_approval || "").toLowerCase();
+    const status = (refund.status || "").toLowerCase();
 
-    if (userApproval !== "accepted") {
-      return res.status(400).json({
-        message: "User has not accepted refund yet"
-      });
+    if (status === "paid") {
+      throw new Error("Already paid");
     }
 
-    if (refund.status === "paid") {
-      return res.status(400).json({
-        message: "Already paid"
-      });
+    if (userApproval !== "accepted") {
+      throw new Error("User has not accepted refund yet");
+    }
+
+    if (status !== "pending") {
+      throw new Error("Invalid refund state");
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE REFUND
+    // 💰 UPDATE ONLY THIS REFUND (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
        SET status='paid'
-       WHERE booking_id=?`,
-      [bookingId]
+       WHERE id=?`,
+      [refund.id]
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 FIXED: UPDATE CORRECT ROW USING booking_id
+    // 🏠 UPDATE PG_USERS (CORRECT ROW)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
@@ -482,13 +485,18 @@ exports.markRefundPaid = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Refund paid & user marked as LEFT"
+      message: "Refund paid successfully"
     });
 
   } catch (err) {
     await connection.rollback();
     console.error("❌ MARK PAID ERROR:", err);
-    res.status(500).json({ message: err.message });
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
   } finally {
     connection.release();
   }
