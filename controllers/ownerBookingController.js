@@ -389,17 +389,26 @@ exports.rejectVacateRequest = async (req, res) => {
    💰 OWNER → MARK REFUND AS PAID
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
+    await connection.beginTransaction();
+
     const { bookingId } = req.params;
 
+    //////////////////////////////////////////////////////
+    // ✅ OWNER CHECK
+    //////////////////////////////////////////////////////
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) {
       return res.status(403).json({ message: "Not an owner" });
     }
 
-    // ✅ CHECK REFUND
-    const [[refund]] = await db.query(
-      `SELECT r.*, b.owner_id 
+    //////////////////////////////////////////////////////
+    // ✅ GET REFUND + BOOKING
+    //////////////////////////////////////////////////////
+    const [[refund]] = await connection.query(
+      `SELECT r.*, b.owner_id, b.user_id, b.pg_id
        FROM refunds r
        JOIN bookings b ON b.id = r.booking_id
        WHERE r.booking_id=?`,
@@ -410,40 +419,97 @@ exports.markRefundPaid = async (req, res) => {
       return res.status(404).json({ message: "Refund not found" });
     }
 
+    //////////////////////////////////////////////////////
     // 🔒 SECURITY CHECK
+    //////////////////////////////////////////////////////
     if (refund.owner_id !== owner.id) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // ❗ ONLY ALLOW IF USER ACCEPTED
-    if (refund.user_approval !== "accepted") {
+    //////////////////////////////////////////////////////
+    // ✅ VALIDATION
+    //////////////////////////////////////////////////////
+    const userApproval = (refund.user_approval || "").toLowerCase();
+
+    if (userApproval !== "accepted") {
       return res.status(400).json({
         message: "User has not accepted refund yet"
       });
     }
 
-    // ❗ ONLY IF STILL PENDING
-    if (refund.status !== "pending") {
+    if (refund.status === "paid") {
       return res.status(400).json({
-        message: "Refund already processed"
+        message: "Already paid"
       });
     }
 
-    // ✅ FINAL PAYMENT
-    await db.query(
+    //////////////////////////////////////////////////////
+    // 💰 1. UPDATE REFUND
+    //////////////////////////////////////////////////////
+    await connection.query(
       `UPDATE refunds 
        SET status='paid'
        WHERE booking_id=?`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // 🏠 2. UPDATE PG_USERS → LEFT (IMPORTANT FIX)
+    //////////////////////////////////////////////////////
+    const [pgUpdate] = await connection.query(
+      `UPDATE pg_users 
+       SET 
+         status='LEFT',
+         vacate_status='completed'
+       WHERE user_id=? AND pg_id=?`,
+      [refund.user_id, refund.pg_id]
+    );
+
+    //////////////////////////////////////////////////////
+    // 🔥 FALLBACK (if above didn't match)
+    //////////////////////////////////////////////////////
+    if (pgUpdate.affectedRows === 0) {
+      await connection.query(
+        `UPDATE pg_users 
+         SET 
+           status='LEFT',
+           vacate_status='completed'
+         WHERE id IN (
+           SELECT id FROM (
+             SELECT id FROM pg_users 
+             WHERE user_id=? AND pg_id=? 
+             ORDER BY id DESC LIMIT 1
+           ) AS temp
+         )`,
+        [refund.user_id, refund.pg_id]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // 📦 3. UPDATE BOOKING
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE bookings 
+       SET status='left'
+       WHERE id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
     res.json({
       success: true,
-      message: "Refund marked as paid"
+      message: "Refund paid & user marked as LEFT"
     });
 
   } catch (err) {
+    await connection.rollback();
     console.error("❌ MARK PAID ERROR:", err);
     res.status(500).json({ message: err.message });
+  } finally {
+    connection.release();
   }
 };
