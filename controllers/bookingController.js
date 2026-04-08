@@ -516,6 +516,9 @@ exports.requestVacate = async (req, res) => {
       });
     }
 
+    //////////////////////////////////////////////////////
+    // ✅ BOOKING CHECK
+    //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -525,19 +528,74 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
+    //////////////////////////////////////////////////////
+    // ✅ CHECK EXISTING REFUND
+    //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
       `SELECT * FROM refunds 
        WHERE booking_id=? AND refund_type='DEPOSIT'`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔥 CASE 1: ALREADY EXISTS
+    //////////////////////////////////////////////////////
     if (existing) {
-      return res.status(400).json({
-        message: "Vacate already requested for this booking"
-      });
+
+      // ❌ If already active request
+      if (existing.status === "pending" || existing.status === "approved") {
+        return res.status(400).json({
+          message: "Vacate already requested"
+        });
+      }
+
+      // 🔁 If previously rejected → RE-REQUEST
+      if (existing.status === "rejected") {
+
+        // update pg_users again
+        await db.query(
+          `UPDATE pg_users 
+           SET 
+             status='LEAVING',
+             vacate_status='requested',
+             vacate_reason=?,
+             vacate_request_date=NOW(),
+             move_out_date=? 
+           WHERE user_id=? 
+           AND pg_id=?`,
+          [reason, vacate_date, userId, booking.pg_id]
+        );
+
+        // update refund instead of insert
+        await db.query(
+          `UPDATE refunds 
+           SET 
+             status='pending',
+             user_approval=NULL,
+             amount=0,
+             reason='Vacate deposit refund',
+             upi_id=?,
+             account_number=?,
+             ifsc_code=?
+           WHERE booking_id=?`,
+          [
+            upi_id || null,
+            account_number || null,
+            ifsc_code || null,
+            bookingId
+          ]
+        );
+
+        return res.json({
+          success: true,
+          message: "Vacate re-request submitted"
+        });
+      }
     }
 
-    // ✅ ONLY MARK LEAVING
+    //////////////////////////////////////////////////////
+    // ✅ NEW REQUEST
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_users 
        SET 
@@ -552,11 +610,10 @@ exports.requestVacate = async (req, res) => {
       [reason, vacate_date, userId, booking.pg_id]
     );
 
-    // ✅ CREATE REFUND
     await db.query(
       `INSERT INTO refunds 
-      (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status)
-      VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending')`,
+      (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status, user_approval)
+      VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending', NULL)`,
       [
         bookingId,
         userId,
@@ -603,7 +660,12 @@ exports.acceptRefund = async (req, res) => {
       });
     }
 
-    // ✅ CHANGE HERE
+    if (refund.user_approval === "accepted") {
+      return res.status(400).json({
+        message: "Already accepted"
+      });
+    }
+
     await db.query(
       `UPDATE refunds 
        SET user_approval='accepted', status='pending'
@@ -625,13 +687,11 @@ exports.acceptRefund = async (req, res) => {
 
 
 
-
 exports.rejectRefund = async (req, res) => {
   try {
     const { bookingId } = req.body;
     const userId = req.user.id;
 
-    // ✅ CHECK REFUND
     const [[refund]] = await db.query(
       "SELECT * FROM refunds WHERE booking_id=? AND user_id=?",
       [bookingId, userId]
@@ -641,14 +701,18 @@ exports.rejectRefund = async (req, res) => {
       return res.status(404).json({ message: "Refund not found" });
     }
 
-    // ❌ ONLY IF APPROVED
     if (refund.status !== "approved") {
       return res.status(400).json({
         message: "Refund not approved yet"
       });
     }
 
-    // ✅ UPDATE → REJECTED
+    if (refund.user_approval === "rejected") {
+      return res.status(400).json({
+        message: "Already rejected"
+      });
+    }
+
     await db.query(
       `UPDATE refunds 
        SET user_approval='rejected', status='pending'
