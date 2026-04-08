@@ -15,7 +15,7 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS
+    // 🔥 STEP 1: AUTO EXPIRE OLD PENDING BOOKINGS
     //////////////////////////////////////////////////////
     await db.query(`
       UPDATE bookings
@@ -25,24 +25,24 @@ exports.createBooking = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 2: BLOCK SAME PG DUPLICATE BOOKING
+    // 🔐 STEP 2: BLOCK ANY ACTIVE BOOKING (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(`
-      SELECT id FROM bookings 
+      SELECT id, status FROM bookings 
       WHERE user_id = ?
       AND pg_id = ?
-      AND status IN ('approved','confirmed')
+      AND status IN ('pending','approved','confirmed')
       LIMIT 1
     `, [userId, pgId]);
 
     if (existing) {
       return res.status(400).json({
-        message: "You already booked this PG. Complete or vacate first."
+        message: `You already have a ${existing.status} booking for this PG`
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 3: BLOCK IF USER ALREADY ACTIVE IN SAME PG
+    // 🔐 STEP 3: BLOCK IF USER IS ALREADY STAYING
     //////////////////////////////////////////////////////
     const [[activeStay]] = await db.query(`
       SELECT id FROM pg_users
@@ -57,20 +57,28 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 👤 USER
+    // 👤 GET USER
     //////////////////////////////////////////////////////
     const [[user]] = await db.query(
       "SELECT id, name, email, phone FROM users WHERE id=?",
       [userId]
     );
 
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
     //////////////////////////////////////////////////////
-    // 🏠 PG
+    // 🏠 GET PG
     //////////////////////////////////////////////////////
     const [[pg]] = await db.query(
       "SELECT * FROM pgs WHERE id=?",
       [pgId]
     );
+
+    if (!pg) {
+      return res.status(404).json({ message: "PG not found" });
+    }
 
     //////////////////////////////////////////////////////
     // 💰 RENT CALCULATION
@@ -79,20 +87,20 @@ exports.createBooking = async (req, res) => {
 
     if (pg.pg_category === "pg") {
       if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
-      if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
-      if (room_type === "Triple Sharing") rent = pg.triple_sharing || 0;
-      if (room_type === "Four Sharing") rent = pg.four_sharing || 0;
-      if (room_type === "Single Room") rent = pg.single_room || 0;
-      if (room_type === "Double Room") rent = pg.double_room || 0;
+      else if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
+      else if (room_type === "Triple Sharing") rent = pg.triple_sharing || 0;
+      else if (room_type === "Four Sharing") rent = pg.four_sharing || 0;
+      else if (room_type === "Single Room") rent = pg.single_room || 0;
+      else if (room_type === "Double Room") rent = pg.double_room || 0;
     }
 
     const deposit = pg.deposit_amount || 0;
     const maintenance = pg.maintenance_amount || 0;
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT BOOKING
+    // 📝 STEP 4: INSERT BOOKING
     //////////////////////////////////////////////////////
-    await db.query(
+    const [result] = await db.query(
       `
       INSERT INTO bookings 
       (pg_id, user_id, owner_id, name, email, phone,
@@ -114,13 +122,17 @@ exports.createBooking = async (req, res) => {
       ]
     );
 
+    //////////////////////////////////////////////////////
+    // ✅ SUCCESS RESPONSE
+    //////////////////////////////////////////////////////
     res.json({
       success: true,
-      message: "Booking created successfully (pending)"
+      bookingId: result.insertId,
+      message: "Booking created successfully"
     });
 
   } catch (err) {
-    console.error("CREATE BOOKING ERROR:", err);
+    console.error("❌ CREATE BOOKING ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
