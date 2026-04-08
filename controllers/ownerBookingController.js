@@ -384,10 +384,6 @@ exports.rejectVacateRequest = async (req, res) => {
 
 
 
-
-/* ======================================================
-   💰 OWNER → MARK REFUND AS PAID
-====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -401,7 +397,7 @@ exports.markRefundPaid = async (req, res) => {
     //////////////////////////////////////////////////////
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) {
-      throw new Error("Not an owner");
+      return res.status(403).json({ message: "Not an owner" });
     }
 
     //////////////////////////////////////////////////////
@@ -416,29 +412,37 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     if (!refund) {
-      throw new Error("Refund not found");
+      return res.status(404).json({ message: "Refund not found" });
     }
 
     //////////////////////////////////////////////////////
     // 🔒 SECURITY CHECK
     //////////////////////////////////////////////////////
     if (refund.owner_id !== owner.id) {
-      throw new Error("Unauthorized");
+      return res.status(403).json({ message: "Unauthorized" });
     }
 
     //////////////////////////////////////////////////////
-    // ❗ VALIDATION
+    // 🔥 FIXED VALIDATION (VERY IMPORTANT)
     //////////////////////////////////////////////////////
-    if (refund.user_approval !== "accepted") {
-      throw new Error("User has not accepted refund yet");
+    const userApproval = (refund.user_approval || "").toString().trim().toLowerCase();
+
+    if (userApproval !== "accepted") {
+      return res.status(400).json({
+        message: `User has not accepted refund yet (current: ${refund.user_approval})`
+      });
     }
 
     if (refund.status === "paid") {
-      throw new Error("Refund already paid");
+      return res.status(400).json({
+        message: "Refund already paid"
+      });
     }
 
     if (refund.status !== "pending") {
-      throw new Error("Invalid refund state");
+      return res.status(400).json({
+        message: `Invalid refund state: ${refund.status}`
+      });
     }
 
     //////////////////////////////////////////////////////
@@ -452,7 +456,7 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 MARK USER LEFT (VERY IMPORTANT)
+    // 🏠 MARK USER LEFT
     //////////////////////////////////////////////////////
     const [pgUserUpdate] = await connection.query(
       `UPDATE pg_users 
@@ -463,7 +467,6 @@ exports.markRefundPaid = async (req, res) => {
       [bookingId]
     );
 
-    // 🔥 fallback safety
     if (pgUserUpdate.affectedRows === 0) {
       await connection.query(
         `UPDATE pg_users 
@@ -479,7 +482,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKING STATUS
+    // 📦 UPDATE BOOKINGS
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
