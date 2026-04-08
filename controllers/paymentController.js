@@ -281,10 +281,10 @@ exports.rejectPayment = async (req, res) => {
       throw new Error("Payment not found");
     }
 
-    const { booking_id, user_id, pg_id, room_id } = data;
+    const { booking_id, room_id } = data;
 
     //////////////////////////////////////////////////////
-    // ❌ UPDATE PAYMENT
+    // ❌ UPDATE PAYMENT → REJECTED
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE payments 
@@ -294,11 +294,11 @@ exports.rejectPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ❌ RESET BOOKING
+    // 🔥 FIXED: KEEP BOOKING APPROVED (IMPORTANT)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
-       SET status='pending',
+       SET status='approved',
            owner_settlement=NULL,
            settlement_date=NULL
        WHERE id=?`,
@@ -306,7 +306,7 @@ exports.rejectPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ❌ REMOVE USER FROM PG (IMPORTANT)
+    // ❌ REMOVE USER FROM PG
     //////////////////////////////////////////////////////
     await connection.query(
       `DELETE FROM pg_users 
@@ -333,7 +333,7 @@ exports.rejectPayment = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Payment rejected and system rolled back successfully"
+      message: "Payment rejected. User can pay again."
     });
 
   } catch (err) {
