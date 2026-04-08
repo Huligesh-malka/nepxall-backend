@@ -444,7 +444,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 1. UPDATE REFUND
+    // 💰 UPDATE REFUND
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
@@ -454,39 +454,19 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 2. UPDATE PG_USERS → LEFT (IMPORTANT FIX)
+    // 🏠 FIXED: UPDATE CORRECT ROW USING booking_id
     //////////////////////////////////////////////////////
-    const [pgUpdate] = await connection.query(
+    await connection.query(
       `UPDATE pg_users 
        SET 
          status='LEFT',
          vacate_status='completed'
-       WHERE user_id=? AND pg_id=?`,
-      [refund.user_id, refund.pg_id]
+       WHERE booking_id=?`,
+      [bookingId]
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 FALLBACK (if above didn't match)
-    //////////////////////////////////////////////////////
-    if (pgUpdate.affectedRows === 0) {
-      await connection.query(
-        `UPDATE pg_users 
-         SET 
-           status='LEFT',
-           vacate_status='completed'
-         WHERE id IN (
-           SELECT id FROM (
-             SELECT id FROM pg_users 
-             WHERE user_id=? AND pg_id=? 
-             ORDER BY id DESC LIMIT 1
-           ) AS temp
-         )`,
-        [refund.user_id, refund.pg_id]
-      );
-    }
-
-    //////////////////////////////////////////////////////
-    // 📦 3. UPDATE BOOKING
+    // 📦 UPDATE BOOKING
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 

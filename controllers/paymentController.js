@@ -121,12 +121,19 @@ exports.confirmPayment = async (req, res) => {
 
 
 exports.verifyPayment = async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
+    await connection.beginTransaction();
+
     //////////////////////////////////////////////////////
     // 1. ADMIN CHECK
     //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Unauthorized" });
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
     }
 
     const { orderId } = req.params;
@@ -134,7 +141,7 @@ exports.verifyPayment = async (req, res) => {
     //////////////////////////////////////////////////////
     // 2. GET PAYMENT + BOOKING DATA
     //////////////////////////////////////////////////////
-    const [[paymentData]] = await db.query(
+    const [[paymentData]] = await connection.query(
       `SELECT 
         p.booking_id, 
         p.amount, 
@@ -159,7 +166,7 @@ exports.verifyPayment = async (req, res) => {
     //////////////////////////////////////////////////////
     // 3. UPDATE PAYMENT → PAID
     //////////////////////////////////////////////////////
-    await db.query(
+    await connection.query(
       `UPDATE payments 
        SET status='paid', verified_by_admin=TRUE 
        WHERE order_id=?`,
@@ -169,7 +176,7 @@ exports.verifyPayment = async (req, res) => {
     //////////////////////////////////////////////////////
     // 4. UPDATE BOOKING → CONFIRMED
     //////////////////////////////////////////////////////
-    await db.query(
+    await connection.query(
       `UPDATE bookings 
        SET status='confirmed', 
            owner_amount=?, 
@@ -179,22 +186,20 @@ exports.verifyPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 5. INSERT / UPDATE PG_USERS (FIXED LOGIC)
+    // 🔥 5. PG_USERS FIX (VERY IMPORTANT)
     //////////////////////////////////////////////////////
 
-    // 🔍 Check existing user in same PG
-    const [[existingUser]] = await db.query(
-      `SELECT id, status FROM pg_users 
-       WHERE user_id=? AND pg_id=? 
-       ORDER BY id DESC LIMIT 1`,
-      [paymentData.user_id, paymentData.pg_id]
+    // ✅ ALWAYS CHECK USING booking_id (NOT user_id + pg_id)
+    const [[existing]] = await connection.query(
+      `SELECT id FROM pg_users WHERE booking_id=?`,
+      [paymentData.booking_id]
     );
 
-    if (!existingUser) {
+    if (!existing) {
       //////////////////////////////////////////////////////
-      // ✅ FIRST TIME BOOKING → INSERT
+      // ✅ ALWAYS INSERT NEW ROW (NEW BOOKING)
       //////////////////////////////////////////////////////
-      await db.query(
+      await connection.query(
         `INSERT INTO pg_users 
         (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
         VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
@@ -207,41 +212,20 @@ exports.verifyPayment = async (req, res) => {
           paymentData.booking_id
         ]
       );
-
-    } else if (existingUser.status === "LEFT") {
-      //////////////////////////////////////////////////////
-      // 🔥 RE-BOOK SAME PG → UPDATE OLD ROW
-      //////////////////////////////////////////////////////
-      await db.query(
-        `UPDATE pg_users 
-         SET status='ACTIVE',
-             room_id=?,
-             join_date=?,
-             booking_id=? 
-         WHERE id=?`,
-        [
-          paymentData.room_id || null,
-          paymentData.check_in_date,
-          paymentData.booking_id,
-          existingUser.id
-        ]
-      );
-
-    } else {
-      //////////////////////////////////////////////////////
-      // ❌ SAFETY: USER ALREADY ACTIVE
-      //////////////////////////////////////////////////////
-      return res.status(400).json({
-        success: false,
-        message: "User already active in this PG"
-      });
     }
+
+    //////////////////////////////////////////////////////
+    // ❌ REMOVE OLD LOGIC COMPLETELY
+    //////////////////////////////////////////////////////
+    // ❌ NO update based on user_id + pg_id
+    // ❌ NO reuse old row
+    // ❌ ALWAYS NEW ROW PER BOOKING
 
     //////////////////////////////////////////////////////
     // 6. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     if (paymentData.room_id) {
-      await db.query(
+      await connection.query(
         `UPDATE pg_rooms 
          SET occupied_seats = occupied_seats + 1 
          WHERE id=?`,
@@ -250,20 +234,25 @@ exports.verifyPayment = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // RESPONSE
+    // ✅ COMMIT
     //////////////////////////////////////////////////////
+    await connection.commit();
+
     res.json({
       success: true,
       message: "Payment verified. User is now ACTIVE in PG."
     });
 
   } catch (err) {
+    await connection.rollback();
     console.error("❌ VERIFY PAYMENT ERROR:", err);
     res.status(500).json({
       success: false,
       message: "Internal Server Error",
       error: err.sqlMessage || err.message
     });
+  } finally {
+    connection.release();
   }
 };
 //////////////////////////////////////////////////////
