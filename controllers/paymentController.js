@@ -119,7 +119,6 @@ exports.confirmPayment = async (req, res) => {
 
 };
 
-
 exports.verifyPayment = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -197,58 +196,24 @@ exports.verifyPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 5. FIX PG_USERS (HANDLE DUPLICATE SAFELY)
+    // 🔥 5. ALWAYS INSERT NEW PG_USERS (FINAL LOGIC)
     //////////////////////////////////////////////////////
-    const [[existing]] = await connection.query(
-      `SELECT id FROM pg_users WHERE booking_id=? FOR UPDATE`,
-      [paymentData.booking_id]
+    await connection.query(
+      `INSERT INTO pg_users 
+      (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+      VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
+      [
+        paymentData.owner_id,
+        paymentData.pg_id,
+        paymentData.room_id || null,
+        paymentData.user_id,
+        paymentData.check_in_date,
+        paymentData.booking_id
+      ]
     );
 
-    if (existing) {
-      //////////////////////////////////////////////////////
-      // ✅ UPDATE EXISTING (IMPORTANT FIX)
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `UPDATE pg_users 
-         SET 
-           status='ACTIVE',
-           owner_id=?,
-           pg_id=?,
-           room_id=?,
-           user_id=?,
-           join_date=?
-         WHERE booking_id=?`,
-        [
-          paymentData.owner_id,
-          paymentData.pg_id,
-          paymentData.room_id || null,
-          paymentData.user_id,
-          paymentData.check_in_date,
-          paymentData.booking_id
-        ]
-      );
-
-    } else {
-      //////////////////////////////////////////////////////
-      // ✅ INSERT NEW
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `INSERT INTO pg_users 
-        (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
-        VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
-        [
-          paymentData.owner_id,
-          paymentData.pg_id,
-          paymentData.room_id || null,
-          paymentData.user_id,
-          paymentData.check_in_date,
-          paymentData.booking_id
-        ]
-      );
-    }
-
     //////////////////////////////////////////////////////
-    // 6. UPDATE ROOM OCCUPANCY (SAFE)
+    // 6. UPDATE ROOM OCCUPANCY
     //////////////////////////////////////////////////////
     if (paymentData.room_id) {
       await connection.query(
