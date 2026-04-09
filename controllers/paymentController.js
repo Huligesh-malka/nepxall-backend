@@ -6,20 +6,23 @@ const db = require("../db");
 //////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
-    const { bookingId } = req.body;
+    const { bookingId, type } = req.body;
 
     if (!bookingId) {
       return res.status(400).json({ success: false, message: "bookingId required" });
     }
 
-    // ✅ 1. Get real booking data (Added user_id to the SELECT)
+    //////////////////////////////////////////////////////
+    // GET BOOKING
+    //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
       `SELECT 
         user_id, 
         rent_amount, 
         security_deposit, 
         maintenance_amount, 
-        platform_fee 
+        platform_fee,
+        status
        FROM bookings 
        WHERE id = ?`,
       [bookingId]
@@ -29,36 +32,90 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    // Convert string → number
+    //////////////////////////////////////////////////////
+    // CALCULATE TOTAL
+    //////////////////////////////////////////////////////
     const rent = parseFloat(booking.rent_amount) || 0;
     const deposit = parseFloat(booking.security_deposit) || 0;
     const maintenance = parseFloat(booking.maintenance_amount) || 0;
     const platformFee = parseFloat(booking.platform_fee) || 0;
-    const amount = rent + deposit + maintenance + platformFee;
 
-    if (amount <= 0) {
-      return res.status(400).json({ success: false, message: "Invalid amount" });
+    const total = rent + deposit + maintenance + platformFee;
+
+    let amount = 0;
+    let paymentType = "";
+
+    //////////////////////////////////////////////////////
+    // TOKEN PAYMENT
+    //////////////////////////////////////////////////////
+    if (!type || type === "TOKEN") {
+      amount = 1000;
+      paymentType = "TOKEN";
+
+      // ❌ Prevent duplicate token
+      const [existing] = await db.query(
+        `SELECT id FROM payments WHERE booking_id=? AND payment_type='TOKEN'`,
+        [bookingId]
+      );
+
+      if (existing.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Token already paid"
+        });
+      }
     }
 
-    // ✅ 3. Create Order
-    const orderId = `order_${bookingId}_${Date.now()}`;
+    //////////////////////////////////////////////////////
+    // REMAINING PAYMENT
+    //////////////////////////////////////////////////////
+    if (type === "REMAINING") {
+      amount = total - 1000;
+      paymentType = "REMAINING";
+
+      // ❌ Prevent remaining before token
+      const [token] = await db.query(
+        `SELECT id FROM payments 
+         WHERE booking_id=? AND payment_type='TOKEN' AND status='paid'`,
+        [bookingId]
+      );
+
+      if (token.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Please pay ₹1000 first"
+        });
+      }
+    }
+
+    //////////////////////////////////////////////////////
+    // CREATE ORDER
+    //////////////////////////////////////////////////////
+    const orderId = `${paymentType.toLowerCase()}_${bookingId}_${Date.now()}`;
     const upiId = "huligeshmalka-1@oksbi";
     const merchantName = "Nepxall";
 
-    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(
+      merchantName
+    )}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+
     const qr = await QRCode.toDataURL(upiLink);
 
-    // ✅ 4. Save payment (NOW INCLUDING user_id)
+    //////////////////////////////////////////////////////
+    // SAVE PAYMENT
+    //////////////////////////////////////////////////////
     await db.query(
-      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
-       VALUES (?, ?, ?, ?, 'pending', NOW())`,
-      [bookingId, booking.user_id, orderId, amount]
+      `INSERT INTO payments 
+       (booking_id, user_id, order_id, amount, status, payment_type, created_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, NOW())`,
+      [bookingId, booking.user_id, orderId, amount, paymentType]
     );
 
     res.json({
       success: true,
       orderId,
       amount,
+      paymentType,
       upiLink,
       qr
     });
@@ -140,33 +197,32 @@ exports.verifyPayment = async (req, res) => {
     //////////////////////////////////////////////////////
     // 2. GET PAYMENT + BOOKING DATA
     //////////////////////////////////////////////////////
-    const [[paymentData]] = await connection.query(
+    const [[data]] = await connection.query(
       `SELECT 
-        p.booking_id, 
+        p.booking_id,
         p.amount,
-        p.status AS payment_status,
-        b.pg_id, 
-        b.user_id, 
-        b.owner_id, 
+        p.status,
+        p.payment_type,
+        b.pg_id,
+        b.user_id,
+        b.owner_id,
         b.room_id,
-        b.check_in_date 
+        b.check_in_date,
+        b.status AS booking_status
        FROM payments p
        JOIN bookings b ON b.id = p.booking_id
-       WHERE p.order_id = ? FOR UPDATE`,
+       WHERE p.order_id=? FOR UPDATE`,
       [orderId]
     );
 
-    if (!paymentData) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment record not found"
-      });
+    if (!data) {
+      throw new Error("Payment not found");
     }
 
     //////////////////////////////////////////////////////
-    // 🔒 PREVENT DOUBLE APPROVE
+    // 🔒 PREVENT DOUBLE VERIFY
     //////////////////////////////////////////////////////
-    if (paymentData.payment_status === "paid") {
+    if (data.status === "paid") {
       return res.status(400).json({
         success: false,
         message: "Payment already verified"
@@ -174,7 +230,7 @@ exports.verifyPayment = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 3. UPDATE PAYMENT → PAID
+    // 3. MARK PAYMENT AS PAID
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE payments 
@@ -184,64 +240,128 @@ exports.verifyPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 4. UPDATE BOOKING → CONFIRMED
+    // 🔥 4. TOKEN PAYMENT LOGIC
     //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE bookings 
-       SET status='confirmed', 
-           owner_amount=?, 
-           owner_settlement='PENDING' 
-       WHERE id=?`,
-      [paymentData.amount, paymentData.booking_id]
-    );
+    if (data.payment_type === "TOKEN") {
 
-    //////////////////////////////////////////////////////
-    // 🔥 5. ALWAYS INSERT NEW PG_USERS (FINAL LOGIC)
-    //////////////////////////////////////////////////////
-    await connection.query(
-      `INSERT INTO pg_users 
-      (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
-      VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
-      [
-        paymentData.owner_id,
-        paymentData.pg_id,
-        paymentData.room_id || null,
-        paymentData.user_id,
-        paymentData.check_in_date,
-        paymentData.booking_id
-      ]
-    );
+      // ❌ Prevent re-token
+      if (data.booking_status === "PARTIAL_PAID") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Token already processed"
+        });
+      }
 
-    //////////////////////////////////////////////////////
-    // 6. UPDATE ROOM OCCUPANCY
-    //////////////////////////////////////////////////////
-    if (paymentData.room_id) {
       await connection.query(
-        `UPDATE pg_rooms 
-         SET occupied_seats = occupied_seats + 1 
+        `UPDATE bookings 
+         SET status='PARTIAL_PAID'
          WHERE id=?`,
-        [paymentData.room_id]
+        [data.booking_id]
       );
+
+      await connection.commit();
+
+      return res.json({
+        success: true,
+        type: "TOKEN_SUCCESS",
+        message: "₹1000 received. Booking reserved."
+      });
     }
 
     //////////////////////////////////////////////////////
-    // ✅ COMMIT
+    // 🔥 5. REMAINING PAYMENT LOGIC
     //////////////////////////////////////////////////////
-    await connection.commit();
+    if (data.payment_type === "REMAINING") {
 
-    res.json({
-      success: true,
-      message: "Payment verified. User is now ACTIVE in PG."
+      // ❌ Prevent remaining without token
+      if (data.booking_status !== "PARTIAL_PAID") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Please complete token payment first"
+        });
+      }
+
+      ////////////////////////////////////////////////////
+      // ✅ CONFIRM BOOKING
+      ////////////////////////////////////////////////////
+      await connection.query(
+        `UPDATE bookings 
+         SET status='confirmed',
+             owner_amount=?,
+             owner_settlement='PENDING'
+         WHERE id=?`,
+        [data.amount, data.booking_id]
+      );
+
+      ////////////////////////////////////////////////////
+      // 🔒 PREVENT DUPLICATE JOIN
+      ////////////////////////////////////////////////////
+      const [existing] = await connection.query(
+        `SELECT id FROM pg_users WHERE booking_id=?`,
+        [data.booking_id]
+      );
+
+      if (existing.length === 0) {
+
+        //////////////////////////////////////////////////
+        // ✅ INSERT USER
+        //////////////////////////////////////////////////
+        await connection.query(
+          `INSERT INTO pg_users 
+           (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+           VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
+          [
+            data.owner_id,
+            data.pg_id,
+            data.room_id || null,
+            data.user_id,
+            data.check_in_date,
+            data.booking_id
+          ]
+        );
+
+        //////////////////////////////////////////////////
+        // ✅ UPDATE ROOM OCCUPANCY
+        //////////////////////////////////////////////////
+        if (data.room_id) {
+          await connection.query(
+            `UPDATE pg_rooms 
+             SET occupied_seats = occupied_seats + 1 
+             WHERE id=?`,
+            [data.room_id]
+          );
+        }
+      }
+
+      await connection.commit();
+
+      return res.json({
+        success: true,
+        type: "FULL_SUCCESS",
+        message: "Full payment done. User joined PG."
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ❌ INVALID TYPE
+    //////////////////////////////////////////////////////
+    await connection.rollback();
+
+    return res.status(400).json({
+      success: false,
+      message: "Invalid payment type"
     });
 
   } catch (err) {
     await connection.rollback();
+
     console.error("❌ VERIFY PAYMENT ERROR:", err);
 
     res.status(500).json({
       success: false,
-      message: "Internal Server Error",
-      error: err.sqlMessage || err.message
+      message: err.message || "Server error"
     });
 
   } finally {
