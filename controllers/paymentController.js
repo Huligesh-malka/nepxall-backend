@@ -673,15 +673,7 @@ exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        p.order_id,
-        p.amount,
-        p.status,
-        p.created_at,
-        p.submitted_at,
-        p.booking_id,
-        p.utr,
-        p.screenshot,
-        p.verified_by_admin,
+        b.id AS booking_id,
 
         /* USER */
         COALESCE(u.name, b.name, 'Guest User') AS reg_name,
@@ -691,27 +683,74 @@ exports.getAdminPayments = async (req, res) => {
         b.room_type AS sharing,
         b.check_in_date,
 
-        /* 🔥 ADD THESE (IMPORTANT) */
-        b.rent_amount,
-        b.security_deposit,
-        b.maintenance_amount,
+        /* PG */
+        pg.pg_name,
 
-        /* TOTAL */
+        /* TOTAL AMOUNT */
         (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
 
-        /* PG */
-        pg.pg_name
+        /* 🔥 TOTAL PAID */
+        SUM(CASE WHEN p.status='paid' THEN p.amount ELSE 0 END) AS total_paid,
 
-      FROM payments p
-      LEFT JOIN bookings b ON b.id = p.booking_id
+        /* 🔥 TOKEN PAID */
+        SUM(CASE 
+            WHEN p.payment_type='TOKEN' AND p.status='paid' 
+            THEN p.amount ELSE 0 END) AS token_paid,
+
+        /* 🔥 REMAINING PAID */
+        SUM(CASE 
+            WHEN p.payment_type='REMAINING' AND p.status='paid' 
+            THEN p.amount ELSE 0 END) AS remaining_paid,
+
+        /* LAST PAYMENT INFO (for buttons, screenshot, etc.) */
+        MAX(p.created_at) AS created_at,
+        MAX(p.submitted_at) AS submitted_at,
+        MAX(p.utr) AS utr,
+        MAX(p.screenshot) AS screenshot,
+
+        /* 🔥 GET LAST ORDER ID */
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(p.order_id ORDER BY p.created_at DESC),
+          ',', 1
+        ) AS order_id,
+
+        /* 🔥 STATUS */
+        MAX(p.status) AS payment_status
+
+      FROM bookings b
+
+      LEFT JOIN payments p ON p.booking_id = b.id
       LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
-      ORDER BY p.created_at DESC
+
+      GROUP BY b.id
+      ORDER BY created_at DESC
     `);
+
+    //////////////////////////////////////////////////////
+    // 🔥 FORMAT RESPONSE
+    //////////////////////////////////////////////////////
+    const formatted = rows.map(r => {
+      const total = Number(r.total_amount) || 0;
+      const paid = Number(r.total_paid) || 0;
+      const remaining = total - paid;
+
+      let status = "NOT_PAID";
+      if (paid > 0 && remaining > 0) status = "PARTIAL_PAID";
+      if (remaining <= 0 && total > 0) status = "FULLY_PAID";
+
+      return {
+        ...r,
+        total_amount: total,
+        total_paid: paid,
+        remaining_amount: remaining,
+        status
+      };
+    });
 
     res.json({
       success: true,
-      data: rows
+      data: formatted
     });
 
   } catch (err) {
