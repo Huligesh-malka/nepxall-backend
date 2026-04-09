@@ -342,7 +342,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
   }
 };
 
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -377,7 +376,7 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ ONLY SHOW REFUND IF VACATE REQUEST EXISTS */
+        /* ✅ REFUND ONLY IF CURRENT BOOKING HAS VACATE */
         CASE 
           WHEN r.id IS NULL THEN NULL
           ELSE r.status
@@ -392,21 +391,13 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
-      /* ✅ ONLY VACATE-BASED REFUND */
       LEFT JOIN refunds r 
         ON r.booking_id = b.id
         AND r.refund_type = 'DEPOSIT'
-        AND r.created_at = (
-          SELECT MAX(created_at) 
-          FROM refunds 
-          WHERE booking_id = b.id 
-            AND refund_type = 'DEPOSIT'
-        )
 
       WHERE b.user_id = ? 
-        AND b.status IN ('confirmed','left')
+        AND b.status = 'confirmed'   -- 🔥 FIX
 
-        /* ✅ ONLY SHOW IF PAYMENT IS PAID */
         AND EXISTS (
           SELECT 1 FROM payments p 
           WHERE p.booking_id = b.id 
