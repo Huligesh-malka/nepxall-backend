@@ -615,18 +615,32 @@ exports.joinPGWithRoom = async (req, res) => {
     await connection.beginTransaction();
 
     //////////////////////////////////////////////////////
-    // ✅ FIX USER ID (VERY IMPORTANT)
+    // ✅ GET USER ID FROM FIREBASE UID
     //////////////////////////////////////////////////////
-    const user_id =
-      req.user?.id ||
-      req.user?.uid ||
-      req.user?.firebase_uid ||
-      req.user;
+    const firebase_uid = req.user?.firebase_uid;
 
+    const [userRows] = await connection.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
+    );
+
+    if (userRows.length === 0) {
+      await connection.rollback();
+      return res.status(401).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    const user_id = userRows[0].id;
+
+    //////////////////////////////////////////////////////
+    // ✅ GET DATA
+    //////////////////////////////////////////////////////
     const { pg_id, room_id } = req.body;
 
     console.log("JOIN DEBUG:", {
-      user: req.user,
+      firebase_uid,
       user_id,
       pg_id,
       room_id
@@ -635,11 +649,11 @@ exports.joinPGWithRoom = async (req, res) => {
     //////////////////////////////////////////////////////
     // ❌ VALIDATION
     //////////////////////////////////////////////////////
-    if (!pg_id || !user_id) {
+    if (!pg_id) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Invalid user or PG"
+        message: "PG ID required"
       });
     }
 
@@ -691,14 +705,14 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ ROOM NUMBER SAFE
+    // ✅ ROOM NUMBER
     //////////////////////////////////////////////////////
     const roomNo = room
       ? (room.room_no || room.room_number || room.id)
       : null;
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT USER (JOIN)
+    // ✅ INSERT USER
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO pg_users 
@@ -714,7 +728,7 @@ exports.joinPGWithRoom = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ UPDATE ROOM ONLY IF EXISTS
+    // ✅ UPDATE ROOM
     //////////////////////////////////////////////////////
     if (room_id) {
       await connection.query(
@@ -726,7 +740,7 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ FINAL CHECK-IN STORE
+    // ✅ CHECK-IN ENTRY
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO pg_checkins (user_id, pg_id, payment_status) 
@@ -740,7 +754,7 @@ exports.joinPGWithRoom = async (req, res) => {
     await connection.commit();
 
     //////////////////////////////////////////////////////
-    // ✅ SUCCESS RESPONSE
+    // ✅ SUCCESS
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
