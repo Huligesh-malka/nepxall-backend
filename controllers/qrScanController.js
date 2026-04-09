@@ -529,7 +529,6 @@ exports.checkAndCheckinUser = async (req, res) => {
       [user_id, pg_id]
     );
 
-    // 🔥 NOT JOINED → SHOW JOIN FLOW
     if (activeStay.length === 0) {
       return res.json({
         success: false,
@@ -539,7 +538,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. CHECK PAYMENT (ONLY AFTER JOIN)
+    // ✅ 2. CHECK PAYMENT
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
       `SELECT * FROM bookings 
@@ -574,7 +573,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 3. CHECK IF ALREADY JOINED (NO DAILY CHECK)
+    // ✅ 3. CHECK IF ALREADY CHECKED-IN
     //////////////////////////////////////////////////////
     const [existing] = await db.query(
       `SELECT * FROM pg_checkins 
@@ -591,21 +590,12 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 4. STORE FIRST CHECK-IN ONLY
-    //////////////////////////////////////////////////////
-    await db.query(
-      `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status)
-       VALUES (?, ?, ?, ?)`,
-      [user_id, pg_id, userBooking.id, "paid"]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS (FIRST TIME ONLY)
+    // 🔥 4. ASK CONFIRMATION (NO INSERT HERE)
     //////////////////////////////////////////////////////
     return res.json({
-      success: true,
-      type: "SUCCESS",
-      message: "✅ Joined successfully 🎉"
+      success: false,
+      type: "CONFIRM_JOIN",
+      message: "⚠️ Are you sure you want to join this PG?"
     });
 
   } catch (err) {
@@ -616,17 +606,17 @@ exports.checkAndCheckinUser = async (req, res) => {
       message: err.message || "Server error"
     });
   }
-};    
+};   
 
 exports.joinPGWithRoom = async (req, res) => {
-  const connection = await db.getConnection(); // Get a connection for transaction
+  const connection = await db.getConnection();
+
   try {
     await connection.beginTransaction();
 
     const { pg_id, room_id } = req.body;
     const user_id = req.user.id;
 
-    // 1. Fetch Room with a "FOR UPDATE" lock to prevent double-booking
     const [rooms] = await connection.query(
       `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ? FOR UPDATE`,
       [room_id, pg_id]
@@ -639,13 +629,11 @@ exports.joinPGWithRoom = async (req, res) => {
 
     const room = rooms[0];
 
-    // 2. Check Capacity
     if (room.occupied_seats >= room.total_seats) {
       await connection.rollback();
       return res.json({ success: false, message: "❌ Room is full" });
     }
 
-    // 3. Check if user already in THIS PG
     const [existing] = await connection.query(
       `SELECT id FROM pg_users WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
       [user_id, pg_id]
@@ -656,11 +644,11 @@ exports.joinPGWithRoom = async (req, res) => {
       return res.json({ success: false, message: "Already joined this PG" });
     }
 
-    // 4. FIX: Ensure we use the correct property from your DB
-    // Check if your DB column is room_no, room_number, or room_name
-    const roomNo = room.room_no || room.room_number || room.id; 
+    const roomNo = room.room_no || room.room_number || room.id;
 
-    // 5. Insert User
+    //////////////////////////////////////////////////////
+    // ✅ INSERT USER (JOIN)
+    //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
@@ -668,7 +656,9 @@ exports.joinPGWithRoom = async (req, res) => {
       [room.owner_id || 1, pg_id, room_id, user_id, roomNo]
     );
 
-    // 6. Update Room Occupancy (The "Minus" logic you asked for)
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE ROOM
+    //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_rooms 
        SET occupied_seats = occupied_seats + 1 
@@ -676,13 +666,15 @@ exports.joinPGWithRoom = async (req, res) => {
       [room_id]
     );
 
-    // 7. Initial Check-in
+    //////////////////////////////////////////////////////
+    // ✅ FINAL CHECK-IN STORE (ONLY HERE)
+    //////////////////////////////////////////////////////
     await connection.query(
-      `INSERT INTO pg_checkins (user_id, pg_id, payment_status) VALUES (?, ?, ?)`,
+      `INSERT INTO pg_checkins (user_id, pg_id, payment_status) 
+       VALUES (?, ?, ?)`,
       [user_id, pg_id, "paid"]
     );
 
-    // Commit all changes
     await connection.commit();
 
     return res.json({
