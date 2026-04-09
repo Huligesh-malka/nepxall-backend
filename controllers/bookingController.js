@@ -341,7 +341,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -351,7 +350,7 @@ exports.getUserActiveStay = async (req, res) => {
       SELECT 
         b.id,
 
-        /* ✅ ONLY PAID PAYMENT */
+        /* PAYMENT */
         (SELECT p.order_id 
          FROM payments p 
          WHERE p.booking_id = b.id 
@@ -376,16 +375,18 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ REFUND ONLY IF CURRENT BOOKING HAS VACATE */
+        /* ✅ REFUND ONLY FOR LEAVING STATE */
         CASE 
-          WHEN r.id IS NULL THEN NULL
-          ELSE r.status
+          WHEN b.status = 'LEAVING' THEN r.status
+          ELSE NULL
         END AS refund_status,
 
-        r.user_approval,
-        r.amount AS refund_amount,
+        CASE 
+          WHEN b.status = 'LEAVING' THEN r.amount
+          ELSE NULL
+        END AS refund_amount,
 
-        'ACTIVE' AS status
+        b.status
 
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
@@ -396,8 +397,11 @@ exports.getUserActiveStay = async (req, res) => {
         AND r.refund_type = 'DEPOSIT'
 
       WHERE b.user_id = ? 
-        AND b.status = 'confirmed'   -- 🔥 FIX
 
+        /* ✅ FIX: include LEAVING */
+        AND b.status IN ('confirmed', 'LEAVING')
+
+        /* ONLY PAID USERS */
         AND EXISTS (
           SELECT 1 FROM payments p 
           WHERE p.booking_id = b.id 
@@ -405,6 +409,7 @@ exports.getUserActiveStay = async (req, res) => {
         )
 
       ORDER BY b.updated_at DESC
+      LIMIT 1
       `,
       [userId]
     );
