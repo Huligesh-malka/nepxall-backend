@@ -488,7 +488,6 @@ exports.getScanStatistics = async (req, res) => {
 
 
 
-
 /* ================= CHECK AND CHECK-IN USER ================= */
 exports.checkAndCheckinUser = async (req, res) => {
   try {
@@ -517,13 +516,29 @@ exports.checkAndCheckinUser = async (req, res) => {
 
     const user_id = userRows[0].id;
 
-    // 2. CHECK JOIN (pg_users)
+    // 2. CHECK IF ALREADY IN pg_checkins (Highest Priority)
+    const [existingCheckin] = await db.query(
+      `SELECT * FROM pg_checkins 
+       WHERE user_id = ? AND pg_id = ?`,
+      [user_id, pg_id]
+    );
+
+    if (existingCheckin.length > 0) {
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "✅ You already joined this PG"
+      });
+    }
+
+    // 3. CHECK JOIN STATUS (pg_users)
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
        WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
       [user_id, pg_id]
     );
 
+    // If not in pg_users at all, they MUST join through the normal flow
     if (activeStay.length === 0) {
       return res.json({
         success: false,
@@ -532,7 +547,8 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
-    // 3. CHECK PAYMENT
+    // 4. CHECK BOOKING & PAYMENT
+    // We only check this if they aren't "checked in" yet but are in pg_users
     const [booking] = await db.query(
       `SELECT id FROM bookings 
        WHERE user_id = ? AND pg_id = ? 
@@ -563,23 +579,9 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
-    // 4. CHECK IF ALREADY CHECKED-IN
-    const [existing] = await db.query(
-      `SELECT * FROM pg_checkins 
-       WHERE user_id = ? AND pg_id = ?`,
-      [user_id, pg_id]
-    );
-
-    if (existing.length > 0) {
-      return res.json({
-        success: true,
-        type: "ALREADY_JOINED",
-        message: "✅ You already joined this PG"
-      });
-    }
-
+    // 5. IF THEY HAVE PAYMENT & ACTIVE STAY BUT NO CHECK-IN RECORD
     return res.json({
-      success: false,
+      success: true,
       type: "CONFIRM_JOIN",
       message: "⚠️ Are you sure you want to join this PG?"
     });
@@ -597,7 +599,6 @@ exports.joinPGWithRoom = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // ✅ FIX 1: Support both 'uid' and 'firebase_uid' from req.user
     const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
     if (!firebase_uid) {
@@ -605,7 +606,6 @@ exports.joinPGWithRoom = async (req, res) => {
       return res.status(401).json({ success: false, message: "Authentication UID missing" });
     }
 
-    // ✅ FIX 2: Get the local DB user ID
     const [userRows] = await connection.query(
       `SELECT id FROM users WHERE firebase_uid = ?`,
       [firebase_uid]
@@ -624,7 +624,18 @@ exports.joinPGWithRoom = async (req, res) => {
       return res.status(400).json({ success: false, message: "PG ID required" });
     }
 
-    // Optional Room Handling
+    // Check if already in pg_checkins to prevent duplicate logic
+    const [checkinExist] = await connection.query(
+      `SELECT id FROM pg_checkins WHERE user_id = ? AND pg_id = ?`,
+      [user_id, pg_id]
+    );
+
+    if (checkinExist.length > 0) {
+      await connection.rollback();
+      return res.json({ success: true, type: "ALREADY_JOINED", message: "Already joined" });
+    }
+
+    // Handle Room selection
     let room = null;
     if (room_id) {
       const [rooms] = await connection.query(
@@ -632,42 +643,38 @@ exports.joinPGWithRoom = async (req, res) => {
         [room_id, pg_id]
       );
 
-      if (rooms.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({ success: false, message: "Room not found" });
+      if (rooms.length > 0) {
+        room = rooms[0];
+        if (room.occupied_seats >= room.total_seats) {
+          await connection.rollback();
+          return res.json({ success: false, message: "❌ Room is full" });
+        }
       }
-
-      room = rooms[0];
-
-      if (room.occupied_seats >= room.total_seats) {
-        await connection.rollback();
-        return res.json({ success: false, message: "❌ Room is full" });
-      }
-    }
-
-    // Check if already joined
-    const [existing] = await connection.query(
-      `SELECT id FROM pg_users 
-       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
-      [user_id, pg_id]
-    );
-
-    if (existing.length > 0) {
-      await connection.rollback();
-      return res.json({ success: false, message: "Already joined this PG" });
     }
 
     const roomNo = room ? (room.room_no || room.room_number) : null;
 
-    // INSERT INTO pg_users
-    await connection.query(
-      `INSERT INTO pg_users 
-       (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
-       VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
-      [room?.owner_id || 1, pg_id, room_id || null, user_id, roomNo]
+    // Check if entry exists in pg_users, update or insert
+    const [existingStay] = await connection.query(
+      `SELECT id FROM pg_users WHERE user_id = ? AND pg_id = ?`,
+      [user_id, pg_id]
     );
 
-    // UPDATE ROOM COUNT
+    if (existingStay.length > 0) {
+      await connection.query(
+        `UPDATE pg_users SET status = 'ACTIVE', room_id = ?, room_no = ?, join_date = CURDATE() WHERE id = ?`,
+        [room_id || null, roomNo, existingStay[0].id]
+      );
+    } else {
+      await connection.query(
+        `INSERT INTO pg_users 
+         (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
+         VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
+        [room?.owner_id || 1, pg_id, room_id || null, user_id, roomNo]
+      );
+    }
+
+    // Update room occupancy
     if (room_id) {
       await connection.query(
         `UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id = ?`,
@@ -675,7 +682,7 @@ exports.joinPGWithRoom = async (req, res) => {
       );
     }
 
-    // INSERT INTO pg_checkins
+    // Create the Check-in record
     await connection.query(
       `INSERT INTO pg_checkins (user_id, pg_id, payment_status) 
        VALUES (?, ?, ?)`,
@@ -686,9 +693,8 @@ exports.joinPGWithRoom = async (req, res) => {
 
     return res.json({
       success: true,
-      message: room 
-        ? `🎉 Joined successfully! Room ${roomNo}` 
-        : "🎉 Joined successfully!",
+      type: "ALREADY_JOINED",
+      message: room ? `🎉 Joined Room ${roomNo}!` : "🎉 Joined successfully!",
       room_no: roomNo
     });
 
