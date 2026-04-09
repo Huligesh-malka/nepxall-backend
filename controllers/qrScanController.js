@@ -492,7 +492,9 @@ exports.checkAndCheckinUser = async (req, res) => {
     const { pg_id } = req.body;
     const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
-    // ✅ Get user
+    //////////////////////////////////////////////////////
+    // ✅ GET USER
+    //////////////////////////////////////////////////////
     const [userRows] = await db.query(
       `SELECT id FROM users WHERE firebase_uid = ?`,
       [firebase_uid]
@@ -505,10 +507,10 @@ exports.checkAndCheckinUser = async (req, res) => {
     const user_id = userRows[0].id;
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 1: CHECK IF USER ALREADY ACTIVE
+    // ✅ STEP 1: CHECK ACTIVE USER
     //////////////////////////////////////////////////////
     const [activeUser] = await db.query(
-      `SELECT * FROM pg_users 
+      `SELECT id FROM pg_users 
        WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'
        LIMIT 1`,
       [user_id, pg_id]
@@ -523,20 +525,14 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 2: FIND VALID PAID BOOKING
-    // (Handles TOKEN + REMAINING also)
+    // ✅ STEP 2: CHECK BOOKING (NO PAYMENT)
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
-      `SELECT b.id 
-       FROM bookings b
-       WHERE b.user_id = ? 
-       AND b.pg_id = ?
-       AND EXISTS (
-         SELECT 1 FROM payments p 
-         WHERE p.booking_id = b.id 
-         AND p.status = 'paid'
-       )
-       ORDER BY b.created_at DESC 
+      `SELECT id 
+       FROM bookings 
+       WHERE user_id = ? 
+       AND pg_id = ?
+       ORDER BY created_at DESC 
        LIMIT 1`,
       [user_id, pg_id]
     );
@@ -544,15 +540,15 @@ exports.checkAndCheckinUser = async (req, res) => {
     if (booking.length === 0) {
       return res.json({
         success: false,
-        type: "NOT_PAID",
-        message: "❌ No paid booking found. Please pay first."
+        type: "NO_BOOKING",
+        message: "❌ No booking found. Please book first."
       });
     }
 
     const booking_id = booking[0].id;
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 3: CHECK IF ALREADY CHECKED-IN
+    // ✅ STEP 3: CHECK EXISTING CHECK-IN
     //////////////////////////////////////////////////////
     const [existingCheckin] = await db.query(
       `SELECT id FROM pg_checkins WHERE booking_id = ?`,
@@ -568,13 +564,13 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 4: SHOW CONFIRM JOIN
+    // ✅ STEP 4: CONFIRM JOIN
     //////////////////////////////////////////////////////
     return res.json({
       success: false,
       type: "CONFIRM_JOIN",
       booking_id,
-      message: "⚠️ Valid booking found! Confirm to join this PG."
+      message: "⚠️ Booking found! Confirm to join this PG."
     });
 
   } catch (err) {
@@ -585,9 +581,6 @@ exports.checkAndCheckinUser = async (req, res) => {
     });
   }
 };
-
-
-
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -629,25 +622,20 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET LATEST VALID PAID BOOKING
+    // ✅ GET LATEST BOOKING (NO PAYMENT)
     //////////////////////////////////////////////////////
     const [booking] = await connection.query(
-      `SELECT b.id, b.room_id 
-       FROM bookings b
-       WHERE b.user_id = ? 
-       AND b.pg_id = ?
-       AND EXISTS (
-         SELECT 1 FROM payments p 
-         WHERE p.booking_id = b.id 
-         AND p.status = 'paid'
-       )
-       ORDER BY b.created_at DESC 
+      `SELECT id, room_id 
+       FROM bookings 
+       WHERE user_id = ? 
+       AND pg_id = ?
+       ORDER BY created_at DESC 
        LIMIT 1`,
       [user_id, pg_id]
     );
 
     if (booking.length === 0) {
-      throw new Error("No paid booking found");
+      throw new Error("No booking found");
     }
 
     const booking_id = booking[0].id;
@@ -705,7 +693,7 @@ exports.joinPGWithRoom = async (req, res) => {
     await connection.query(
       `INSERT INTO pg_checkins 
        (user_id, pg_id, booking_id, payment_status)
-       VALUES (?, ?, ?, 'paid')`,
+       VALUES (?, ?, ?, 'manual')`,
       [user_id, pg_id, booking_id]
     );
 
@@ -714,7 +702,7 @@ exports.joinPGWithRoom = async (req, res) => {
     return res.json({
       success: true,
       type: "ALREADY_JOINED",
-      message: "🎉 Successfully checked in!"
+      message: "🎉 Successfully joined PG!"
     });
 
   } catch (err) {
