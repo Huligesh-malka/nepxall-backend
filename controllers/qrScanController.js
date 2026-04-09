@@ -484,7 +484,6 @@ exports.getScanStatistics = async (req, res) => {
   }
 };
 
-
 exports.checkAndCheckinUser = async (req, res) => {
   try {
     const { pg_id } = req.body;
@@ -505,7 +504,7 @@ exports.checkAndCheckinUser = async (req, res) => {
     const user_id = userRows[0].id;
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 1: CHECK ACTIVE USER
+    // ✅ CHECK ACTIVE USER
     //////////////////////////////////////////////////////
     const [activeUser] = await db.query(
       `SELECT id FROM pg_users 
@@ -523,12 +522,15 @@ exports.checkAndCheckinUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ STEP 2: CHECK BOOKING + PAYMENT
+    // ✅ BOOKING + ONLY PAID PAYMENT CHECK
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
-      `SELECT b.id, b.status, p.status AS payment_status
+      `SELECT b.id, b.status,
+        (SELECT COUNT(*) 
+         FROM payments p 
+         WHERE p.booking_id = b.id 
+           AND p.status = 'paid') AS is_paid
        FROM bookings b
-       LEFT JOIN payments p ON p.booking_id = b.id
        WHERE b.user_id = ? 
        AND b.pg_id = ?
        ORDER BY b.created_at DESC 
@@ -547,11 +549,11 @@ exports.checkAndCheckinUser = async (req, res) => {
     const bookingData = booking[0];
 
     //////////////////////////////////////////////////////
-    // ❌ PAYMENT NOT DONE
+    // ❌ NOT PAID
     //////////////////////////////////////////////////////
     if (
       bookingData.status !== "confirmed" ||
-      bookingData.payment_status !== "paid"
+      bookingData.is_paid === 0
     ) {
       return res.json({
         success: false,
@@ -594,6 +596,8 @@ exports.checkAndCheckinUser = async (req, res) => {
     });
   }
 };
+
+
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -616,7 +620,7 @@ exports.joinPGWithRoom = async (req, res) => {
     const user_id = userRows[0].id;
 
     //////////////////////////////////////////////////////
-    // ✅ CHECK ACTIVE USER (IMPORTANT)
+    // ✅ CHECK ACTIVE USER
     //////////////////////////////////////////////////////
     const [activeUser] = await connection.query(
       `SELECT id FROM pg_users 
@@ -650,12 +654,16 @@ exports.joinPGWithRoom = async (req, res) => {
     const finalRoomId = room_id || booking[0].room_id;
 
     //////////////////////////////////////////////////////
-    // ✅ CHECK PAYMENT AGAIN (SECURITY)
+    // ✅ CHECK PAYMENT (ONLY PAID - FINAL FIX)
     //////////////////////////////////////////////////////
     const [[paymentCheck]] = await connection.query(
-      `SELECT b.status, p.status AS payment_status
+      `SELECT 
+          b.status,
+          (SELECT COUNT(*) 
+           FROM payments p 
+           WHERE p.booking_id = b.id 
+             AND p.status = 'paid') AS is_paid
        FROM bookings b
-       LEFT JOIN payments p ON p.booking_id = b.id
        WHERE b.id = ?`,
       [booking_id]
     );
@@ -663,7 +671,7 @@ exports.joinPGWithRoom = async (req, res) => {
     if (
       !paymentCheck ||
       paymentCheck.status !== "confirmed" ||
-      paymentCheck.payment_status !== "paid"
+      paymentCheck.is_paid === 0
     ) {
       throw new Error("Payment not completed");
     }
@@ -686,7 +694,7 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT CHECK-IN ONLY (NO pg_users insert)
+    // ✅ INSERT CHECK-IN
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO pg_checkins 
