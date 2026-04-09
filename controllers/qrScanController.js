@@ -489,40 +489,35 @@ exports.getScanStatistics = async (req, res) => {
 
 
 
+/* ================= CHECK AND CHECK-IN USER ================= */
 exports.checkAndCheckinUser = async (req, res) => {
   try {
-    //////////////////////////////////////////////////////
-    // ✅ GET DATA
-    //////////////////////////////////////////////////////
-    const pg_id = req.body.pg_id;
+    const { pg_id } = req.body;
 
-    const user_id =
-      req.user?.id ||
-      req.user?.uid ||
-      req.user;
+    // Standardized user extraction
+    const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
-    console.log("USER:", user_id);
-
-    //////////////////////////////////////////////////////
-    // ❌ VALIDATION
-    //////////////////////////////////////////////////////
     if (!pg_id) {
-      return res.status(400).json({
-        success: false,
-        message: "PG ID is required"
-      });
+      return res.status(400).json({ success: false, message: "PG ID is required" });
     }
 
-    if (!user_id) {
-      return res.status(401).json({
-        success: false,
-        message: "User not authenticated"
-      });
+    if (!firebase_uid) {
+      return res.status(401).json({ success: false, message: "User not authenticated" });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ 1. CHECK JOIN (pg_users)
-    //////////////////////////////////////////////////////
+    // 1. Get the internal MySQL user ID first
+    const [userRows] = await db.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: "User profile not found in database" });
+    }
+
+    const user_id = userRows[0].id;
+
+    // 2. CHECK JOIN (pg_users)
     const [activeStay] = await db.query(
       `SELECT * FROM pg_users 
        WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
@@ -537,11 +532,9 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ 2. CHECK PAYMENT
-    //////////////////////////////////////////////////////
+    // 3. CHECK PAYMENT
     const [booking] = await db.query(
-      `SELECT * FROM bookings 
+      `SELECT id FROM bookings 
        WHERE user_id = ? AND pg_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
       [user_id, pg_id]
@@ -551,17 +544,15 @@ exports.checkAndCheckinUser = async (req, res) => {
       return res.json({
         success: false,
         type: "NOT_PAID",
-        message: "❌ Please complete payment"
+        message: "❌ No booking found. Please complete payment"
       });
     }
 
-    const userBooking = booking[0];
-
     const [payment] = await db.query(
-      `SELECT * FROM payments 
+      `SELECT status FROM payments 
        WHERE booking_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
-      [userBooking.id]
+      [booking[0].id]
     );
 
     if (payment.length === 0 || payment[0].status !== "paid") {
@@ -572,9 +563,7 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ 3. CHECK IF ALREADY CHECKED-IN
-    //////////////////////////////////////////////////////
+    // 4. CHECK IF ALREADY CHECKED-IN
     const [existing] = await db.query(
       `SELECT * FROM pg_checkins 
        WHERE user_id = ? AND pg_id = ?`,
@@ -589,9 +578,6 @@ exports.checkAndCheckinUser = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 4. ASK CONFIRMATION (NO INSERT HERE)
-    //////////////////////////////////////////////////////
     return res.json({
       success: false,
       type: "CONFIRM_JOIN",
@@ -600,25 +586,26 @@ exports.checkAndCheckinUser = async (req, res) => {
 
   } catch (err) {
     console.error("🔥 CHECK-IN ERROR:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Server error"
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
-};   
+};
 
+/* ================= JOIN PG WITH ROOM ================= */
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    //////////////////////////////////////////////////////
-    // ✅ GET USER ID FROM FIREBASE UID
-    //////////////////////////////////////////////////////
-    const firebase_uid = req.user?.firebase_uid;
+    // ✅ FIX 1: Support both 'uid' and 'firebase_uid' from req.user
+    const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
+    if (!firebase_uid) {
+      await connection.rollback();
+      return res.status(401).json({ success: false, message: "Authentication UID missing" });
+    }
+
+    // ✅ FIX 2: Get the local DB user ID
     const [userRows] = await connection.query(
       `SELECT id FROM users WHERE firebase_uid = ?`,
       [firebase_uid]
@@ -626,42 +613,19 @@ exports.joinPGWithRoom = async (req, res) => {
 
     if (userRows.length === 0) {
       await connection.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "User not found"
-      });
+      return res.status(404).json({ success: false, message: "User record not found" });
     }
 
     const user_id = userRows[0].id;
-
-    //////////////////////////////////////////////////////
-    // ✅ GET DATA
-    //////////////////////////////////////////////////////
     const { pg_id, room_id } = req.body;
 
-    console.log("JOIN DEBUG:", {
-      firebase_uid,
-      user_id,
-      pg_id,
-      room_id
-    });
-
-    //////////////////////////////////////////////////////
-    // ❌ VALIDATION
-    //////////////////////////////////////////////////////
     if (!pg_id) {
       await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "PG ID required"
-      });
+      return res.status(400).json({ success: false, message: "PG ID required" });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ OPTIONAL ROOM HANDLING
-    //////////////////////////////////////////////////////
+    // Optional Room Handling
     let room = null;
-
     if (room_id) {
       const [rooms] = await connection.query(
         `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ? FOR UPDATE`,
@@ -670,26 +634,18 @@ exports.joinPGWithRoom = async (req, res) => {
 
       if (rooms.length === 0) {
         await connection.rollback();
-        return res.status(404).json({
-          success: false,
-          message: "Room not found"
-        });
+        return res.status(404).json({ success: false, message: "Room not found" });
       }
 
       room = rooms[0];
 
       if (room.occupied_seats >= room.total_seats) {
         await connection.rollback();
-        return res.json({
-          success: false,
-          message: "❌ Room is full"
-        });
+        return res.json({ success: false, message: "❌ Room is full" });
       }
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK IF ALREADY JOINED
-    //////////////////////////////////////////////////////
+    // Check if already joined
     const [existing] = await connection.query(
       `SELECT id FROM pg_users 
        WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
@@ -698,83 +654,49 @@ exports.joinPGWithRoom = async (req, res) => {
 
     if (existing.length > 0) {
       await connection.rollback();
-      return res.json({
-        success: false,
-        message: "Already joined this PG"
-      });
+      return res.json({ success: false, message: "Already joined this PG" });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ ROOM NUMBER
-    //////////////////////////////////////////////////////
-    const roomNo = room
-      ? (room.room_no || room.room_number || room.id)
-      : null;
+    const roomNo = room ? (room.room_no || room.room_number) : null;
 
-    //////////////////////////////////////////////////////
-    // ✅ INSERT USER
-    //////////////////////////////////////////////////////
+    // INSERT INTO pg_users
     await connection.query(
       `INSERT INTO pg_users 
        (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
        VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
-      [
-        room?.owner_id || 1,
-        pg_id,
-        room_id || null,
-        user_id,
-        roomNo
-      ]
+      [room?.owner_id || 1, pg_id, room_id || null, user_id, roomNo]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ UPDATE ROOM
-    //////////////////////////////////////////////////////
+    // UPDATE ROOM COUNT
     if (room_id) {
       await connection.query(
-        `UPDATE pg_rooms 
-         SET occupied_seats = occupied_seats + 1 
-         WHERE id = ?`,
+        `UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id = ?`,
         [room_id]
       );
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK-IN ENTRY
-    //////////////////////////////////////////////////////
+    // INSERT INTO pg_checkins
     await connection.query(
       `INSERT INTO pg_checkins (user_id, pg_id, payment_status) 
        VALUES (?, ?, ?)`,
       [user_id, pg_id, "paid"]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ COMMIT
-    //////////////////////////////////////////////////////
     await connection.commit();
 
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS
-    //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      message: room
-        ? `🎉 Joined successfully! Room ${roomNo}`
-        : "🎉 Joined successfully! You can select a room later",
+      message: room 
+        ? `🎉 Joined successfully! Room ${roomNo}` 
+        : "🎉 Joined successfully!",
       room_no: roomNo
     });
 
   } catch (err) {
-    await connection.rollback();
-
+    if (connection) await connection.rollback();
     console.error("🔥 JOIN ERROR:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Server error"
-    });
-
+    return res.status(500).json({ success: false, message: err.message || "Server error" });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };
