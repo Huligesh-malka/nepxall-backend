@@ -487,121 +487,226 @@ exports.getScanStatistics = async (req, res) => {
 
 
 
-/* ================= CHECK AND CHECK-IN USER ================= */
-/* ================= CHECK AND CHECK-IN USER ================= */
 exports.checkAndCheckinUser = async (req, res) => {
   try {
     const { pg_id } = req.body;
     const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
-    const [userRows] = await db.query(`SELECT id FROM users WHERE firebase_uid = ?`, [firebase_uid]);
-    if (userRows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
+    // ✅ Get user
+    const [userRows] = await db.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
     const user_id = userRows[0].id;
 
-    // 1. AUTOMATICALLY find the latest PAID booking to use as the reference
+    //////////////////////////////////////////////////////
+    // ✅ STEP 1: CHECK IF USER ALREADY ACTIVE
+    //////////////////////////////////////////////////////
+    const [activeUser] = await db.query(
+      `SELECT * FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'
+       LIMIT 1`,
+      [user_id, pg_id]
+    );
+
+    if (activeUser.length > 0) {
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "✅ Already staying in this PG"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ STEP 2: FIND VALID PAID BOOKING
+    // (Handles TOKEN + REMAINING also)
+    //////////////////////////////////////////////////////
     const [booking] = await db.query(
-      `SELECT b.id FROM bookings b
-       JOIN payments p ON b.id = p.booking_id
-       WHERE b.user_id = ? AND b.pg_id = ? AND p.status = 'paid'
-       ORDER BY b.created_at DESC LIMIT 1`,
+      `SELECT b.id 
+       FROM bookings b
+       WHERE b.user_id = ? 
+       AND b.pg_id = ?
+       AND EXISTS (
+         SELECT 1 FROM payments p 
+         WHERE p.booking_id = b.id 
+         AND p.status = 'paid'
+       )
+       ORDER BY b.created_at DESC 
+       LIMIT 1`,
       [user_id, pg_id]
     );
 
     if (booking.length === 0) {
-      return res.json({ 
-        success: false, 
-        type: "NOT_PAID", 
-        message: "❌ No paid booking found. Please pay first." 
+      return res.json({
+        success: false,
+        type: "NOT_PAID",
+        message: "❌ No paid booking found. Please pay first."
       });
     }
 
     const booking_id = booking[0].id;
 
-    // 2. Check if already "Verified" (present in pg_checkins)
+    //////////////////////////////////////////////////////
+    // ✅ STEP 3: CHECK IF ALREADY CHECKED-IN
+    //////////////////////////////////////////////////////
     const [existingCheckin] = await db.query(
-      `SELECT * FROM pg_checkins WHERE booking_id = ?`, [booking_id]
+      `SELECT id FROM pg_checkins WHERE booking_id = ?`,
+      [booking_id]
     );
 
     if (existingCheckin.length > 0) {
       return res.json({
         success: true,
-        type: "ALREADY_JOINED", // Shows the green "Verified" / "Already Joined" UI
+        type: "ALREADY_JOINED",
         message: "✅ Verified"
       });
     }
 
-    // 3. If they have a paid booking but aren't checked in, show the Join prompt
+    //////////////////////////////////////////////////////
+    // ✅ STEP 4: SHOW CONFIRM JOIN
+    //////////////////////////////////////////////////////
     return res.json({
       success: false,
-      type: "CONFIRM_JOIN", // Shows the red "Confirm Join" box
+      type: "CONFIRM_JOIN",
+      booking_id,
       message: "⚠️ Valid booking found! Confirm to join this PG."
     });
 
   } catch (err) {
     console.error("🔥 CHECK-IN ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
 
-/* ================= JOIN PG WITH ROOM (Fully Automatic) ================= */
+
+
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
+
   try {
     await connection.beginTransaction();
 
     const firebase_uid = req.user?.uid || req.user?.firebase_uid;
     const { pg_id, room_id } = req.body;
 
-    const [userRows] = await connection.query(`SELECT id FROM users WHERE firebase_uid = ?`, [firebase_uid]);
+    //////////////////////////////////////////////////////
+    // ✅ GET USER
+    //////////////////////////////////////////////////////
+    const [userRows] = await connection.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
+    );
+
+    if (userRows.length === 0) throw new Error("User not found");
+
     const user_id = userRows[0].id;
 
-    // 1. AUTOMATICALLY grab the booking_id so the user doesn't have to provide it
-    const [booking] = await connection.query(
-      `SELECT b.id, b.room_id FROM bookings b
-       JOIN payments p ON b.id = p.booking_id
-       WHERE b.user_id = ? AND b.pg_id = ? AND p.status = 'paid'
-       ORDER BY b.created_at DESC LIMIT 1`,
+    //////////////////////////////////////////////////////
+    // ✅ PREVENT DOUBLE ACTIVE
+    //////////////////////////////////////////////////////
+    const [activeUser] = await connection.query(
+      `SELECT id FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'
+       LIMIT 1`,
       [user_id, pg_id]
     );
 
-    if (booking.length === 0) throw new Error("No paid booking found to link.");
+    if (activeUser.length > 0) {
+      await connection.rollback();
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "Already staying in PG"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ GET LATEST VALID PAID BOOKING
+    //////////////////////////////////////////////////////
+    const [booking] = await connection.query(
+      `SELECT b.id, b.room_id 
+       FROM bookings b
+       WHERE b.user_id = ? 
+       AND b.pg_id = ?
+       AND EXISTS (
+         SELECT 1 FROM payments p 
+         WHERE p.booking_id = b.id 
+         AND p.status = 'paid'
+       )
+       ORDER BY b.created_at DESC 
+       LIMIT 1`,
+      [user_id, pg_id]
+    );
+
+    if (booking.length === 0) {
+      throw new Error("No paid booking found");
+    }
+
     const booking_id = booking[0].id;
     const finalRoomId = room_id || booking[0].room_id;
 
-    // 2. Double-check to prevent duplicate check-ins
+    //////////////////////////////////////////////////////
+    // ✅ PREVENT DUPLICATE CHECK-IN
+    //////////////////////////////////////////////////////
     const [checkinExist] = await connection.query(
-      `SELECT id FROM pg_checkins WHERE booking_id = ?`, [booking_id]
+      `SELECT id FROM pg_checkins WHERE booking_id = ?`,
+      [booking_id]
     );
 
     if (checkinExist.length > 0) {
       await connection.rollback();
-      return res.json({ success: true, type: "ALREADY_JOINED", message: "Already checked in" });
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "Already checked in"
+      });
     }
 
-    // 3. AUTOMATIC SYNC: Update pg_users with the correct booking_id and set to ACTIVE
-    // This fixes any "ghost" or "left" records automatically
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE OR INSERT pg_users
+    //////////////////////////////////////////////////////
     const [existingStay] = await connection.query(
-      `SELECT id FROM pg_users WHERE user_id = ? AND pg_id = ?`, [user_id, pg_id]
+      `SELECT id FROM pg_users 
+       WHERE user_id = ? AND pg_id = ?
+       ORDER BY created_at DESC LIMIT 1`,
+      [user_id, pg_id]
     );
 
     if (existingStay.length > 0) {
       await connection.query(
-        `UPDATE pg_users SET booking_id = ?, status = 'ACTIVE', room_id = ?, join_date = CURDATE() WHERE id = ?`,
+        `UPDATE pg_users 
+         SET booking_id = ?, 
+             status = 'ACTIVE',
+             room_id = ?, 
+             join_date = CURDATE()
+         WHERE id = ?`,
         [booking_id, finalRoomId, existingStay[0].id]
       );
     } else {
       await connection.query(
-        `INSERT INTO pg_users (pg_id, user_id, booking_id, room_id, status, join_date)
+        `INSERT INTO pg_users 
+         (pg_id, user_id, booking_id, room_id, status, join_date)
          VALUES (?, ?, ?, ?, 'ACTIVE', CURDATE())`,
         [pg_id, user_id, booking_id, finalRoomId]
       );
     }
 
-    // 4. AUTOMATIC INSERT: Create the check-in record linked to the booking
+    //////////////////////////////////////////////////////
+    // ✅ INSERT CHECK-IN
+    //////////////////////////////////////////////////////
     await connection.query(
-      `INSERT INTO pg_checkins (user_id, pg_id, booking_id, payment_status) 
-       VALUES (?, ?, ?, ?)`,
-      [user_id, pg_id, booking_id, "paid"]
+      `INSERT INTO pg_checkins 
+       (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, 'paid')`,
+      [user_id, pg_id, booking_id]
     );
 
     await connection.commit();
@@ -609,14 +714,19 @@ exports.joinPGWithRoom = async (req, res) => {
     return res.json({
       success: true,
       type: "ALREADY_JOINED",
-      message: "🎉 Success! You are now checked in."
+      message: "🎉 Successfully checked in!"
     });
 
   } catch (err) {
-    if (connection) await connection.rollback();
+    await connection.rollback();
     console.error("🔥 JOIN ERROR:", err);
-    return res.status(500).json({ success: false, message: err.message });
+
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
   } finally {
-    if (connection) connection.release();
+    connection.release();
   }
 };
