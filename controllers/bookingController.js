@@ -341,7 +341,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -376,35 +375,55 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ REFUND ONLY IF CURRENT BOOKING HAS VACATE */
+        /* ✅ FIX: SHOW REFUND ONLY WHEN USER IS LEAVING */
         CASE 
-          WHEN r.id IS NULL THEN NULL
-          ELSE r.status
+          WHEN b.status = 'LEAVING' THEN r.status
+          ELSE NULL
         END AS refund_status,
 
-        r.user_approval,
-        r.amount AS refund_amount,
+        CASE 
+          WHEN b.status = 'LEAVING' THEN r.user_approval
+          ELSE NULL
+        END AS user_approval,
 
-        'ACTIVE' AS status
+        CASE 
+          WHEN b.status = 'LEAVING' THEN r.amount
+          ELSE NULL
+        END AS refund_amount,
+
+        /* ✅ RETURN REAL STATUS */
+        b.status
 
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
+      /* ✅ FIX: ONLY LATEST REFUND */
       LEFT JOIN refunds r 
         ON r.booking_id = b.id
         AND r.refund_type = 'DEPOSIT'
+        AND r.created_at = (
+          SELECT MAX(created_at) 
+          FROM refunds 
+          WHERE booking_id = b.id 
+            AND refund_type = 'DEPOSIT'
+        )
 
       WHERE b.user_id = ? 
-        AND b.status = 'confirmed'   -- 🔥 FIX
 
+        /* ✅ FIX: INCLUDE LEAVING ALSO */
+        AND b.status IN ('confirmed', 'LEAVING')
+
+        /* ✅ ONLY PAID BOOKINGS */
         AND EXISTS (
           SELECT 1 FROM payments p 
           WHERE p.booking_id = b.id 
             AND p.status = 'paid'
         )
 
-      ORDER BY b.updated_at DESC
+      /* ✅ FIX: ONLY LATEST BOOKING */
+      ORDER BY b.id DESC
+      LIMIT 1
       `,
       [userId]
     );
@@ -416,7 +435,6 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 
 exports.getReceiptDetails = async (req, res) => {
