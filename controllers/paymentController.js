@@ -689,36 +689,45 @@ exports.getAdminPayments = async (req, res) => {
         /* TOTAL AMOUNT */
         (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
 
-        /* 🔥 TOTAL PAID */
-        SUM(CASE WHEN p.status='paid' THEN p.amount ELSE 0 END) AS total_paid,
-
-        /* 🔥 TOKEN PAID */
+        /* 🔥 INCLUDE submitted + paid */
         SUM(CASE 
-            WHEN p.payment_type='TOKEN' AND p.status='paid' 
-            THEN p.amount ELSE 0 END) AS token_paid,
+          WHEN p.status IN ('paid','submitted') 
+          THEN p.amount ELSE 0 END
+        ) AS total_paid,
 
-        /* 🔥 REMAINING PAID */
+        /* 🔥 TOKEN */
         SUM(CASE 
-            WHEN p.payment_type='REMAINING' AND p.status='paid' 
-            THEN p.amount ELSE 0 END) AS remaining_paid,
+          WHEN p.payment_type='TOKEN' 
+          AND p.status IN ('paid','submitted') 
+          THEN p.amount ELSE 0 END
+        ) AS token_paid,
 
-        /* LAST PAYMENT INFO (for buttons, screenshot, etc.) */
+        /* 🔥 REMAINING */
+        SUM(CASE 
+          WHEN p.payment_type='REMAINING' 
+          AND p.status IN ('paid','submitted') 
+          THEN p.amount ELSE 0 END
+        ) AS remaining_paid,
+
+        /* LAST PAYMENT INFO */
         MAX(p.created_at) AS created_at,
         MAX(p.submitted_at) AS submitted_at,
         MAX(p.utr) AS utr,
         MAX(p.screenshot) AS screenshot,
 
-        /* 🔥 GET LAST ORDER ID */
+        /* 🔥 LAST ORDER ID */
         SUBSTRING_INDEX(
           GROUP_CONCAT(p.order_id ORDER BY p.created_at DESC),
           ',', 1
         ) AS order_id,
 
-        /* 🔥 STATUS */
-        MAX(p.status) AS payment_status
+        /* 🔥 LAST PAYMENT STATUS */
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(p.status ORDER BY p.created_at DESC),
+          ',', 1
+        ) AS payment_status
 
       FROM bookings b
-
       LEFT JOIN payments p ON p.booking_id = b.id
       LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
@@ -736,8 +745,14 @@ exports.getAdminPayments = async (req, res) => {
       const remaining = total - paid;
 
       let status = "NOT_PAID";
-      if (paid > 0 && remaining > 0) status = "PARTIAL_PAID";
-      if (remaining <= 0 && total > 0) status = "FULLY_PAID";
+
+      if (paid > 0 && remaining > 0) {
+        status = "PARTIAL_PAID";
+      }
+
+      if (remaining <= 0 && total > 0) {
+        status = "FULLY_PAID";
+      }
 
       return {
         ...r,
@@ -761,7 +776,6 @@ exports.getAdminPayments = async (req, res) => {
     });
   }
 };
-
 
 
 
