@@ -6,38 +6,20 @@ const db = require("../db");
 //////////////////////////////////////////////////////
 exports.createPayment = async (req, res) => {
   try {
-    const { bookingId, type } = req.body;
+    const { bookingId } = req.body;
 
     if (!bookingId) {
       return res.status(400).json({ success: false, message: "bookingId required" });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 PREVENT MULTIPLE PAYMENT (VERY IMPORTANT)
-    //////////////////////////////////////////////////////
-    const [pending] = await db.query(
-      `SELECT id FROM payments 
-       WHERE booking_id=? AND status IN ('pending','submitted')`,
-      [bookingId]
-    );
-
-    if (pending.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Payment already in progress. Please wait."
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // GET BOOKING
-    //////////////////////////////////////////////////////
+    // ✅ 1. Get real booking data (Added user_id to the SELECT)
     const [[booking]] = await db.query(
       `SELECT 
         user_id, 
         rent_amount, 
         security_deposit, 
         maintenance_amount, 
-        platform_fee
+        platform_fee 
        FROM bookings 
        WHERE id = ?`,
       [bookingId]
@@ -47,95 +29,31 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    //////////////////////////////////////////////////////
-    // CALCULATE TOTAL
-    //////////////////////////////////////////////////////
-    const total =
-      (parseFloat(booking.rent_amount) || 0) +
-      (parseFloat(booking.security_deposit) || 0) +
-      (parseFloat(booking.maintenance_amount) || 0) +
-      (parseFloat(booking.platform_fee) || 0);
+    // Convert string → number
+    const rent = parseFloat(booking.rent_amount) || 0;
+    const deposit = parseFloat(booking.security_deposit) || 0;
+    const maintenance = parseFloat(booking.maintenance_amount) || 0;
+    const platformFee = parseFloat(booking.platform_fee) || 0;
+    const amount = rent + deposit + maintenance + platformFee;
 
-    let amount = 0;
-    let paymentType = "";
-
-    //////////////////////////////////////////////////////
-    // TOKEN
-    //////////////////////////////////////////////////////
-    if (!type || type === "TOKEN") {
-      amount = 1000;
-      paymentType = "TOKEN";
-
-      const [existing] = await db.query(
-        `SELECT id FROM payments 
-         WHERE booking_id=? AND payment_type='TOKEN'`,
-        [bookingId]
-      );
-
-      if (existing.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Token already paid"
-        });
-      }
+    if (amount <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid amount" });
     }
 
-    //////////////////////////////////////////////////////
-    // REMAINING
-    //////////////////////////////////////////////////////
-    if (type === "REMAINING") {
-      paymentType = "REMAINING";
+    // ✅ 3. Create Order
+    const orderId = `order_${bookingId}_${Date.now()}`;
+    const upiId = "huligeshmalka-1@oksbi";
+    const merchantName = "Nepxall";
 
-      const [[paid]] = await db.query(
-        `SELECT SUM(amount) as paid FROM payments 
-         WHERE booking_id=? AND status IN ('paid','submitted')`,
-        [bookingId]
-      );
-
-      amount = total - (paid.paid || 0);
-
-      if (amount <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: "No remaining amount"
-        });
-      }
-    }
-
-    //////////////////////////////////////////////////////
-    // CREATE ORDER
-    //////////////////////////////////////////////////////
-    const orderId = `${paymentType.toLowerCase()}_${bookingId}_${Date.now()}`;
-
-    const upiLink = `upi://pay?pa=huligeshmalka-1@oksbi&pn=Nepxall&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
-
+    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
     const qr = await QRCode.toDataURL(upiLink);
 
-    //////////////////////////////////////////////////////
-    // SAFE INSERT (RETRY)
-    //////////////////////////////////////////////////////
-    try {
-      await db.query(
-        `INSERT INTO payments 
-         (booking_id, user_id, order_id, amount, status, payment_type, created_at)
-         VALUES (?, ?, ?, ?, 'pending', ?, NOW())`,
-        [bookingId, booking.user_id, orderId, amount, paymentType]
-      );
-    } catch (err) {
-      if (err.code === "ER_LOCK_WAIT_TIMEOUT") {
-        console.log("Retrying insert...");
-        await new Promise(r => setTimeout(r, 1000));
-
-        await db.query(
-          `INSERT INTO payments 
-           (booking_id, user_id, order_id, amount, status, payment_type, created_at)
-           VALUES (?, ?, ?, ?, 'pending', ?, NOW())`,
-          [bookingId, booking.user_id, orderId, amount, paymentType]
-        );
-      } else {
-        throw err;
-      }
-    }
+    // ✅ 4. Save payment (NOW INCLUDING user_id)
+    await db.query(
+      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
+       VALUES (?, ?, ?, ?, 'pending', NOW())`,
+      [bookingId, booking.user_id, orderId, amount]
+    );
 
     res.json({
       success: true,
@@ -205,51 +123,58 @@ exports.verifyPayment = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    await connection.beginTransaction();
+
     //////////////////////////////////////////////////////
-    // ADMIN CHECK
+    // 1. ADMIN CHECK
     //////////////////////////////////////////////////////
     if (req.user.role !== "admin") {
-      return res.status(403).json({ success: false });
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
     }
 
     const { orderId } = req.params;
 
     //////////////////////////////////////////////////////
-    // GET DATA (NO HEAVY LOCK)
+    // 2. GET PAYMENT + BOOKING DATA
     //////////////////////////////////////////////////////
-    const [[data]] = await connection.query(
+    const [[paymentData]] = await connection.query(
       `SELECT 
-        p.booking_id,
+        p.booking_id, 
         p.amount,
-        p.status,
-        p.payment_type,
-        b.pg_id,
-        b.user_id,
-        b.owner_id,
+        p.status AS payment_status,
+        b.pg_id, 
+        b.user_id, 
+        b.owner_id, 
         b.room_id,
-        b.check_in_date,
-        b.status AS booking_status
+        b.check_in_date 
        FROM payments p
        JOIN bookings b ON b.id = p.booking_id
-       WHERE p.order_id=?`,
+       WHERE p.order_id = ? FOR UPDATE`,
       [orderId]
     );
 
-    if (!data) {
-      return res.status(404).json({ success: false });
+    if (!paymentData) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment record not found"
+      });
     }
 
-    if (data.status === "paid") {
-      return res.status(400).json({ success: false, message: "Already verified" });
+    //////////////////////////////////////////////////////
+    // 🔒 PREVENT DOUBLE APPROVE
+    //////////////////////////////////////////////////////
+    if (paymentData.payment_status === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment already verified"
+      });
     }
 
     //////////////////////////////////////////////////////
-    // START TRANSACTION ONLY NOW
-    //////////////////////////////////////////////////////
-    await connection.beginTransaction();
-
-    //////////////////////////////////////////////////////
-    // MARK PAID
+    // 3. UPDATE PAYMENT → PAID
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE payments 
@@ -259,72 +184,65 @@ exports.verifyPayment = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // TOKEN
+    // 4. UPDATE BOOKING → CONFIRMED
     //////////////////////////////////////////////////////
-    if (data.payment_type === "TOKEN") {
+    await connection.query(
+      `UPDATE bookings 
+       SET status='confirmed', 
+           owner_amount=?, 
+           owner_settlement='PENDING' 
+       WHERE id=?`,
+      [paymentData.amount, paymentData.booking_id]
+    );
 
+    //////////////////////////////////////////////////////
+    // 🔥 5. ALWAYS INSERT NEW PG_USERS (FINAL LOGIC)
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `INSERT INTO pg_users 
+      (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+      VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
+      [
+        paymentData.owner_id,
+        paymentData.pg_id,
+        paymentData.room_id || null,
+        paymentData.user_id,
+        paymentData.check_in_date,
+        paymentData.booking_id
+      ]
+    );
+
+    //////////////////////////////////////////////////////
+    // 6. UPDATE ROOM OCCUPANCY
+    //////////////////////////////////////////////////////
+    if (paymentData.room_id) {
       await connection.query(
-        `UPDATE bookings SET status='PARTIAL_PAID' WHERE id=?`,
-        [data.booking_id]
-      );
-
-      await connection.commit();
-
-      return res.json({
-        success: true,
-        message: "₹1000 received"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // REMAINING
-    //////////////////////////////////////////////////////
-    if (data.payment_type === "REMAINING") {
-
-      await connection.query(
-        `UPDATE bookings 
-         SET status='confirmed',
-             owner_amount=?,
-             owner_settlement='PENDING'
+        `UPDATE pg_rooms 
+         SET occupied_seats = occupied_seats + 1 
          WHERE id=?`,
-        [data.amount, data.booking_id]
+        [paymentData.room_id]
       );
-
-      const [existing] = await connection.query(
-        `SELECT id FROM pg_users WHERE booking_id=?`,
-        [data.booking_id]
-      );
-
-      if (existing.length === 0) {
-        await connection.query(
-          `INSERT INTO pg_users 
-           (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
-           VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
-          [
-            data.owner_id,
-            data.pg_id,
-            data.room_id,
-            data.user_id,
-            data.check_in_date,
-            data.booking_id
-          ]
-        );
-      }
-
-      await connection.commit();
-
-      return res.json({
-        success: true,
-        message: "User joined PG"
-      });
     }
 
-    await connection.rollback();
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Payment verified. User is now ACTIVE in PG."
+    });
 
   } catch (err) {
     await connection.rollback();
-    console.error("VERIFY ERROR:", err);
-    res.status(500).json({ success: false });
+    console.error("❌ VERIFY PAYMENT ERROR:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: err.sqlMessage || err.message
+    });
 
   } finally {
     connection.release();
@@ -635,7 +553,15 @@ exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        b.id AS booking_id,
+        p.order_id,
+        p.amount,
+        p.status,
+        p.created_at,
+        p.submitted_at,
+        p.booking_id,
+        p.utr,
+        p.screenshot,
+        p.verified_by_admin,
 
         /* USER */
         COALESCE(u.name, b.name, 'Guest User') AS reg_name,
@@ -645,89 +571,27 @@ exports.getAdminPayments = async (req, res) => {
         b.room_type AS sharing,
         b.check_in_date,
 
-        /* PG */
-        pg.pg_name,
+        /* 🔥 ADD THESE (IMPORTANT) */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
 
-        /* TOTAL AMOUNT */
+        /* TOTAL */
         (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
 
-        /* 🔥 INCLUDE submitted + paid */
-        SUM(CASE 
-          WHEN p.status IN ('paid','submitted') 
-          THEN p.amount ELSE 0 END
-        ) AS total_paid,
+        /* PG */
+        pg.pg_name
 
-        /* 🔥 TOKEN */
-        SUM(CASE 
-          WHEN p.payment_type='TOKEN' 
-          AND p.status IN ('paid','submitted') 
-          THEN p.amount ELSE 0 END
-        ) AS token_paid,
-
-        /* 🔥 REMAINING */
-        SUM(CASE 
-          WHEN p.payment_type='REMAINING' 
-          AND p.status IN ('paid','submitted') 
-          THEN p.amount ELSE 0 END
-        ) AS remaining_paid,
-
-        /* LAST PAYMENT INFO */
-        MAX(p.created_at) AS created_at,
-        MAX(p.submitted_at) AS submitted_at,
-        MAX(p.utr) AS utr,
-        MAX(p.screenshot) AS screenshot,
-
-        /* 🔥 LAST ORDER ID */
-        SUBSTRING_INDEX(
-          GROUP_CONCAT(p.order_id ORDER BY p.created_at DESC),
-          ',', 1
-        ) AS order_id,
-
-        /* 🔥 LAST PAYMENT STATUS */
-        SUBSTRING_INDEX(
-          GROUP_CONCAT(p.status ORDER BY p.created_at DESC),
-          ',', 1
-        ) AS payment_status
-
-      FROM bookings b
-      LEFT JOIN payments p ON p.booking_id = b.id
+      FROM payments p
+      LEFT JOIN bookings b ON b.id = p.booking_id
       LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
-
-      GROUP BY b.id
-      ORDER BY created_at DESC
+      ORDER BY p.created_at DESC
     `);
-
-    //////////////////////////////////////////////////////
-    // 🔥 FORMAT RESPONSE
-    //////////////////////////////////////////////////////
-    const formatted = rows.map(r => {
-      const total = Number(r.total_amount) || 0;
-      const paid = Number(r.total_paid) || 0;
-      const remaining = total - paid;
-
-      let status = "NOT_PAID";
-
-      if (paid > 0 && remaining > 0) {
-        status = "PARTIAL_PAID";
-      }
-
-      if (remaining <= 0 && total > 0) {
-        status = "FULLY_PAID";
-      }
-
-      return {
-        ...r,
-        total_amount: total,
-        total_paid: paid,
-        remaining_amount: remaining,
-        status
-      };
-    });
 
     res.json({
       success: true,
-      data: formatted
+      data: rows
     });
 
   } catch (err) {
@@ -738,6 +602,7 @@ exports.getAdminPayments = async (req, res) => {
     });
   }
 };
+
 
 
 
