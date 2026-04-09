@@ -63,7 +63,7 @@ exports.createPayment = async (req, res) => {
     // TOKEN
     //////////////////////////////////////////////////////
     if (!type || type === "TOKEN") {
-      amount = 1;
+      amount = 1000;
       paymentType = "TOKEN";
 
       const [existing] = await db.query(
