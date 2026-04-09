@@ -483,11 +483,26 @@ exports.getUserPaymentStatus = async (req, res) => {
     const { bookingId } = req.params;
 
     const [rows] = await db.query(
-      `SELECT status, order_id, utr, created_at, submitted_at 
-       FROM payments 
-       WHERE booking_id = ?
-       ORDER BY created_at DESC 
-       LIMIT 1`,
+      `
+      SELECT 
+        status, 
+        order_id, 
+        utr, 
+        created_at, 
+        submitted_at 
+      FROM payments 
+      WHERE booking_id = ?
+      ORDER BY 
+        CASE 
+          WHEN status = 'paid' THEN 1
+          WHEN status = 'submitted' THEN 2
+          WHEN status = 'pending' THEN 3
+          WHEN status = 'rejected' THEN 4
+          ELSE 5
+        END,
+        created_at DESC
+      LIMIT 1
+      `,
       [bookingId]
     );
 
@@ -499,14 +514,14 @@ exports.getUserPaymentStatus = async (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: rows[0]
     });
 
   } catch (err) {
     console.error("❌ PAYMENT STATUS ERROR:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch payment status"
     });
