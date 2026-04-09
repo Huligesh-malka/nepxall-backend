@@ -614,8 +614,34 @@ exports.joinPGWithRoom = async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    //////////////////////////////////////////////////////
+    // ✅ FIX USER ID (VERY IMPORTANT)
+    //////////////////////////////////////////////////////
+    const user_id =
+      req.user?.id ||
+      req.user?.uid ||
+      req.user?.firebase_uid ||
+      req.user;
+
     const { pg_id, room_id } = req.body;
-    const user_id = req.user.id;
+
+    console.log("JOIN DEBUG:", {
+      user: req.user,
+      user_id,
+      pg_id,
+      room_id
+    });
+
+    //////////////////////////////////////////////////////
+    // ❌ VALIDATION
+    //////////////////////////////////////////////////////
+    if (!pg_id || !user_id) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user or PG"
+      });
+    }
 
     //////////////////////////////////////////////////////
     // ✅ OPTIONAL ROOM HANDLING
@@ -665,7 +691,7 @@ exports.joinPGWithRoom = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ ROOM NUMBER (SAFE)
+    // ✅ ROOM NUMBER SAFE
     //////////////////////////////////////////////////////
     const roomNo = room
       ? (room.room_no || room.room_number || room.id)
@@ -713,6 +739,9 @@ exports.joinPGWithRoom = async (req, res) => {
     //////////////////////////////////////////////////////
     await connection.commit();
 
+    //////////////////////////////////////////////////////
+    // ✅ SUCCESS RESPONSE
+    //////////////////////////////////////////////////////
     return res.json({
       success: true,
       message: room
@@ -723,11 +752,12 @@ exports.joinPGWithRoom = async (req, res) => {
 
   } catch (err) {
     await connection.rollback();
+
     console.error("🔥 JOIN ERROR:", err);
 
     return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: err.message || "Server error"
     });
 
   } finally {
