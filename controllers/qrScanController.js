@@ -485,205 +485,233 @@ exports.getScanStatistics = async (req, res) => {
 };
 
 
-
 exports.checkAndCheckinUser = async (req, res) => {
   try {
-    //////////////////////////////////////////////////////
-    // ✅ GET DATA
-    //////////////////////////////////////////////////////
-    const pg_id = req.body.pg_id;
-
-    const user_id =
-      req.user?.id ||
-      req.user?.uid ||
-      req.user;
-
-    console.log("USER:", user_id);
+    const { pg_id } = req.body;
+    const firebase_uid = req.user?.uid || req.user?.firebase_uid;
 
     //////////////////////////////////////////////////////
-    // ❌ VALIDATION
+    // ✅ GET USER
     //////////////////////////////////////////////////////
-    if (!pg_id) {
-      return res.status(400).json({
-        success: false,
-        message: "PG ID is required"
-      });
+    const [userRows] = await db.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    if (!user_id) {
-      return res.status(401).json({
-        success: false,
-        message: "User not authenticated"
-      });
-    }
+    const user_id = userRows[0].id;
 
     //////////////////////////////////////////////////////
-    // ✅ 1. CHECK JOIN (pg_users)
+    // ✅ STEP 1: CHECK ACTIVE USER
     //////////////////////////////////////////////////////
-    const [activeStay] = await db.query(
-      `SELECT * FROM pg_users 
-       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
+    const [activeUser] = await db.query(
+      `SELECT id FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'
+       LIMIT 1`,
       [user_id, pg_id]
     );
 
-    if (activeStay.length === 0) {
+    if (activeUser.length === 0) {
       return res.json({
         success: false,
-        type: "NOT_JOINED",
-        message: "🏠 Please join this PG first"
+        type: "NOT_ACTIVE",
+        message: "❌ You are not approved for this PG"
       });
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 2. CHECK PAYMENT
+    // ✅ STEP 2: CHECK BOOKING + PAYMENT
     //////////////////////////////////////////////////////
     const [booking] = await db.query(
-      `SELECT * FROM bookings 
-       WHERE user_id = ? AND pg_id = ? 
-       ORDER BY created_at DESC LIMIT 1`,
+      `SELECT b.id, b.status, p.status AS payment_status
+       FROM bookings b
+       LEFT JOIN payments p ON p.booking_id = b.id
+       WHERE b.user_id = ? 
+       AND b.pg_id = ?
+       ORDER BY b.created_at DESC 
+       LIMIT 1`,
       [user_id, pg_id]
     );
 
     if (booking.length === 0) {
       return res.json({
         success: false,
-        type: "NOT_PAID",
-        message: "❌ Please complete payment"
+        type: "NO_BOOKING",
+        message: "❌ No booking found"
       });
     }
 
-    const userBooking = booking[0];
+    const bookingData = booking[0];
 
-    const [payment] = await db.query(
-      `SELECT * FROM payments 
-       WHERE booking_id = ? 
-       ORDER BY created_at DESC LIMIT 1`,
-      [userBooking.id]
-    );
-
-    if (payment.length === 0 || payment[0].status !== "paid") {
+    //////////////////////////////////////////////////////
+    // ❌ PAYMENT NOT DONE
+    //////////////////////////////////////////////////////
+    if (
+      bookingData.status !== "confirmed" ||
+      bookingData.payment_status !== "paid"
+    ) {
       return res.json({
         success: false,
-        type: "NOT_PAID",
-        message: "❌ Please complete payment"
+        type: "PAYMENT_PENDING",
+        message: "💰 Please complete payment first"
       });
     }
 
     //////////////////////////////////////////////////////
-    // ✅ 3. CHECK IF ALREADY CHECKED-IN
+    // ✅ ALREADY CHECKED-IN
     //////////////////////////////////////////////////////
-    const [existing] = await db.query(
-      `SELECT * FROM pg_checkins 
-       WHERE user_id = ? AND pg_id = ?`,
-      [user_id, pg_id]
+    const [existingCheckin] = await db.query(
+      `SELECT id FROM pg_checkins WHERE booking_id = ?`,
+      [bookingData.id]
     );
 
-    if (existing.length > 0) {
+    if (existingCheckin.length > 0) {
       return res.json({
         success: true,
         type: "ALREADY_JOINED",
-        message: "✅ You already joined this PG"
+        message: "✅ Already checked in"
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 4. ASK CONFIRMATION (NO INSERT HERE)
+    // ✅ ALLOW JOIN
     //////////////////////////////////////////////////////
     return res.json({
-      success: false,
-      type: "CONFIRM_JOIN",
-      message: "⚠️ Are you sure you want to join this PG?"
+      success: true,
+      type: "ALLOW_JOIN",
+      booking_id: bookingData.id,
+      message: "✅ Payment verified. Click join"
     });
 
   } catch (err) {
     console.error("🔥 CHECK-IN ERROR:", err);
-
     return res.status(500).json({
       success: false,
-      message: err.message || "Server error"
+      message: "Server error"
     });
   }
 };
-
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
     await connection.beginTransaction();
 
+    const firebase_uid = req.user?.uid || req.user?.firebase_uid;
     const { pg_id, room_id } = req.body;
-    const user_id = req.user.id;
 
-    const [rooms] = await connection.query(
-      `SELECT * FROM pg_rooms WHERE id = ? AND pg_id = ? FOR UPDATE`,
-      [room_id, pg_id]
+    //////////////////////////////////////////////////////
+    // ✅ GET USER
+    //////////////////////////////////////////////////////
+    const [userRows] = await connection.query(
+      `SELECT id FROM users WHERE firebase_uid = ?`,
+      [firebase_uid]
     );
 
-    if (rooms.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: "Room not found" });
-    }
+    if (userRows.length === 0) throw new Error("User not found");
 
-    const room = rooms[0];
+    const user_id = userRows[0].id;
 
-    if (room.occupied_seats >= room.total_seats) {
-      await connection.rollback();
-      return res.json({ success: false, message: "❌ Room is full" });
-    }
-
-    const [existing] = await connection.query(
-      `SELECT id FROM pg_users WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'`,
+    //////////////////////////////////////////////////////
+    // ✅ CHECK ACTIVE USER (IMPORTANT)
+    //////////////////////////////////////////////////////
+    const [activeUser] = await connection.query(
+      `SELECT id FROM pg_users 
+       WHERE user_id = ? AND pg_id = ? AND status = 'ACTIVE'
+       LIMIT 1`,
       [user_id, pg_id]
     );
 
-    if (existing.length > 0) {
-      await connection.rollback();
-      return res.json({ success: false, message: "Already joined this PG" });
+    if (activeUser.length === 0) {
+      throw new Error("User is not approved in this PG");
     }
 
-    const roomNo = room.room_no || room.room_number || room.id;
-
     //////////////////////////////////////////////////////
-    // ✅ INSERT USER (JOIN)
+    // ✅ GET BOOKING
     //////////////////////////////////////////////////////
-    await connection.query(
-      `INSERT INTO pg_users 
-       (owner_id, pg_id, room_id, user_id, room_no, join_date, status)
-       VALUES (?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
-      [room.owner_id || 1, pg_id, room_id, user_id, roomNo]
+    const [booking] = await connection.query(
+      `SELECT id, room_id, status 
+       FROM bookings 
+       WHERE user_id = ? 
+       AND pg_id = ?
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [user_id, pg_id]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ UPDATE ROOM
-    //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE pg_rooms 
-       SET occupied_seats = occupied_seats + 1 
-       WHERE id = ?`,
-      [room_id]
-    );
+    if (booking.length === 0) {
+      throw new Error("No booking found");
+    }
+
+    const booking_id = booking[0].id;
+    const finalRoomId = room_id || booking[0].room_id;
 
     //////////////////////////////////////////////////////
-    // ✅ FINAL CHECK-IN STORE (ONLY HERE)
+    // ✅ CHECK PAYMENT AGAIN (SECURITY)
+    //////////////////////////////////////////////////////
+    const [[paymentCheck]] = await connection.query(
+      `SELECT b.status, p.status AS payment_status
+       FROM bookings b
+       LEFT JOIN payments p ON p.booking_id = b.id
+       WHERE b.id = ?`,
+      [booking_id]
+    );
+
+    if (
+      !paymentCheck ||
+      paymentCheck.status !== "confirmed" ||
+      paymentCheck.payment_status !== "paid"
+    ) {
+      throw new Error("Payment not completed");
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ PREVENT DUPLICATE CHECK-IN
+    //////////////////////////////////////////////////////
+    const [checkinExist] = await connection.query(
+      `SELECT id FROM pg_checkins WHERE booking_id = ?`,
+      [booking_id]
+    );
+
+    if (checkinExist.length > 0) {
+      await connection.rollback();
+      return res.json({
+        success: true,
+        type: "ALREADY_JOINED",
+        message: "Already checked in"
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ INSERT CHECK-IN ONLY (NO pg_users insert)
     //////////////////////////////////////////////////////
     await connection.query(
-      `INSERT INTO pg_checkins (user_id, pg_id, payment_status) 
-       VALUES (?, ?, ?)`,
-      [user_id, pg_id, "paid"]
+      `INSERT INTO pg_checkins 
+       (user_id, pg_id, booking_id, payment_status)
+       VALUES (?, ?, ?, 'paid')`,
+      [user_id, pg_id, booking_id]
     );
 
     await connection.commit();
 
     return res.json({
       success: true,
-      message: "🎉 Joined successfully",
-      room_no: roomNo
+      type: "JOIN_SUCCESS",
+      message: "🎉 Check-in successful!"
     });
 
   } catch (err) {
     await connection.rollback();
     console.error("🔥 JOIN ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
   } finally {
     connection.release();
   }
