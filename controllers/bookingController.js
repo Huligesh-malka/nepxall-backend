@@ -356,13 +356,13 @@ exports.getUserActiveStay = async (req, res) => {
          FROM payments p 
          WHERE p.booking_id = b.id 
            AND p.status = 'paid'
-         LIMIT 1) AS order_id,
+         ORDER BY p.id DESC LIMIT 1) AS order_id,
 
         (SELECT p.submitted_at 
          FROM payments p 
          WHERE p.booking_id = b.id 
            AND p.status = 'paid'
-         LIMIT 1) AS paid_date,
+         ORDER BY p.id DESC LIMIT 1) AS paid_date,
 
         /* PG DETAILS */
         pg.pg_name,
@@ -376,11 +376,20 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
+        /* 🔥 REFUND DATA (IMPORTANT) */
+        r.status AS refund_status,
+        r.user_approval,
+
         'ACTIVE' AS status
 
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+
+      /* 🔥 JOIN REFUND */
+      LEFT JOIN refunds r 
+        ON r.booking_id = b.id 
+        AND r.refund_type='DEPOSIT'
 
       WHERE b.user_id = ?
         AND b.status IN ('confirmed','left')
