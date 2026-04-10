@@ -501,3 +501,111 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
+
+
+
+
+
+exports.adminMarkRefundPaid = async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { bookingId } = req.params;
+
+    //////////////////////////////////////////////////////
+    // ✅ ADMIN CHECK (YOU CAN CUSTOMIZE ROLE)
+    //////////////////////////////////////////////////////
+    if (!req.user || !req.user.isAdmin) {
+      throw new Error("Not authorized as admin");
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ GET FULL REFUND ONLY
+    //////////////////////////////////////////////////////
+    const [[refund]] = await connection.query(
+      `SELECT r.*, b.user_id, b.pg_id
+       FROM refunds r
+       JOIN bookings b ON b.id = r.booking_id
+       WHERE r.booking_id=? 
+       AND r.refund_type='FULL'
+       ORDER BY r.id DESC
+       LIMIT 1`,
+      [bookingId]
+    );
+
+    if (!refund) {
+      throw new Error("Full refund not found");
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ VALIDATION
+    //////////////////////////////////////////////////////
+    const status = (refund.status || "").toLowerCase();
+
+    if (status === "paid") {
+      throw new Error("Already paid");
+    }
+
+    if (!["pending", "approved"].includes(status)) {
+      throw new Error("Invalid refund state");
+    }
+
+    //////////////////////////////////////////////////////
+    // 💰 MARK REFUND AS PAID (AUTO ACCEPT)
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE refunds 
+       SET status='paid',
+           user_approval='accepted'
+       WHERE id=?`,
+      [refund.id]
+    );
+
+    //////////////////////////////////////////////////////
+    // 📦 UPDATE BOOKING (FULL REFUND → CANCELLED)
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE bookings 
+       SET status='cancelled',
+           updated_at=NOW()
+       WHERE id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ❌ OPTIONAL: REMOVE FROM PG_USERS IF EXISTS
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `DELETE FROM pg_users 
+       WHERE booking_id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Full refund paid successfully (Admin)"
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("❌ ADMIN REFUND ERROR:", err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  } finally {
+    connection.release();
+  }
+};
+
+
+

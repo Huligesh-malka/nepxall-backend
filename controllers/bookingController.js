@@ -465,7 +465,6 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
-
 exports.requestRefund = async (req, res) => {
   try {
     const { bookingId, reason, upi_id } = req.body;
@@ -507,7 +506,7 @@ exports.requestRefund = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 GET LATEST REFUND
+    // 🔥 GET LATEST REFUND ONLY
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
       `SELECT * FROM refunds 
@@ -518,7 +517,7 @@ exports.requestRefund = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ❌ BLOCK IF ALREADY ACTIVE
+    // ❌ BLOCK IF ACTIVE REQUEST EXISTS
     //////////////////////////////////////////////////////
     if (existing && existing.status !== "rejected") {
       return res.status(400).json({
@@ -536,7 +535,7 @@ exports.requestRefund = async (req, res) => {
          SET reason=?, 
              upi_id=?, 
              status='pending',
-             user_approval='pending',
+             user_approval='accepted', -- FULL auto accept
              created_at=NOW()
          WHERE id=?`,
         [reason, upi_id, existing.id]
@@ -558,16 +557,29 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT NEW REFUND
+    // ✅ INSERT NEW REFUND (FULL TYPE)
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
       VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
-      // 🔥 NOTE: user_approval = 'accepted' (AUTO)
       [bookingId, userId, amount, reason, upi_id]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔥 OPTIONAL: MARK BOOKING AS CANCELLATION REQUESTED
+    //////////////////////////////////////////////////////
+    await db.query(
+      `UPDATE bookings 
+       SET status='pending_refund',
+           updated_at=NOW()
+       WHERE id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ RESPONSE
+    //////////////////////////////////////////////////////
     res.json({
       success: true,
       message: "Refund request submitted",
@@ -579,7 +591,6 @@ exports.requestRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.requestVacate = async (req, res) => {
   try {

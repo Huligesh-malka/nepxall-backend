@@ -11,7 +11,8 @@ const {
   getVacateRequests,
   approveVacateRequest,
   markRefundPaid,
-  rejectVacateRequest   // ✅ NEW
+  rejectVacateRequest,
+  adminMarkRefundPaid   // 🔥 ADD THIS
 } = ownerController;
 
 // ================= BOOKINGS =================
@@ -29,18 +30,25 @@ router.post(
   approveVacateRequest
 );
 
-// ❌ OWNER REJECT (NEW)
+// ❌ OWNER REJECT
 router.post(
   "/refund/reject/:bookingId",
   firebaseAuth,
   rejectVacateRequest
 );
 
-// 💰 MARK AS PAID
+// 💰 OWNER MARK AS PAID (DEPOSIT)
 router.post(
   "/refund/mark-paid/:bookingId",
   firebaseAuth,
   markRefundPaid
+);
+
+// 🔵 ADMIN MARK AS PAID (FULL REFUND)  🔥 NEW
+router.post(
+  "/admin/refund/mark-paid/:bookingId",
+  firebaseAuth,
+  adminMarkRefundPaid
 );
 
 module.exports = router;
