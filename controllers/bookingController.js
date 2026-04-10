@@ -535,7 +535,7 @@ exports.requestRefund = async (req, res) => {
          SET reason=?, 
              upi_id=?, 
              status='pending',
-             user_approval='accepted', -- FULL auto accept
+             user_approval='accepted',
              created_at=NOW()
          WHERE id=?`,
         [reason, upi_id, existing.id]
@@ -567,15 +567,10 @@ exports.requestRefund = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔥 OPTIONAL: MARK BOOKING AS CANCELLATION REQUESTED
+    // 🚫 IMPORTANT: DO NOT CHANGE BOOKING STATUS
     //////////////////////////////////////////////////////
-    await db.query(
-      `UPDATE bookings 
-       SET status='pending_refund',
-           updated_at=NOW()
-       WHERE id=?`,
-      [bookingId]
-    );
+    // ❌ REMOVED THIS (CAUSE OF BUG)
+    // UPDATE bookings SET status='pending_refund'
 
     //////////////////////////////////////////////////////
     // ✅ RESPONSE
@@ -591,7 +586,6 @@ exports.requestRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.requestVacate = async (req, res) => {
   try {
     const {
