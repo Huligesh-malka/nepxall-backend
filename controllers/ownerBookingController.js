@@ -504,7 +504,6 @@ exports.markRefundPaid = async (req, res) => {
 
 
 
-
 exports.adminMarkRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -521,7 +520,7 @@ exports.adminMarkRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET FULL REFUND
+    // ✅ GET LATEST FULL REFUND
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.user_id, b.pg_id
@@ -541,18 +540,12 @@ exports.adminMarkRefundPaid = async (req, res) => {
     //////////////////////////////////////////////////////
     // ✅ VALIDATION
     //////////////////////////////////////////////////////
-    const status = (refund.status || "").toLowerCase();
-
-    if (status === "paid") {
+    if (refund.status === "paid") {
       throw new Error("Already paid");
     }
 
-    if (!["pending", "approved"].includes(status)) {
-      throw new Error("Invalid refund state");
-    }
-
     //////////////////////////////////////////////////////
-    // 💰 MARK REFUND PAID
+    // 💰 UPDATE REFUND
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
@@ -563,35 +556,34 @@ exports.adminMarkRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS (IMPORTANT FIX)
+    // 🔥 FORCE UPDATE PG_USERS (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
-       SET status='LEFT',
-           vacate_status='completed'
+       SET 
+         status='LEFT',
+         vacate_status='completed'
        WHERE booking_id=?`,
       [bookingId]
     );
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKING (IMPORTANT FIX)
+    // 🔥 FORCE UPDATE BOOKINGS (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
-       SET status='left',
-           updated_at=NOW()
+       SET 
+         status='left',
+         updated_at=NOW()
        WHERE id=?`,
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ COMMIT
-    //////////////////////////////////////////////////////
     await connection.commit();
 
     res.json({
       success: true,
-      message: "Full refund paid successfully"
+      message: "Full refund completed & user vacated"
     });
 
   } catch (err) {
