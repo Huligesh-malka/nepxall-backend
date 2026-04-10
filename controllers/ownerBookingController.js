@@ -505,7 +505,6 @@ exports.markRefundPaid = async (req, res) => {
 
 
 
-
 exports.adminMarkRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -515,14 +514,14 @@ exports.adminMarkRefundPaid = async (req, res) => {
     const { bookingId } = req.params;
 
     //////////////////////////////////////////////////////
-    // ✅ ADMIN CHECK (YOU CAN CUSTOMIZE ROLE)
+    // ✅ ADMIN CHECK
     //////////////////////////////////////////////////////
     if (!req.user || !req.user.isAdmin) {
       throw new Error("Not authorized as admin");
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET FULL REFUND ONLY
+    // ✅ GET FULL REFUND
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.user_id, b.pg_id
@@ -553,7 +552,7 @@ exports.adminMarkRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 MARK REFUND AS PAID (AUTO ACCEPT)
+    // 💰 MARK REFUND PAID
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
@@ -564,22 +563,24 @@ exports.adminMarkRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKING (FULL REFUND → CANCELLED)
+    // 🏠 UPDATE PG_USERS (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     await connection.query(
-      `UPDATE bookings 
-       SET status='cancelled',
-           updated_at=NOW()
-       WHERE id=?`,
+      `UPDATE pg_users 
+       SET status='LEFT',
+           vacate_status='completed'
+       WHERE booking_id=?`,
       [bookingId]
     );
 
     //////////////////////////////////////////////////////
-    // ❌ OPTIONAL: REMOVE FROM PG_USERS IF EXISTS
+    // 📦 UPDATE BOOKING (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     await connection.query(
-      `DELETE FROM pg_users 
-       WHERE booking_id=?`,
+      `UPDATE bookings 
+       SET status='left',
+           updated_at=NOW()
+       WHERE id=?`,
       [bookingId]
     );
 
@@ -590,7 +591,7 @@ exports.adminMarkRefundPaid = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Full refund paid successfully (Admin)"
+      message: "Full refund paid successfully"
     });
 
   } catch (err) {
@@ -606,6 +607,3 @@ exports.adminMarkRefundPaid = async (req, res) => {
     connection.release();
   }
 };
-
-
-
