@@ -466,7 +466,11 @@ exports.getReceiptDetails = async (req, res) => {
 };
 
 exports.requestRefund = async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
+    await connection.beginTransaction();
+
     const { bookingId, reason, upi_id } = req.body;
     const userId = req.user.id;
 
@@ -482,33 +486,31 @@ exports.requestRefund = async (req, res) => {
     //////////////////////////////////////////////////////
     // ✅ CHECK BOOKING
     //////////////////////////////////////////////////////
-    const [[booking]] = await db.query(
+    const [[booking]] = await connection.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
     );
 
     if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
+      throw new Error("Booking not found");
     }
 
     //////////////////////////////////////////////////////
     // ❌ BLOCK IF USER ALREADY JOINED
     //////////////////////////////////////////////////////
-    const [[checkin]] = await db.query(
+    const [[checkin]] = await connection.query(
       "SELECT id FROM pg_checkins WHERE booking_id=?",
       [bookingId]
     );
 
     if (checkin) {
-      return res.status(400).json({
-        message: "❌ Already joined PG. Refund not allowed. Use vacate option."
-      });
+      throw new Error("Already joined PG. Use vacate option.");
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 GET LATEST REFUND ONLY
+    // ❌ BLOCK DUPLICATE REQUEST
     //////////////////////////////////////////////////////
-    const [[existing]] = await db.query(
+    const [[existing]] = await connection.query(
       `SELECT * FROM refunds 
        WHERE booking_id=? 
        ORDER BY created_at DESC 
@@ -516,36 +518,8 @@ exports.requestRefund = async (req, res) => {
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // ❌ BLOCK IF ACTIVE REQUEST EXISTS
-    //////////////////////////////////////////////////////
     if (existing && existing.status !== "rejected") {
-      return res.status(400).json({
-        message: "Refund already requested",
-        status: existing.status
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // 🔁 RE-REQUEST IF REJECTED
-    //////////////////////////////////////////////////////
-    if (existing && existing.status === "rejected") {
-      await db.query(
-        `UPDATE refunds 
-         SET reason=?, 
-             upi_id=?, 
-             status='pending',
-             user_approval='accepted',
-             created_at=NOW()
-         WHERE id=?`,
-        [reason, upi_id, existing.id]
-      );
-
-      return res.json({
-        success: true,
-        message: "Refund re-request submitted",
-        status: "pending"
-      });
+      throw new Error("Refund already requested");
     }
 
     //////////////////////////////////////////////////////
@@ -557,33 +531,57 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT NEW REFUND (FULL TYPE)
+    // ✅ INSERT FULL REFUND → DIRECT PAID (🔥 FIX)
     //////////////////////////////////////////////////////
-    await db.query(
+    const [result] = await connection.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
-      VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
+      VALUES (?,?,?,?,?,'FULL','paid','accepted')`,
       [bookingId, userId, amount, reason, upi_id]
     );
 
     //////////////////////////////////////////////////////
-    // 🚫 IMPORTANT: DO NOT CHANGE BOOKING STATUS
+    // 🏠 UPDATE PG_USERS → LEFT
     //////////////////////////////////////////////////////
-    // ❌ REMOVED THIS (CAUSE OF BUG)
-    // UPDATE bookings SET status='pending_refund'
+    await connection.query(
+      `UPDATE pg_users 
+       SET status='LEFT',
+           vacate_status='completed'
+       WHERE booking_id=?`,
+      [bookingId]
+    );
 
     //////////////////////////////////////////////////////
-    // ✅ RESPONSE
+    // 📦 UPDATE BOOKINGS → LEFT
     //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE bookings 
+       SET status='left'
+       WHERE id=?`,
+      [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
     res.json({
       success: true,
-      message: "Refund request submitted",
-      status: "pending"
+      message: "Full refund processed successfully (Direct)",
+      status: "paid"
     });
 
   } catch (err) {
+    await connection.rollback();
     console.error("❌ REFUND ERROR:", err);
-    res.status(500).json({ message: err.message });
+
+    res.status(500).json({
+      message: err.message
+    });
+
+  } finally {
+    connection.release();
   }
 };
 exports.requestVacate = async (req, res) => {
