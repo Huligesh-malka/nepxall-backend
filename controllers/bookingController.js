@@ -454,78 +454,99 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
+exports.requestRefund = async (req, res) => {
+  try {
+    const { bookingId, reason, upi_id } = req.body;
+    const userId = req.user.id;
 
+    //////////////////////////////////////////////////////
+    // ✅ CHECK BOOKING
+    //////////////////////////////////////////////////////
+    const [[booking]] = await db.query(
+      "SELECT * FROM bookings WHERE id=? AND user_id=?",
+      [bookingId, userId]
+    );
 
-  exports.requestRefund = async (req, res) => {
-    try {
-      const { bookingId, reason, upi_id } = req.body;
-      const userId = req.user.id;
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
 
-      // ✅ CHECK BOOKING
-      const [[booking]] = await db.query(
-        "SELECT * FROM bookings WHERE id=? AND user_id=?",
-        [bookingId, userId]
-      );
+    //////////////////////////////////////////////////////
+    // 🔥 ❌ BLOCK IF USER ALREADY JOINED (MAIN FIX)
+    //////////////////////////////////////////////////////
+    const [[checkin]] = await db.query(
+      "SELECT * FROM pg_checkins WHERE booking_id=?",
+      [bookingId]
+    );
 
-      if (!booking) {
-        return res.status(404).json({ message: "Booking not found" });
-      }
+    if (checkin) {
+      return res.status(400).json({
+        message: "❌ You have already joined the PG. Refund not allowed. Please use vacate option."
+      });
+    }
 
-      // 🔥 CHECK EXISTING REFUND
-      const [[existing]] = await db.query(
-        "SELECT * FROM refunds WHERE booking_id=?",
-        [bookingId]
-      );
+    //////////////////////////////////////////////////////
+    // 🔥 CHECK EXISTING REFUND
+    //////////////////////////////////////////////////////
+    const [[existing]] = await db.query(
+      "SELECT * FROM refunds WHERE booking_id=?",
+      [bookingId]
+    );
 
-      // ❌ BLOCK if already requested (except rejected)
-      if (existing && existing.status !== "rejected") {
-        return res.status(400).json({
-          message: "Refund already requested",
-          status: existing.status
-        });
-      }
+    // ❌ BLOCK if already requested (except rejected)
+    if (existing && existing.status !== "rejected") {
+      return res.status(400).json({
+        message: "Refund already requested",
+        status: existing.status
+      });
+    }
 
-      // 🔁 IF REJECTED → UPDATE INSTEAD OF INSERT
-      if (existing && existing.status === "rejected") {
-        await db.query(
-          `UPDATE refunds 
-          SET reason=?, upi_id=?, status='pending', created_at=NOW()
-          WHERE booking_id=?`,
-          [reason, upi_id, bookingId]
-        );
-
-        return res.json({
-          success: true,
-          message: "Refund re-request submitted",
-          status: "pending"
-        });
-      }
-
-      // ✅ CALCULATE AMOUNT SAFELY
-      const amount =
-        (Number(booking.rent_amount) || 0) +
-        (Number(booking.security_deposit) || 0) +
-        (Number(booking.maintenance_amount) || 0);
-
-      // ✅ INSERT NEW REFUND
+    //////////////////////////////////////////////////////
+    // 🔁 IF REJECTED → UPDATE
+    //////////////////////////////////////////////////////
+    if (existing && existing.status === "rejected") {
       await db.query(
-        `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
-        VALUES (?,?,?,?,?)`,
-        [bookingId, userId, amount, reason, upi_id]
+        `UPDATE refunds 
+         SET reason=?, upi_id=?, status='pending', created_at=NOW()
+         WHERE booking_id=?`,
+        [reason, upi_id, bookingId]
       );
 
-      res.json({
+      return res.json({
         success: true,
-        message: "Refund request submitted",
+        message: "Refund re-request submitted",
         status: "pending"
       });
-
-    } catch (err) {
-      console.error("❌ REFUND ERROR:", err);
-      res.status(500).json({ message: err.message });
     }
-  };
 
+    //////////////////////////////////////////////////////
+    // ✅ CALCULATE AMOUNT
+    //////////////////////////////////////////////////////
+    const amount =
+      (Number(booking.rent_amount) || 0) +
+      (Number(booking.security_deposit) || 0) +
+      (Number(booking.maintenance_amount) || 0);
+
+    //////////////////////////////////////////////////////
+    // ✅ INSERT REFUND
+    //////////////////////////////////////////////////////
+    await db.query(
+      `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
+       VALUES (?,?,?,?,?)`,
+      [bookingId, userId, amount, reason, upi_id]
+    );
+
+    res.json({
+      success: true,
+      message: "Refund request submitted",
+      status: "pending"
+    });
+
+  } catch (err) {
+    console.error("❌ REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
 exports.requestVacate = async (req, res) => {
   try {
     const {
@@ -681,6 +702,11 @@ exports.requestVacate = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+
 
 exports.acceptRefund = async (req, res) => {
   try {
