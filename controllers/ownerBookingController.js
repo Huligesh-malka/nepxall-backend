@@ -382,10 +382,8 @@ exports.rejectVacateRequest = async (req, res) => {
 };
 
 
-
-
 /* ======================================================
-   💰 OWNER → MARK REFUND AS PAID (FINAL FIX)
+   💰 OWNER → MARK REFUND AS PAID (FINAL FIX - FULL + DEPOSIT)
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
@@ -404,14 +402,13 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET LATEST REFUND ONLY (CRITICAL FIX)
+    // ✅ GET LATEST REFUND (🔥 FIXED: BOTH FULL + DEPOSIT)
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
        FROM refunds r
        JOIN bookings b ON b.id = r.booking_id
        WHERE r.booking_id=? 
-       AND r.refund_type='DEPOSIT'
        ORDER BY r.id DESC
        LIMIT 1`,
       [bookingId]
@@ -429,7 +426,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ VALIDATION (STRICT)
+    // ✅ VALIDATION
     //////////////////////////////////////////////////////
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
@@ -447,7 +444,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE ONLY THIS REFUND (IMPORTANT FIX)
+    // 💰 UPDATE REFUND → PAID
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
@@ -457,26 +454,42 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS (CORRECT ROW)
+    // 🧠 LOGIC BASED ON REFUND TYPE
     //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE pg_users 
-       SET 
-         status='LEFT',
-         vacate_status='completed'
-       WHERE booking_id=?`,
-      [bookingId]
-    );
+    if (refund.refund_type === "DEPOSIT") {
+      // ✅ VACATE FLOW
+      await connection.query(
+        `UPDATE pg_users 
+         SET status='LEFT',
+             vacate_status='completed'
+         WHERE booking_id=?`,
+        [bookingId]
+      );
 
-    //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKING
-    //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE bookings 
-       SET status='left'
-       WHERE id=?`,
-      [bookingId]
-    );
+      await connection.query(
+        `UPDATE bookings 
+         SET status='left'
+         WHERE id=?`,
+        [bookingId]
+      );
+
+    } else if (refund.refund_type === "FULL") {
+      // ✅ FULL REFUND → DIRECT EXIT
+      await connection.query(
+        `UPDATE pg_users 
+         SET status='LEFT',
+             vacate_status='completed'
+         WHERE booking_id=?`,
+        [bookingId]
+      );
+
+      await connection.query(
+        `UPDATE bookings 
+         SET status='left'
+         WHERE id=?`,
+        [bookingId]
+      );
+    }
 
     //////////////////////////////////////////////////////
     // ✅ COMMIT
@@ -501,4 +514,3 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
-
