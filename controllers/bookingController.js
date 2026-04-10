@@ -342,7 +342,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
   }
 };
 
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -351,7 +350,7 @@ exports.getUserActiveStay = async (req, res) => {
       SELECT 
         b.id,
 
-        /* ✅ PAYMENT */
+        /* PAYMENT */
         (SELECT p.order_id 
          FROM payments p 
          WHERE p.booking_id = b.id 
@@ -376,9 +375,10 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* 🔥 REFUND DATA (IMPORTANT) */
+        /* 🔥 REFUND DATA */
         r.status AS refund_status,
         r.user_approval,
+        r.amount AS refund_amount,
 
         'ACTIVE' AS status
 
@@ -386,7 +386,6 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
-      /* 🔥 JOIN REFUND */
       LEFT JOIN refunds r 
         ON r.booking_id = b.id 
         AND r.refund_type='DEPOSIT'
@@ -410,7 +409,6 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.getReceiptDetails = async (req, res) => {
   try {
@@ -528,7 +526,6 @@ exports.getReceiptDetails = async (req, res) => {
     }
   };
 
-
 exports.requestVacate = async (req, res) => {
   try {
     const {
@@ -564,7 +561,7 @@ exports.requestVacate = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ CHECK PG_USERS (MAIN FIX 🔥)
+    // ✅ CHECK PG USER
     //////////////////////////////////////////////////////
     const [[pgUser]] = await db.query(
       "SELECT * FROM pg_users WHERE booking_id=?",
@@ -575,14 +572,28 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "PG user record not found" });
     }
 
-    // ❌ BLOCK IF ALREADY REQUESTED
-    if (pgUser.vacate_status === "requested") {
+    //////////////////////////////////////////////////////
+    // ✅ CHECK LAST REFUND (🔥 IMPORTANT FIX)
+    //////////////////////////////////////////////////////
+    const [[lastRefund]] = await db.query(
+      `SELECT status FROM refunds 
+       WHERE booking_id=? 
+       ORDER BY id DESC LIMIT 1`,
+      [bookingId]
+    );
+
+    // ❌ BLOCK only if NOT rejected
+    if (
+      pgUser.vacate_status === "requested" &&
+      lastRefund &&
+      lastRefund.status !== "rejected"
+    ) {
       return res.status(400).json({
         message: "Vacate already requested"
       });
     }
 
-    // ❌ BLOCK IF ALREADY COMPLETED
+    // ❌ BLOCK IF COMPLETED
     if (pgUser.vacate_status === "completed") {
       return res.status(400).json({
         message: "Already vacated"
@@ -590,7 +601,7 @@ exports.requestVacate = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ UPDATE PG USER STATUS
+    // ✅ UPDATE PG USER
     //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_users 
@@ -604,7 +615,12 @@ exports.requestVacate = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ CHECK EXISTING DEPOSIT REFUND
+    // ✅ CALCULATE REFUND AMOUNT
+    //////////////////////////////////////////////////////
+    let refundAmount = booking.security_deposit || 0;
+
+    //////////////////////////////////////////////////////
+    // ✅ CHECK EXISTING REFUND
     //////////////////////////////////////////////////////
     const [[existingRefund]] = await db.query(
       `SELECT * FROM refunds 
@@ -614,19 +630,26 @@ exports.requestVacate = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔁 UPDATE IF EXISTS
+    // 🔁 UPDATE EXISTING
     //////////////////////////////////////////////////////
     if (existingRefund) {
       await db.query(
         `UPDATE refunds 
          SET status='pending',
              user_approval='pending',
+             amount=?,
              upi_id=?,
              account_number=?,
              ifsc_code=?,
              created_at=NOW()
          WHERE id=?`,
-        [upi_id, account_number, ifsc_code, existingRefund.id]
+        [
+          refundAmount,
+          upi_id,
+          account_number,
+          ifsc_code,
+          existingRefund.id
+        ]
       );
     } else {
       //////////////////////////////////////////////////////
@@ -639,7 +662,7 @@ exports.requestVacate = async (req, res) => {
         [
           bookingId,
           userId,
-          0,
+          refundAmount,
           "Deposit refund after vacate",
           upi_id || null,
           account_number || null,
@@ -658,7 +681,6 @@ exports.requestVacate = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.acceptRefund = async (req, res) => {
   try {
