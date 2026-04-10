@@ -472,6 +472,15 @@ exports.requestRefund = async (req, res) => {
     const userId = req.user.id;
 
     //////////////////////////////////////////////////////
+    // ✅ VALIDATION
+    //////////////////////////////////////////////////////
+    if (!bookingId || !reason || !upi_id) {
+      return res.status(400).json({
+        message: "Booking ID, reason and UPI ID are required"
+      });
+    }
+
+    //////////////////////////////////////////////////////
     // ✅ CHECK BOOKING
     //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
@@ -493,12 +502,12 @@ exports.requestRefund = async (req, res) => {
 
     if (checkin) {
       return res.status(400).json({
-        message: "❌ Already joined PG. Refund not allowed."
+        message: "❌ Already joined PG. Refund not allowed. Use vacate option."
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 GET LATEST REFUND ONLY
+    // 🔥 GET LATEST REFUND
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
       `SELECT * FROM refunds 
@@ -509,7 +518,7 @@ exports.requestRefund = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ❌ BLOCK IF ACTIVE REQUEST EXISTS
+    // ❌ BLOCK IF ALREADY ACTIVE
     //////////////////////////////////////////////////////
     if (existing && existing.status !== "rejected") {
       return res.status(400).json({
@@ -549,12 +558,13 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT NEW REFUND (FULL FIX)
+    // ✅ INSERT NEW REFUND
     //////////////////////////////////////////////////////
     await db.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
-      VALUES (?,?,?,?,?,'FULL','pending','pending')`,
+      VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
+      // 🔥 NOTE: user_approval = 'accepted' (AUTO)
       [bookingId, userId, amount, reason, upi_id]
     );
 
