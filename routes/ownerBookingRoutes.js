@@ -45,10 +45,6 @@ router.post(
 );
 
 // 🔵 ADMIN MARK AS PAID (FULL REFUND)  🔥 NEW
-router.post(
-  "/admin/refund/mark-paid/:bookingId",
-  firebaseAuth,
-  adminMarkRefundPaid
-);
+
 
 module.exports = router;
