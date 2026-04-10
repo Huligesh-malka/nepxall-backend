@@ -341,7 +341,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -379,6 +378,11 @@ exports.getUserActiveStay = async (req, res) => {
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
+
+        /* 🔥 NEW: JOIN STATUS (IMPORTANT) */
+        (SELECT COUNT(*) 
+         FROM pg_checkins pc 
+         WHERE pc.booking_id = b.id) AS is_joined,
 
         'ACTIVE' AS status
 
