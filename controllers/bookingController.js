@@ -341,6 +341,7 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -374,12 +375,13 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* 🔥 REFUND DATA */
+        /* ✅ FIXED REFUND (LATEST ONLY) */
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
+        r.refund_type,
 
-        /* 🔥 NEW: JOIN STATUS (IMPORTANT) */
+        /* ✅ JOIN STATUS */
         (SELECT COUNT(*) 
          FROM pg_checkins pc 
          WHERE pc.booking_id = b.id) AS is_joined,
@@ -390,9 +392,15 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
+      /* 🔥 IMPORTANT FIX (LATEST REFUND ONLY) */
       LEFT JOIN refunds r 
-        ON r.booking_id = b.id 
-        AND r.refund_type='DEPOSIT'
+        ON r.id = (
+          SELECT r2.id
+          FROM refunds r2
+          WHERE r2.booking_id = b.id
+          ORDER BY r2.created_at DESC
+          LIMIT 1
+        )
 
       WHERE b.user_id = ?
         AND b.status IN ('confirmed','left')
@@ -413,7 +421,6 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.getReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -458,6 +465,7 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
+
 exports.requestRefund = async (req, res) => {
   try {
     const { bookingId, reason, upi_id } = req.body;
@@ -476,28 +484,33 @@ exports.requestRefund = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 ❌ BLOCK IF USER ALREADY JOINED (MAIN FIX)
+    // ❌ BLOCK IF USER ALREADY JOINED
     //////////////////////////////////////////////////////
     const [[checkin]] = await db.query(
-      "SELECT * FROM pg_checkins WHERE booking_id=?",
+      "SELECT id FROM pg_checkins WHERE booking_id=?",
       [bookingId]
     );
 
     if (checkin) {
       return res.status(400).json({
-        message: "❌ You have already joined the PG. Refund not allowed. Please use vacate option."
+        message: "❌ Already joined PG. Refund not allowed."
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 CHECK EXISTING REFUND
+    // 🔥 GET LATEST REFUND ONLY
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(
-      "SELECT * FROM refunds WHERE booking_id=?",
+      `SELECT * FROM refunds 
+       WHERE booking_id=? 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
       [bookingId]
     );
 
-    // ❌ BLOCK if already requested (except rejected)
+    //////////////////////////////////////////////////////
+    // ❌ BLOCK IF ACTIVE REQUEST EXISTS
+    //////////////////////////////////////////////////////
     if (existing && existing.status !== "rejected") {
       return res.status(400).json({
         message: "Refund already requested",
@@ -506,14 +519,18 @@ exports.requestRefund = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔁 IF REJECTED → UPDATE
+    // 🔁 RE-REQUEST IF REJECTED
     //////////////////////////////////////////////////////
     if (existing && existing.status === "rejected") {
       await db.query(
         `UPDATE refunds 
-         SET reason=?, upi_id=?, status='pending', created_at=NOW()
-         WHERE booking_id=?`,
-        [reason, upi_id, bookingId]
+         SET reason=?, 
+             upi_id=?, 
+             status='pending',
+             user_approval='pending',
+             created_at=NOW()
+         WHERE id=?`,
+        [reason, upi_id, existing.id]
       );
 
       return res.json({
@@ -524,7 +541,7 @@ exports.requestRefund = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ CALCULATE AMOUNT
+    // ✅ CALCULATE FULL REFUND AMOUNT
     //////////////////////////////////////////////////////
     const amount =
       (Number(booking.rent_amount) || 0) +
@@ -532,11 +549,12 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT REFUND
+    // ✅ INSERT NEW REFUND (FULL FIX)
     //////////////////////////////////////////////////////
     await db.query(
-      `INSERT INTO refunds (booking_id, user_id, amount, reason, upi_id)
-       VALUES (?,?,?,?,?)`,
+      `INSERT INTO refunds 
+      (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
+      VALUES (?,?,?,?,?,'FULL','pending','pending')`,
       [bookingId, userId, amount, reason, upi_id]
     );
 
@@ -551,6 +569,8 @@ exports.requestRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
 exports.requestVacate = async (req, res) => {
   try {
     const {
