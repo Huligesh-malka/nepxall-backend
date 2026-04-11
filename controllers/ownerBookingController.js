@@ -512,27 +512,3 @@ exports.markRefundPaid = async (req, res) => {
 };
 
 
-
-
-exports.syncRefundStatus = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-
-    await db.query(`
-      UPDATE pg_users 
-      SET status='LEFT', vacate_status='completed'
-      WHERE booking_id=?
-    `, [bookingId]);
-
-    await db.query(`
-      UPDATE bookings 
-      SET status='left'
-      WHERE id=?
-    `, [bookingId]);
-
-    res.json({ success: true, message: "Synced successfully" });
-
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};

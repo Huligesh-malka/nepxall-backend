@@ -43,11 +43,6 @@ router.post(
   markRefundPaid
 );
 
-// 🔄 SYNC
-router.post(
-  "/refund/sync/:bookingId",
-  firebaseAuth,
-  ownerController.syncRefundStatus
-);
+
 
 module.exports = router;
