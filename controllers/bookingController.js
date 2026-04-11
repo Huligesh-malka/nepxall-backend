@@ -609,7 +609,6 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
-
 exports.requestVacate = async (req, res) => {
   try {
     const {
