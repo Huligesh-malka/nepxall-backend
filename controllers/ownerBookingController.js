@@ -386,11 +386,8 @@ exports.rejectVacateRequest = async (req, res) => {
 
 
 
-
-
-
 /* ======================================================
-   💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT - FINAL FIX)
+   💰 MARK REFUND AS COMPLETED (FINAL FIX)
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
@@ -399,7 +396,7 @@ exports.markRefundPaid = async (req, res) => {
     await connection.beginTransaction();
 
     //////////////////////////////////////////////////////
-    // ✅ GET REFUND ID FROM PARAM
+    // ✅ GET REFUND ID
     //////////////////////////////////////////////////////
     const { id } = req.params;
 
@@ -412,7 +409,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET EXACT REFUND
+    // ✅ GET REFUND + BOOKING
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
@@ -429,7 +426,7 @@ exports.markRefundPaid = async (req, res) => {
     const bookingId = refund.booking_id;
 
     //////////////////////////////////////////////////////
-    // 🔒 SECURITY CHECK (ONLY FOR DEPOSIT)
+    // 🔒 OWNER SECURITY CHECK
     //////////////////////////////////////////////////////
     if (refund.refund_type === "DEPOSIT") {
       if (!owner) {
@@ -447,31 +444,31 @@ exports.markRefundPaid = async (req, res) => {
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
 
-    // 🔥 FIX: Don't block if already paid
-    const alreadyPaid = status === "paid";
+    // ✅ FIX: use "completed" instead of "paid"
+    const alreadyCompleted = status === "completed";
 
     if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
       throw new Error("User has not accepted refund yet");
     }
 
-    if (!alreadyPaid && !["pending", "approved"].includes(status)) {
+    if (!alreadyCompleted && !["pending", "approved"].includes(status)) {
       throw new Error("Invalid refund state");
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE REFUND → PAID (ONLY IF NOT ALREADY)
+    // 💰 UPDATE REFUND → COMPLETED
     //////////////////////////////////////////////////////
-    if (!alreadyPaid) {
+    if (!alreadyCompleted) {
       await connection.query(
         `UPDATE refunds 
-         SET status='paid'
+         SET status='completed'
          WHERE id=?`,
         [id]
       );
     }
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS → LEFT (🔥 ALWAYS RUN)
+    // 🏠 UPDATE PG_USERS → LEFT
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
@@ -482,7 +479,7 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKINGS → LEFT (🔥 ALWAYS RUN)
+    // 📦 UPDATE BOOKINGS → LEFT
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
@@ -498,14 +495,14 @@ exports.markRefundPaid = async (req, res) => {
 
     res.json({
       success: true,
-      message: alreadyPaid
-        ? "Already paid, status synced successfully"
-        : "Refund paid successfully"
+      message: alreadyCompleted
+        ? "Already completed, status synced"
+        : "Refund completed successfully"
     });
 
   } catch (err) {
     await connection.rollback();
-    console.error("❌ MARK PAID ERROR:", err);
+    console.error("❌ MARK COMPLETED ERROR:", err);
 
     res.status(500).json({
       success: false,
@@ -515,4 +512,4 @@ exports.markRefundPaid = async (req, res) => {
   } finally {
     connection.release();
   }
-};  
+};
