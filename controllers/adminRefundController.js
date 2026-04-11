@@ -79,3 +79,36 @@ exports.markRefundPaidAdmin = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+/* =========================================
+   👑 ADMIN → REJECT FULL REFUND
+========================================= */
+exports.rejectRefund = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[refund]] = await db.query(
+      `SELECT * FROM refunds WHERE id=?`,
+      [id]
+    );
+
+    if (!refund) throw new Error("Refund not found");
+
+    if (refund.refund_type !== "FULL") {
+      throw new Error("Admin can only reject FULL refunds");
+    }
+
+    await db.query(
+      `UPDATE refunds SET status='rejected' WHERE id=?`,
+      [id]
+    );
+
+    res.json({ success: true });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
