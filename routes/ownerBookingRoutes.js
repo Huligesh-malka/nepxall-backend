@@ -38,7 +38,7 @@ router.post(
 
 // 💰 OWNER MARK AS PAID (✅ FIXED)
 router.post(
-  "/refund/mark-paid/:bookingId",   // ❌ WRONG PARAM
+  "/refund/mark-paid/:id",   // ✅ refund.id
   firebaseAuth,
   markRefundPaid
 );
