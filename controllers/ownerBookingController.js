@@ -380,6 +380,9 @@ exports.rejectVacateRequest = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
 /* ======================================================
    💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT - FINAL FIX)
 ====================================================== */
@@ -390,9 +393,9 @@ exports.markRefundPaid = async (req, res) => {
     await connection.beginTransaction();
 
     //////////////////////////////////////////////////////
-    // ✅ GET REFUND ID FROM PARAM (🔥 FIX)
+    // ✅ GET REFUND ID FROM PARAM
     //////////////////////////////////////////////////////
-    const { id } = req.params; // ✅ refund id from frontend
+    const { id } = req.params;
 
     //////////////////////////////////////////////////////
     // ✅ OPTIONAL OWNER CHECK
@@ -403,7 +406,7 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET EXACT REFUND (🔥 FIX: NO MORE WRONG PICK)
+    // ✅ GET EXACT REFUND
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
@@ -438,30 +441,31 @@ exports.markRefundPaid = async (req, res) => {
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
 
-    if (status === "paid") {
-      throw new Error("Already paid");
-    }
+    // 🔥 FIX: Don't block if already paid
+    const alreadyPaid = status === "paid";
 
     if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
       throw new Error("User has not accepted refund yet");
     }
 
-    if (!["pending", "approved"].includes(status)) {
+    if (!alreadyPaid && !["pending", "approved"].includes(status)) {
       throw new Error("Invalid refund state");
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE REFUND → PAID
+    // 💰 UPDATE REFUND → PAID (ONLY IF NOT ALREADY)
     //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE refunds 
-       SET status='paid'
-       WHERE id=?`,
-      [id]
-    );
+    if (!alreadyPaid) {
+      await connection.query(
+        `UPDATE refunds 
+         SET status='paid'
+         WHERE id=?`,
+        [id]
+      );
+    }
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS → LEFT
+    // 🏠 UPDATE PG_USERS → LEFT (🔥 ALWAYS RUN)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
@@ -472,7 +476,7 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKINGS → LEFT
+    // 📦 UPDATE BOOKINGS → LEFT (🔥 ALWAYS RUN)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
@@ -488,7 +492,9 @@ exports.markRefundPaid = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Refund paid successfully"
+      message: alreadyPaid
+        ? "Already paid, status synced successfully"
+        : "Refund paid successfully"
     });
 
   } catch (err) {
