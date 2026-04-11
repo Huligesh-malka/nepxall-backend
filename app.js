@@ -128,6 +128,7 @@ app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
 
 /* ================= ADMIN ROUTES ================= */
 app.use("/api/admin", safeLoad("./routes/adminRoutes"));
+app.use("/api/admin", safeLoad("./routes/adminRefundRoutes"));
 app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
 
 /* ================= VENDOR ROUTES ================= */
