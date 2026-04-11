@@ -343,7 +343,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 };
 
 
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -375,7 +374,11 @@ exports.getUserActiveStay = async (req, res) => {
         b.rent_amount,
         b.security_deposit AS deposit_amount,
         b.maintenance_amount,
+
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
+
+        /* ✅ NEW: CORRECT TOTAL PAID */
+        (b.rent_amount + b.maintenance_amount + b.security_deposit) AS total_paid,
 
         /* ✅ FULL REFUND */
         (
