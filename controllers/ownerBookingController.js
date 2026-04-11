@@ -381,9 +381,8 @@ exports.rejectVacateRequest = async (req, res) => {
   }
 };
 
-
 /* ======================================================
-   💰 OWNER → MARK REFUND AS PAID (FINAL FIX - FULL + DEPOSIT)
+   💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT)
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
@@ -394,15 +393,16 @@ exports.markRefundPaid = async (req, res) => {
     const { bookingId } = req.params;
 
     //////////////////////////////////////////////////////
-    // ✅ OWNER CHECK
+    // ✅ OPTIONAL OWNER CHECK (ONLY FOR DEPOSIT)
     //////////////////////////////////////////////////////
-    const owner = await getOwner(req.user.firebase_uid);
-    if (!owner) {
-      throw new Error("Not an owner");
+    let owner = null;
+
+    if (req.user?.firebase_uid) {
+      owner = await getOwner(req.user.firebase_uid);
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET LATEST REFUND (🔥 FIXED: BOTH FULL + DEPOSIT)
+    // ✅ GET LATEST REFUND (FULL + DEPOSIT)
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
@@ -421,9 +421,18 @@ exports.markRefundPaid = async (req, res) => {
     //////////////////////////////////////////////////////
     // 🔒 SECURITY CHECK
     //////////////////////////////////////////////////////
-    if (refund.owner_id !== owner.id) {
-      throw new Error("Unauthorized");
+    if (refund.refund_type === "DEPOSIT") {
+      // 👉 OWNER FLOW
+      if (!owner) {
+        throw new Error("Not an owner");
+      }
+
+      if (refund.owner_id !== owner.id) {
+        throw new Error("Unauthorized");
+      }
     }
+
+    // 👉 FULL → ADMIN FLOW (no owner check)
 
     //////////////////////////////////////////////////////
     // ✅ VALIDATION
@@ -435,11 +444,13 @@ exports.markRefundPaid = async (req, res) => {
       throw new Error("Already paid");
     }
 
-    if (userApproval !== "accepted") {
+    // 👉 FULL refund doesn't need user approval
+    if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
       throw new Error("User has not accepted refund yet");
     }
 
-    if (status !== "pending") {
+    // ✅ allow approved also
+    if (!["pending", "approved"].includes(status)) {
       throw new Error("Invalid refund state");
     }
 
@@ -454,42 +465,25 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🧠 LOGIC BASED ON REFUND TYPE
+    // 🏠 UPDATE PG_USERS → LEFT
     //////////////////////////////////////////////////////
-    if (refund.refund_type === "DEPOSIT") {
-      // ✅ VACATE FLOW
-      await connection.query(
-        `UPDATE pg_users 
-         SET status='LEFT',
-             vacate_status='completed'
-         WHERE booking_id=?`,
-        [bookingId]
-      );
+    await connection.query(
+      `UPDATE pg_users 
+       SET status='LEFT',
+           vacate_status='completed'
+       WHERE booking_id=?`,
+      [bookingId]
+    );
 
-      await connection.query(
-        `UPDATE bookings 
-         SET status='left'
-         WHERE id=?`,
-        [bookingId]
-      );
-
-    } else if (refund.refund_type === "FULL") {
-      // ✅ FULL REFUND → DIRECT EXIT
-      await connection.query(
-        `UPDATE pg_users 
-         SET status='LEFT',
-             vacate_status='completed'
-         WHERE booking_id=?`,
-        [bookingId]
-      );
-
-      await connection.query(
-        `UPDATE bookings 
-         SET status='left'
-         WHERE id=?`,
-        [bookingId]
-      );
-    }
+    //////////////////////////////////////////////////////
+    // 📦 UPDATE BOOKINGS → LEFT
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `UPDATE bookings 
+       SET status='left'
+       WHERE id=?`,
+      [bookingId]
+    );
 
     //////////////////////////////////////////////////////
     // ✅ COMMIT
