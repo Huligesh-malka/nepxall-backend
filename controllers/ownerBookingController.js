@@ -423,16 +423,16 @@ exports.markRefundPaid = async (req, res) => {
     const bookingId = refund.booking_id;
 
     //////////////////////////////////////////////////////
-    // 🔒 SECURITY CHECK (ONLY FOR DEPOSIT)
+    // 🔒 SECURITY CHECK (🔥 FIXED FOR ADMIN + OWNER)
     //////////////////////////////////////////////////////
     if (refund.refund_type === "DEPOSIT") {
-      if (!owner) {
-        throw new Error("Not an owner");
+      // 👉 OWNER FLOW
+      if (owner) {
+        if (refund.owner_id !== owner.id) {
+          throw new Error("Unauthorized");
+        }
       }
-
-      if (refund.owner_id !== owner.id) {
-        throw new Error("Unauthorized");
-      }
+      // 👉 ADMIN FLOW → allowed (no block)
     }
 
     //////////////////////////////////////////////////////
@@ -441,7 +441,6 @@ exports.markRefundPaid = async (req, res) => {
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
 
-    // 🔥 FIX: Don't block if already paid
     const alreadyPaid = status === "paid";
 
     if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
