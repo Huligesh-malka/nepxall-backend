@@ -427,6 +427,8 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
 exports.getReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
