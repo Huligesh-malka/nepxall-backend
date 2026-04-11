@@ -507,8 +507,7 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
-
-exports.requestRefund = async (req, res) => {
+  exports.requestRefund = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
@@ -574,7 +573,7 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT FULL REFUND → PENDING (🔥 FIX)
+    // ✅ INSERT FULL REFUND → PENDING
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO refunds 
@@ -582,12 +581,6 @@ exports.requestRefund = async (req, res) => {
       VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
       [bookingId, userId, amount, reason, upi_id]
     );
-
-    //////////////////////////////////////////////////////
-    // ❌ DO NOT UPDATE STATUS HERE
-    //////////////////////////////////////////////////////
-    // NO pg_users update
-    // NO bookings update
 
     //////////////////////////////////////////////////////
     // ✅ COMMIT
@@ -604,7 +597,10 @@ exports.requestRefund = async (req, res) => {
     await connection.rollback();
     console.error("❌ REFUND ERROR:", err);
 
-    res.status(500).json({
+    //////////////////////////////////////////////////////
+    // 🔥 ONLY CHANGE HERE (IMPORTANT)
+    //////////////////////////////////////////////////////
+    res.status(400).json({
       message: err.message
     });
 
