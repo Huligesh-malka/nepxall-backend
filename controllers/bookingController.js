@@ -343,6 +343,7 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 };
 
 
+
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -414,6 +415,16 @@ exports.getUserActiveStay = async (req, res) => {
           LIMIT 1
         ) AS deposit_refund_amount,
 
+        /* 🔥 FIX: ADD THIS ONLY */
+        (
+          SELECT r2.user_approval
+          FROM refunds r2
+          WHERE r2.booking_id = b.id
+          AND r2.refund_type = 'DEPOSIT'
+          ORDER BY r2.created_at DESC
+          LIMIT 1
+        ) AS deposit_user_approval,
+
         /* JOIN STATUS */
         (SELECT COUNT(*) 
          FROM pg_checkins pc 
@@ -444,6 +455,8 @@ exports.getUserActiveStay = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
 
 
 
