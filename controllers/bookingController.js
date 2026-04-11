@@ -342,6 +342,8 @@ exports.getActiveTenantsByOwner = async (req, res) => {
   }
 };
 
+
+
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -375,13 +377,13 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ FIXED REFUND (LATEST ONLY) */
+        /* ✅ FIXED: ONLY DEPOSIT REFUND */
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
         r.refund_type,
 
-        /* ✅ JOIN STATUS */
+        /* JOIN STATUS */
         (SELECT COUNT(*) 
          FROM pg_checkins pc 
          WHERE pc.booking_id = b.id) AS is_joined,
@@ -392,12 +394,13 @@ exports.getUserActiveStay = async (req, res) => {
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
-      /* 🔥 IMPORTANT FIX (LATEST REFUND ONLY) */
+      /* 🔥 FIX: ONLY DEPOSIT REFUND */
       LEFT JOIN refunds r 
         ON r.id = (
           SELECT r2.id
           FROM refunds r2
           WHERE r2.booking_id = b.id
+          AND r2.refund_type = 'DEPOSIT'   -- ✅ VERY IMPORTANT FIX
           ORDER BY r2.created_at DESC
           LIMIT 1
         )
