@@ -43,73 +43,47 @@ exports.approveRefund = async (req, res) => {
       [id]
     );
 
-    res.json({ success: true });
+    res.json({ success: true, message: "FULL refund approved" });
 
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-
+/* =========================================
+   👑 ADMIN → MARK FULL REFUND PAID
+========================================= */
 exports.markRefundPaidAdmin = async (req, res) => {
-  const connection = await db.getConnection();
-
   try {
-    await connection.beginTransaction();
-
     const { id } = req.params;
 
-    const [[refund]] = await connection.query(
-      `SELECT r.*, b.pg_id 
-       FROM refunds r
-       JOIN bookings b ON b.id = r.booking_id
-       WHERE r.id=?`,
+    const [[refund]] = await db.query(
+      `SELECT * FROM refunds WHERE id=?`,
       [id]
     );
 
     if (!refund) throw new Error("Refund not found");
 
+    if (refund.refund_type !== "FULL") {
+      throw new Error("Admin can only process FULL refunds");
+    }
+
     //////////////////////////////////////////////////////
-    // ✅ UPDATE REFUND
+    // ✅ ONLY UPDATE REFUND (NO VACATE CHANGE)
     //////////////////////////////////////////////////////
-    await connection.query(
+    await db.query(
       `UPDATE refunds SET status='paid' WHERE id=?`,
       [id]
     );
 
-    //////////////////////////////////////////////////////
-    // 🔥 STRONG UPDATE (FIXED)
-    //////////////////////////////////////////////////////
-    if (refund.refund_type === "DEPOSIT") {
-
-      const [result1] = await connection.query(
-        `UPDATE pg_users 
-         SET status='LEFT', vacate_status='completed'
-         WHERE booking_id=?`,
-        [refund.booking_id]
-      );
-
-      const [result2] = await connection.query(
-        `UPDATE bookings 
-         SET status='left'
-         WHERE id=?`,
-        [refund.booking_id]
-      );
-
-      console.log("PG_USERS updated:", result1.affectedRows);
-      console.log("BOOKINGS updated:", result2.affectedRows);
-    }
-
-    await connection.commit();
-
-    res.json({ success: true });
+    res.json({
+      success: true,
+      message: "FULL refund marked as paid"
+    });
 
   } catch (err) {
-    await connection.rollback();
-    console.error("❌ ADMIN PAID ERROR:", err);
+    console.error("❌ ADMIN FULL REFUND ERROR:", err);
     res.status(500).json({ message: err.message });
-  } finally {
-    connection.release();
   }
 };
 
@@ -136,7 +110,10 @@ exports.rejectRefund = async (req, res) => {
       [id]
     );
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      message: "FULL refund rejected"
+    });
 
   } catch (err) {
     res.status(500).json({ message: err.message });
