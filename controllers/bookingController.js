@@ -375,24 +375,30 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ FIXED REFUND (LATEST ONLY) */
+        /* ✅ REFUND (LATEST ONLY) */
         r.status AS refund_status,
         r.user_approval,
         r.amount AS refund_amount,
         r.refund_type,
 
+        /* ✅ VACATE + USER STATUS (NEW FIX) */
+        pgu.status AS user_status,
+        pgu.vacate_status,
+
         /* ✅ JOIN STATUS */
         (SELECT COUNT(*) 
          FROM pg_checkins pc 
-         WHERE pc.booking_id = b.id) AS is_joined,
-
-        'ACTIVE' AS status
+         WHERE pc.booking_id = b.id) AS is_joined
 
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
 
-      /* 🔥 IMPORTANT FIX (LATEST REFUND ONLY) */
+      /* 🔥 JOIN PG_USERS (IMPORTANT FIX) */
+      LEFT JOIN pg_users pgu 
+        ON pgu.booking_id = b.id
+
+      /* 🔥 LATEST REFUND ONLY */
       LEFT JOIN refunds r 
         ON r.id = (
           SELECT r2.id
