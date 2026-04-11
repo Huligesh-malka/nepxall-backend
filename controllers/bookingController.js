@@ -465,6 +465,7 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
+
 exports.requestRefund = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -531,35 +532,20 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT FULL REFUND → DIRECT PAID (🔥 FIX)
+    // ✅ INSERT FULL REFUND → PENDING (🔥 FIX)
     //////////////////////////////////////////////////////
-    const [result] = await connection.query(
+    await connection.query(
       `INSERT INTO refunds 
       (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
-      VALUES (?,?,?,?,?,'FULL','paid','accepted')`,
+      VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
       [bookingId, userId, amount, reason, upi_id]
     );
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS → LEFT
+    // ❌ DO NOT UPDATE STATUS HERE
     //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE pg_users 
-       SET status='LEFT',
-           vacate_status='completed'
-       WHERE booking_id=?`,
-      [bookingId]
-    );
-
-    //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKINGS → LEFT
-    //////////////////////////////////////////////////////
-    await connection.query(
-      `UPDATE bookings 
-       SET status='left'
-       WHERE id=?`,
-      [bookingId]
-    );
+    // NO pg_users update
+    // NO bookings update
 
     //////////////////////////////////////////////////////
     // ✅ COMMIT
@@ -568,8 +554,8 @@ exports.requestRefund = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Full refund processed successfully (Direct)",
-      status: "paid"
+      message: "Refund request submitted successfully",
+      status: "pending"
     });
 
   } catch (err) {
@@ -584,6 +570,8 @@ exports.requestRefund = async (req, res) => {
     connection.release();
   }
 };
+
+
 exports.requestVacate = async (req, res) => {
   try {
     const {
