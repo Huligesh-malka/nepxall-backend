@@ -343,7 +343,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
 };
 
 
-
 exports.getUserActiveStay = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -377,11 +376,43 @@ exports.getUserActiveStay = async (req, res) => {
         b.maintenance_amount,
         (b.rent_amount + b.maintenance_amount) AS monthly_total,
 
-        /* ✅ FIXED: ONLY DEPOSIT REFUND */
-        r.status AS refund_status,
-        r.user_approval,
-        r.amount AS refund_amount,
-        r.refund_type,
+        /* ✅ FULL REFUND */
+        (
+          SELECT r1.status
+          FROM refunds r1
+          WHERE r1.booking_id = b.id
+          AND r1.refund_type = 'FULL'
+          ORDER BY r1.created_at DESC
+          LIMIT 1
+        ) AS full_refund_status,
+
+        (
+          SELECT r1.amount
+          FROM refunds r1
+          WHERE r1.booking_id = b.id
+          AND r1.refund_type = 'FULL'
+          ORDER BY r1.created_at DESC
+          LIMIT 1
+        ) AS full_refund_amount,
+
+        /* ✅ DEPOSIT REFUND */
+        (
+          SELECT r2.status
+          FROM refunds r2
+          WHERE r2.booking_id = b.id
+          AND r2.refund_type = 'DEPOSIT'
+          ORDER BY r2.created_at DESC
+          LIMIT 1
+        ) AS deposit_refund_status,
+
+        (
+          SELECT r2.amount
+          FROM refunds r2
+          WHERE r2.booking_id = b.id
+          AND r2.refund_type = 'DEPOSIT'
+          ORDER BY r2.created_at DESC
+          LIMIT 1
+        ) AS deposit_refund_amount,
 
         /* JOIN STATUS */
         (SELECT COUNT(*) 
@@ -393,17 +424,6 @@ exports.getUserActiveStay = async (req, res) => {
       FROM bookings b
       JOIN pgs pg ON pg.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-
-      /* 🔥 FIX: ONLY DEPOSIT REFUND */
-      LEFT JOIN refunds r 
-        ON r.id = (
-          SELECT r2.id
-          FROM refunds r2
-          WHERE r2.booking_id = b.id
-          AND r2.refund_type = 'DEPOSIT'   -- ✅ VERY IMPORTANT FIX
-          ORDER BY r2.created_at DESC
-          LIMIT 1
-        )
 
       WHERE b.user_id = ?
         AND b.status IN ('confirmed','left')
