@@ -19,35 +19,33 @@ exports.getAllRefunds = async (req, res) => {
   }
 };
 
-/* =========================================
-   👑 ADMIN → APPROVE REFUND
-========================================= */
 exports.approveRefund = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const [[refund]] = await db.query(
+      `SELECT * FROM refunds WHERE id=?`,
+      [id]
+    );
+
+    if (!refund) throw new Error("Refund not found");
+
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE REFUND
+    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE refunds SET status='approved' WHERE id=?`,
       [id]
     );
 
-    res.json({ success: true, message: "Refund approved by admin" });
-
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-/* =========================================
-   👑 ADMIN → REJECT REFUND
-========================================= */
-exports.rejectRefund = async (req, res) => {
-  try {
-    const { id } = req.params;
-
+    //////////////////////////////////////////////////////
+    // 🔥 UPDATE PG_USERS (MATCH VACATE FLOW)
+    //////////////////////////////////////////////////////
     await db.query(
-      `UPDATE refunds SET status='rejected' WHERE id=?`,
-      [id]
+      `UPDATE pg_users 
+       SET vacate_status='approved'
+       WHERE booking_id=?`,
+      [refund.booking_id]
     );
 
     res.json({ success: true });
