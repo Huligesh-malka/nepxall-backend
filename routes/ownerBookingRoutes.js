@@ -12,7 +12,6 @@ const {
   approveVacateRequest,
   markRefundPaid,
   rejectVacateRequest,
-    // 🔥 ADD THIS
 } = ownerController;
 
 // ================= BOOKINGS =================
@@ -23,7 +22,7 @@ router.get("/tenants", firebaseAuth, getActiveTenantsByOwner);
 // ================= VACATE =================
 router.get("/vacate/requests", firebaseAuth, getVacateRequests);
 
-// ✅ OWNER APPROVE / RE-APPROVE
+// ✅ OWNER APPROVE
 router.post(
   "/vacate/approve/:bookingId",
   firebaseAuth,
@@ -37,20 +36,18 @@ router.post(
   rejectVacateRequest
 );
 
-// 💰 OWNER MARK AS PAID (DEPOSIT)
+// 💰 OWNER MARK AS PAID (✅ FIXED)
 router.post(
-  "/refund/mark-paid/:bookingId",
+  "/refund/mark-paid/:id",   // 🔥 FIX HERE
   firebaseAuth,
   markRefundPaid
 );
 
-
+// 🔄 SYNC
 router.post(
   "/refund/sync/:bookingId",
   firebaseAuth,
   ownerController.syncRefundStatus
 );
-
-
 
 module.exports = router;
