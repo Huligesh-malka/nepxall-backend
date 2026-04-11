@@ -12,7 +12,7 @@ const {
   approveVacateRequest,
   markRefundPaid,
   rejectVacateRequest,
-  adminMarkRefundPaid   // 🔥 ADD THIS
+    // 🔥 ADD THIS
 } = ownerController;
 
 // ================= BOOKINGS =================
@@ -44,7 +44,13 @@ router.post(
   markRefundPaid
 );
 
-// 🔵 ADMIN MARK AS PAID (FULL REFUND)  🔥 NEW
+
+router.post(
+  "/refund/sync/:bookingId",
+  firebaseAuth,
+  ownerController.syncRefundStatus
+);
+
 
 
 module.exports = router;
