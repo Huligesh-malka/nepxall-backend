@@ -380,9 +380,8 @@ exports.rejectVacateRequest = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 /* ======================================================
-   💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT)
+   💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT - FINAL FIX)
 ====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
@@ -390,39 +389,40 @@ exports.markRefundPaid = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { bookingId } = req.params;
+    //////////////////////////////////////////////////////
+    // ✅ GET REFUND ID FROM PARAM (🔥 FIX)
+    //////////////////////////////////////////////////////
+    const { id } = req.params; // ✅ refund id from frontend
 
     //////////////////////////////////////////////////////
-    // ✅ OPTIONAL OWNER CHECK (ONLY FOR DEPOSIT)
+    // ✅ OPTIONAL OWNER CHECK
     //////////////////////////////////////////////////////
     let owner = null;
-
     if (req.user?.firebase_uid) {
       owner = await getOwner(req.user.firebase_uid);
     }
 
     //////////////////////////////////////////////////////
-    // ✅ GET LATEST REFUND (FULL + DEPOSIT)
+    // ✅ GET EXACT REFUND (🔥 FIX: NO MORE WRONG PICK)
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
        FROM refunds r
        JOIN bookings b ON b.id = r.booking_id
-       WHERE r.booking_id=? 
-       ORDER BY r.id DESC
-       LIMIT 1`,
-      [bookingId]
+       WHERE r.id=?`,
+      [id]
     );
 
     if (!refund) {
       throw new Error("Refund not found");
     }
 
+    const bookingId = refund.booking_id;
+
     //////////////////////////////////////////////////////
-    // 🔒 SECURITY CHECK
+    // 🔒 SECURITY CHECK (ONLY FOR DEPOSIT)
     //////////////////////////////////////////////////////
     if (refund.refund_type === "DEPOSIT") {
-      // 👉 OWNER FLOW
       if (!owner) {
         throw new Error("Not an owner");
       }
@@ -431,8 +431,6 @@ exports.markRefundPaid = async (req, res) => {
         throw new Error("Unauthorized");
       }
     }
-
-    // 👉 FULL → ADMIN FLOW (no owner check)
 
     //////////////////////////////////////////////////////
     // ✅ VALIDATION
@@ -444,12 +442,10 @@ exports.markRefundPaid = async (req, res) => {
       throw new Error("Already paid");
     }
 
-    // 👉 FULL refund doesn't need user approval
     if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
       throw new Error("User has not accepted refund yet");
     }
 
-    // ✅ allow approved also
     if (!["pending", "approved"].includes(status)) {
       throw new Error("Invalid refund state");
     }
@@ -461,7 +457,7 @@ exports.markRefundPaid = async (req, res) => {
       `UPDATE refunds 
        SET status='paid'
        WHERE id=?`,
-      [refund.id]
+      [id]
     );
 
     //////////////////////////////////////////////////////
