@@ -475,6 +475,9 @@ exports.requestRefund = async (req, res) => {
     const { bookingId, reason, upi_id } = req.body;
     const userId = req.user.id;
 
+    //////////////////////////////////////////////////////
+    // ✅ VALIDATION
+    //////////////////////////////////////////////////////
     if (!bookingId || !reason || !upi_id) {
       return res.status(400).json({
         message: "Booking ID, reason and UPI ID are required"
@@ -489,15 +492,30 @@ exports.requestRefund = async (req, res) => {
       [bookingId, userId]
     );
 
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) {
+      throw new Error("Booking not found");
+    }
 
     //////////////////////////////////////////////////////
-    // ❌ BLOCK DUPLICATE
+    // ❌ BLOCK IF USER ALREADY JOINED
+    //////////////////////////////////////////////////////
+    const [[checkin]] = await connection.query(
+      "SELECT id FROM pg_checkins WHERE booking_id=?",
+      [bookingId]
+    );
+
+    if (checkin) {
+      throw new Error("Already joined PG. Use vacate option.");
+    }
+
+    //////////////////////////////////////////////////////
+    // ❌ BLOCK DUPLICATE REQUEST
     //////////////////////////////////////////////////////
     const [[existing]] = await connection.query(
       `SELECT * FROM refunds 
        WHERE booking_id=? 
-       ORDER BY id DESC LIMIT 1`,
+       ORDER BY created_at DESC 
+       LIMIT 1`,
       [bookingId]
     );
 
@@ -506,7 +524,7 @@ exports.requestRefund = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ CALCULATE FULL REFUND
+    // ✅ CALCULATE FULL REFUND AMOUNT
     //////////////////////////////////////////////////////
     const amount =
       (Number(booking.rent_amount) || 0) +
@@ -514,12 +532,7 @@ exports.requestRefund = async (req, res) => {
       (Number(booking.maintenance_amount) || 0);
 
     //////////////////////////////////////////////////////
-    // 🚫 IMPORTANT: DO NOT TOUCH pg_users
-    //////////////////////////////////////////////////////
-    // ❌ REMOVE ANY pg_users UPDATE HERE
-
-    //////////////////////////////////////////////////////
-    // ✅ INSERT REFUND
+    // ✅ INSERT FULL REFUND → PENDING (🔥 FIX)
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO refunds 
@@ -528,23 +541,35 @@ exports.requestRefund = async (req, res) => {
       [bookingId, userId, amount, reason, upi_id]
     );
 
+    //////////////////////////////////////////////////////
+    // ❌ DO NOT UPDATE STATUS HERE
+    //////////////////////////////////////////////////////
+    // NO pg_users update
+    // NO bookings update
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
     await connection.commit();
 
     res.json({
       success: true,
-      message: "Refund request submitted successfully"
+      message: "Refund request submitted successfully",
+      status: "pending"
     });
 
   } catch (err) {
     await connection.rollback();
-    res.status(500).json({ message: err.message });
+    console.error("❌ REFUND ERROR:", err);
+
+    res.status(500).json({
+      message: err.message
+    });
+
   } finally {
     connection.release();
   }
 };
-
-
-
 
 
 exports.requestVacate = async (req, res) => {
