@@ -384,6 +384,11 @@ exports.rejectVacateRequest = async (req, res) => {
 
 
 
+
+
+
+
+
 /* ======================================================
    💰 MARK REFUND AS PAID (OWNER + ADMIN SUPPORT - FINAL FIX)
 ====================================================== */
@@ -424,16 +429,16 @@ exports.markRefundPaid = async (req, res) => {
     const bookingId = refund.booking_id;
 
     //////////////////////////////////////////////////////
-    // 🔒 SECURITY CHECK (🔥 FIXED FOR ADMIN + OWNER)
+    // 🔒 SECURITY CHECK (ONLY FOR DEPOSIT)
     //////////////////////////////////////////////////////
     if (refund.refund_type === "DEPOSIT") {
-      // 👉 OWNER FLOW
-      if (owner) {
-        if (refund.owner_id !== owner.id) {
-          throw new Error("Unauthorized");
-        }
+      if (!owner) {
+        throw new Error("Not an owner");
       }
-      // 👉 ADMIN FLOW → allowed (no block)
+
+      if (refund.owner_id !== owner.id) {
+        throw new Error("Unauthorized");
+      }
     }
 
     //////////////////////////////////////////////////////
@@ -442,6 +447,7 @@ exports.markRefundPaid = async (req, res) => {
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
 
+    // 🔥 FIX: Don't block if already paid
     const alreadyPaid = status === "paid";
 
     if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
@@ -509,6 +515,4 @@ exports.markRefundPaid = async (req, res) => {
   } finally {
     connection.release();
   }
-};
-
-
+};  
