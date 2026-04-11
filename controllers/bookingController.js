@@ -1,855 +1,707 @@
-const db = require("../db");
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useAuth } from "../context/AuthContext";
+import { Navigate, useNavigate } from "react-router-dom";
+import api from "../api/api";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
-//////////////////////////////////////////////////////
-// 🧑 CREATE BOOKING → PRODUCTION SAFE
-//////////////////////////////////////////////////////
+/* ================= BRAND COLORS ================= */
+const BRAND_BLUE = "#0B5ED7";
+const BRAND_GREEN = "#4CAF50";
+const BRAND_RED = "#ef4444";
+const BRAND_ORANGE = "#f59e0b";
 
-exports.createBooking = async (req, res) => {
-  try {
-    const { pgId } = req.params;
-    const { check_in_date, room_type } = req.body;
-    const userId = req.user.id;
+/* ================= 3-DOT MENU COMPONENT ================= */
+const ThreeDotMenu = ({ items }) => {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef();
 
-    if (!check_in_date || !room_type) {
-      return res.status(400).json({ message: "Missing required fields" });
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={menuRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        style={dotBtn}
+        aria-label="More options"
+      >
+        <span style={dot} />
+        <span style={dot} />
+        <span style={dot} />
+      </button>
+
+      {open && (
+        <div style={dropdownMenu}>
+          {items.map((item, idx) => (
+            <button
+              key={idx}
+              style={{
+                ...dropdownItem,
+                color: item.danger ? BRAND_RED : item.warn ? BRAND_ORANGE : "#111827",
+                borderBottom: idx < items.length - 1 ? "1px solid #f3f4f6" : "none",
+              }}
+              onClick={() => {
+                item.onClick();
+                setOpen(false);
+              }}
+            >
+              <span style={{ marginRight: 10, fontSize: 15 }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Stay Details Component - ONLY shows Room, Payment, Deposit, Receipt
+const StayDetails = ({ stay, formatDate }) => {
+  return (
+    <div style={detailsContainer}>
+      {/* Stay Information */}
+      <div style={infoGrid}>
+        <div style={infoItem}>
+          <label style={labelStyle}>🚪 Allotted Room</label>
+          <p style={valStyle}>{stay.room_no || "Allocating..."}</p>
+        </div>
+        <div style={infoItem}>
+          <label style={labelStyle}>👥 Sharing Type</label>
+          <p style={valStyle}>{stay.room_type || "N/A"}</p>
+        </div>
+        <div style={{ ...infoItem, gridColumn: "span 2", marginTop: "10px" }}>
+          <label style={labelStyle}>🆔 Order ID</label>
+          <p
+            style={{
+              ...valStyle,
+              fontSize: "12px",
+              color: BRAND_BLUE,
+              wordBreak: "break-all",
+            }}
+          >
+            {stay.order_id || "N/A"}
+          </p>
+        </div>
+      </div>
+
+      <div style={priceList}>
+        <p style={{ ...priceRow, color: BRAND_GREEN, fontWeight: "700" }}>
+          💰 Paid On: <span>{formatDate(stay.paid_date)}</span>
+        </p>
+        {stay.rent_amount > 0 && (
+          <p style={priceRow}>
+            Monthly Rent: <span>₹{stay.rent_amount}</span>
+          </p>
+        )}
+        {stay.maintenance_amount > 0 && (
+          <p style={priceRow}>
+            Maintenance: <span>₹{stay.maintenance_amount}</span>
+          </p>
+        )}
+        {stay.deposit_amount > 0 && (
+          <p
+            style={{
+              ...priceRow,
+              borderTop: "1px dashed #eee",
+              paddingTop: "10px",
+              marginTop: "10px",
+            }}
+          >
+            Security Deposit (Paid):{" "}
+            <span style={{ fontWeight: "bold" }}>₹{stay.deposit_amount}</span>
+          </p>
+        )}
+        <div style={totalBox}>
+          <span>Total Paid</span>
+          <span style={{ fontSize: "1.2rem", fontWeight: "bold" }}>
+            ₹{stay.total_paid}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const UserActiveStay = () => {
+  const [stays, setStays] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedStayId, setSelectedStayId] = useState(null);
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+
+  const receiptRef = useRef();
+  const [selectedStay, setSelectedStay] = useState(null);
+
+  // Load stays
+  const loadStay = useCallback(async (forceRefresh = false) => {
+    try {
+      if (forceRefresh) setLoading(true);
+      if (!user) return;
+
+      const res = await api.get("/bookings/user/active-stay");
+      const staysData = Array.isArray(res.data) ? res.data : res.data ? [res.data] : [];
+      setStays(staysData);
+      
+      if (staysData.length > 0 && !selectedStayId) {
+        setSelectedStayId(staysData[0].id);
+      }
+    } catch (err) {
+      console.error("Error loading stays:", err);
+    } finally {
+      if (forceRefresh) setLoading(false);
     }
+  }, [user, selectedStayId]);
 
-    //////////////////////////////////////////////////////
-    // 🔥 STEP 1: AUTO EXPIRE OLD PENDING BOOKINGS
-    //////////////////////////////////////////////////////
-    await db.query(`
-      UPDATE bookings
-      SET status = 'expired'
-      WHERE status = 'pending'
-      AND created_at < NOW() - INTERVAL 24 HOUR
-    `);
-
-    //////////////////////////////////////////////////////
-    // 🔐 STEP 2: BLOCK ANY ACTIVE BOOKING (IMPORTANT FIX)
-    //////////////////////////////////////////////////////
-    const [[existing]] = await db.query(`
-      SELECT id, status FROM bookings 
-      WHERE user_id = ?
-      AND pg_id = ?
-      AND status IN ('pending','approved','confirmed')
-      LIMIT 1
-    `, [userId, pgId]);
-
-    if (existing) {
-      return res.status(400).json({
-        message: `You already have a ${existing.status} booking for this PG`
-      });
+  useEffect(() => {
+    if (user) {
+      loadStay(true);
     }
+  }, [user, loadStay]);
 
-    //////////////////////////////////////////////////////
-    // 🔐 STEP 3: BLOCK IF USER IS ALREADY STAYING
-    //////////////////////////////////////////////////////
-    const [[activeStay]] = await db.query(`
-      SELECT id FROM pg_users
-      WHERE user_id=? AND pg_id=? AND status='ACTIVE'
-      LIMIT 1
-    `, [userId, pgId]);
+  const currentStay = stays.find(s => s.id === selectedStayId);
 
-    if (activeStay) {
-      return res.status(400).json({
-        message: "You are already staying in this PG."
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // 👤 GET USER
-    //////////////////////////////////////////////////////
-    const [[user]] = await db.query(
-      "SELECT id, name, email, phone FROM users WHERE id=?",
-      [userId]
-    );
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    //////////////////////////////////////////////////////
-    // 🏠 GET PG
-    //////////////////////////////////////////////////////
-    const [[pg]] = await db.query(
-      "SELECT * FROM pgs WHERE id=?",
-      [pgId]
-    );
-
-    if (!pg) {
-      return res.status(404).json({ message: "PG not found" });
-    }
-
-    //////////////////////////////////////////////////////
-    // 💰 RENT CALCULATION
-    //////////////////////////////////////////////////////
-    let rent = 0;
-
-    if (pg.pg_category === "pg") {
-      if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
-      else if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
-      else if (room_type === "Triple Sharing") rent = pg.triple_sharing || 0;
-      else if (room_type === "Four Sharing") rent = pg.four_sharing || 0;
-      else if (room_type === "Single Room") rent = pg.single_room || 0;
-      else if (room_type === "Double Room") rent = pg.double_room || 0;
-    }
-
-    const deposit = pg.deposit_amount || 0;
-    const maintenance = pg.maintenance_amount || 0;
-
-    //////////////////////////////////////////////////////
-    // 📝 STEP 4: INSERT BOOKING
-    //////////////////////////////////////////////////////
-    const [result] = await db.query(
-      `
-      INSERT INTO bookings 
-      (pg_id, user_id, owner_id, name, email, phone,
-       check_in_date, room_type, rent_amount, security_deposit, maintenance_amount, status) 
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
-      `,
-      [
-        pgId,
-        userId,
-        pg.owner_id,
-        user.name,
-        user.email,
-        user.phone,
-        check_in_date,
-        room_type,
-        rent,
-        deposit,
-        maintenance,
-      ]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ SUCCESS RESPONSE
-    //////////////////////////////////////////////////////
-    res.json({
-      success: true,
-      bookingId: result.insertId,
-      message: "Booking created successfully"
+  const formatDate = (dateString) => {
+    if (!dateString) return "Processing...";
+    return new Date(dateString).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
     });
+  };
 
-  } catch (err) {
-    console.error("❌ CREATE BOOKING ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-//////////////////////////////////////////////////////
-// 📜 USER BOOKINGS
-//////////////////////////////////////////////////////
-exports.getUserBookings = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `
-      SELECT 
-        b.id,
-        b.pg_id,
-        b.owner_id,
-        b.room_id,
-        b.room_type,
-        b.check_in_date,
-        b.status,
-        b.rent_amount,
-        b.security_deposit,
-        b.maintenance_amount,
-        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
-        b.kyc_verified,
-        b.agreement_signed,
-        b.move_in_completed,
-        b.created_at,
-        p.pg_name,
-        p.city,
-        p.area,
-        p.contact_phone AS owner_phone,
-        pr.room_no
-        FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
-      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      WHERE b.user_id=?
-      ORDER BY b.created_at DESC
-      `,
-      [req.user.id]
+  const handleDownloadReceipt = async (stay) => {
+    setSelectedStay(stay);
+    setTimeout(async () => {
+      try {
+        const element = receiptRef.current;
+        const canvas = await html2canvas(element, {
+          scale: 3,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+        });
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF("p", "mm", "a4");
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+        pdf.save(`Receipt_${stay.order_id || "Booking"}.pdf`);
+        setSelectedStay(null);
+      } catch (error) {
+        console.error("Receipt Generation Failed:", error);
+      }
+    }, 500);
+  };
+
+  if (authLoading) {
+    return (
+      <div style={mainContent}>
+        <p style={{ textAlign: "center", padding: 50 }}>⏳ Loading authentication...</p>
+      </div>
     );
-
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
   }
-};
-
-//////////////////////////////////////////////////////
-// 👑 OWNER BOOKINGS
-//////////////////////////////////////////////////////
-exports.getOwnerBookings = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `
-      SELECT 
-        b.*,
-        p.pg_name,
-        u.name AS tenant_name,
-        u.phone AS tenant_phone
-      FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
-      JOIN users u ON u.id = b.user_id
-      WHERE b.owner_id=?
-      ORDER BY b.created_at DESC
-      `,
-      [req.user.id]
-    );
-
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  
+  if (!user) {
+    return <Navigate to="/login" replace />;
   }
-};
 
-//////////////////////////////////////////////////////
-// 👑 OWNER APPROVE / REJECT
-//////////////////////////////////////////////////////
-exports.updateBookingStatus = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    const { status } = req.body;
-
-    //////////////////////////////////////////////////////
-    // ✅ VALID STATUS
-    //////////////////////////////////////////////////////
-    const validStatuses = ['approved', 'rejected'];
-
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status" });
-    }
-
-    //////////////////////////////////////////////////////
-    // 🔥 GET CURRENT BOOKING
-    //////////////////////////////////////////////////////
-    const [[booking]] = await db.query(
-      "SELECT status FROM bookings WHERE id=? AND owner_id=?",
-      [bookingId, req.user.id]
+  if (loading) {
+    return (
+      <div style={mainContent}>
+        <p style={{ textAlign: "center", padding: 50 }}>⏳ Syncing your stays...</p>
+      </div>
     );
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    //////////////////////////////////////////////////////
-    // 🔥 LOGIC FIX
-    //////////////////////////////////////////////////////
-    let finalStatus = status;
-
-    if (status === "rejected") {
-      // ❌ DON'T BLOCK USER
-      // 👉 keep booking alive for retry payment
-      finalStatus = "approved"; 
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ UPDATE BOOKING
-    //////////////////////////////////////////////////////
-    await db.query(
-      "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
-      [finalStatus, bookingId, req.user.id]
-    );
-
-    res.json({
-      success: true,
-      message: status === "rejected"
-        ? "Booking kept approved (user can retry payment)"
-        : "Booking approved"
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
   }
-};
-//////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS
-//////////////////////////////////////////////////////
-//////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS → UPDATED TO HANDLE ORDER_ID
-//////////////////////////////////////////////////////
-exports.markPaymentDone = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    const { room_id, order_id } = req.body;
-    const userId = req.user.id;
 
-    const [[booking]] = await db.query(
-      "SELECT * FROM bookings WHERE id=? AND user_id=?",
-      [bookingId, userId]
+  if (stays.length === 0) {
+    return (
+      <div style={mainContent}>
+        <div style={emptyBox}>
+          <h3 style={{ color: "#4b5563" }}>No Active Stays Found</h3>
+          <p style={{ color: "#9ca3af", marginBottom: 20 }}>
+            You don't have any confirmed bookings at the moment.
+          </p>
+          <button style={btn} onClick={() => navigate("/")}>
+            Browse PGs
+          </button>
+        </div>
+      </div>
     );
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // ✅ ONLY UPDATE BOOKING
-    await db.query(
-      `UPDATE bookings 
-       SET status='confirmed', 
-           room_id=?, 
-           order_id=? 
-       WHERE id=?`,
-      [room_id || null, order_id || booking.order_id, bookingId]
-    );
-
-    // ✅ ROOM UPDATE (OPTIONAL KEEP)
-    if (room_id) {
-      await db.query(
-        "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
-        [room_id]
-      );
-    }
-
-    res.json({ 
-      success: true, 
-      message: "Payment submitted successfully"
-    });
-
-  } catch (err) {
-    console.error("PAYMENT DONE ERROR:", err);
-    res.status(500).json({ message: err.message });
   }
-};
 
-//////////////////////////////////////////////////////
-// 👑 ACTIVE TENANTS
-//////////////////////////////////////////////////////
-exports.getActiveTenantsByOwner = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `
-      SELECT 
-        pu.*,
-        u.name,
-        u.phone,
-        p.pg_name
-      FROM pg_users pu
-      JOIN users u ON u.id = pu.user_id
-      JOIN pgs p ON p.id = pu.pg_id
-      WHERE pu.owner_id=? AND pu.status='ACTIVE'
-      `,
-      [req.user.id]
-    );
+  return (
+    <div style={mainContent}>
+      {/* Stay Selection Dropdown */}
+      <div style={staySelector}>
+        <label style={selectorLabel}>Select Stay:</label>
+        <select 
+          style={selector}
+          value={selectedStayId || ''}
+          onChange={(e) => setSelectedStayId(Number(e.target.value))}
+        >
+          {stays.map((stay) => (
+            <option key={stay.id} value={stay.id}>
+              {stay.pg_name} - Room {stay.room_no}
+            </option>
+          ))}
+        </select>
+      </div>
 
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
+      {currentStay && (
+        <div style={contentCard}>
+          {/* Header with PG name and 3-dot menu */}
+          <div style={cardHeader}>
+            <div>
+              <h2 style={pgName}>{currentStay.pg_name}</h2>
+              <p style={roomInfo}>
+                Room {currentStay.room_no} • {currentStay.room_type} Sharing
+              </p>
+            </div>
+            <ThreeDotMenu
+              items={[
+                {
+                  icon: "📜",
+                  label: "Booking History",
+                  onClick: () => navigate("/user/bookings"),
+                },
+                {
+                  icon: "💳",
+                  label: "Pay Rent",
+                  onClick: () => navigate("/payment"),
+                },
+                {
+                  icon: "📥",
+                  label: "Download Receipt",
+                  onClick: () => handleDownloadReceipt(currentStay),
+                },
+              ]}
+            />
+          </div>
 
+          {/* Content Area - ONLY Stay Details (Room, Payment, Deposit, Receipt) */}
+          <div style={viewContent}>
+            <StayDetails 
+              stay={currentStay}
+              formatDate={formatDate}
+            />
+          </div>
+        </div>
+      )}
 
-exports.getUserActiveStay = async (req, res) => {
-  try {
-    const userId = req.user.id;
+      {/* Hidden Receipt for PDF */}
+      {selectedStay && (
+        <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+          <div ref={receiptRef} style={modernReceiptContainer}>
+            <div style={{ ...receiptHeader, borderBottom: `4px solid ${BRAND_BLUE}` }}>
+              <div>
+                <h1 style={logoText}>
+                  <span style={{ color: BRAND_BLUE }}>NEP</span>
+                  <span style={{ color: BRAND_GREEN }}>XALL</span>
+                </h1>
+                <p style={tagline}>Next Places for Living</p>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <h2 style={receiptTitle}>RENT RECEIPT</h2>
+                <p style={{ ...orderIdText, color: BRAND_BLUE }}>
+                  Order ID: {selectedStay.order_id || "N/A"}
+                </p>
+                <p style={dateText}>
+                  Date: {formatDate(selectedStay.paid_date || new Date())}
+                </p>
+              </div>
+            </div>
 
-    const [rows] = await db.query(`
-      SELECT 
-        b.id,
+            <div style={mainReceiptBody}>
+              <div style={{ flex: 1 }}>
+                <div style={sectionBlock}>
+                  <label style={receiptLabel}>👤 ISSUED TO</label>
+                  <p style={receiptValue}>
+                    {user?.displayName || "Valued Tenant"}
+                  </p>
+                  <p style={receiptSubValue}>
+                    Mob: {user?.phoneNumber || "Registered User"}
+                  </p>
+                </div>
+                <div style={sectionBlock}>
+                  <label style={receiptLabel}>🏠 PROPERTY DETAILS</label>
+                  <p style={receiptValue}>{selectedStay.pg_name}</p>
+                  <p style={receiptSubValue}>
+                    {selectedStay.room_type} Sharing{" "}
+                    {selectedStay.room_no ? `| Room: ${selectedStay.room_no}` : ""}
+                  </p>
+                </div>
+              </div>
+              <div style={paymentStatusBox}>
+                <div style={statusCircle}>✅</div>
+                <h3 style={{ ...statusText, color: BRAND_GREEN }}>VERIFIED</h3>
+                <p style={dateText}>Payment Mode: Online</p>
+                <div style={amountDisplay}>₹{selectedStay.total_paid}</div>
+              </div>
+            </div>
 
-        /* PAYMENT */
-        (SELECT p.order_id 
-         FROM payments p 
-         WHERE p.booking_id = b.id 
-           AND p.status = 'paid'
-         ORDER BY p.id DESC LIMIT 1) AS order_id,
+            <div style={tableContainer}>
+              <div style={{ ...tableHeader, background: BRAND_BLUE }}>
+                <span>📊 PAYMENT BREAKDOWN</span>
+                <span>Amount</span>
+              </div>
+              {selectedStay.rent_amount > 0 && (
+                <div style={tableRow}>
+                  <span>Monthly Room Rent ({selectedStay.room_type})</span>
+                  <span>₹{selectedStay.rent_amount}</span>
+                </div>
+              )}
+              {selectedStay.maintenance_amount > 0 && (
+                <div style={tableRow}>
+                  <span>Maintenance Charges</span>
+                  <span>₹{selectedStay.maintenance_amount}</span>
+                </div>
+              )}
+              <div
+                style={{
+                  ...tableRow,
+                  borderBottom: `2px solid ${BRAND_BLUE}`,
+                  fontWeight: "bold",
+                  background: "#f8fafc",
+                }}
+              >
+                <span>Total Amount Received</span>
+                <span>₹{selectedStay.total_paid}</span>
+              </div>
+            </div>
 
-        (SELECT p.submitted_at 
-         FROM payments p 
-         WHERE p.booking_id = b.id 
-           AND p.status = 'paid'
-         ORDER BY p.id DESC LIMIT 1) AS paid_date,
+            {selectedStay.deposit_amount > 0 && (
+              <div
+                style={{
+                  ...sectionBlock,
+                  marginTop: "30px",
+                  padding: "20px",
+                  background: "#f0f4f8",
+                  borderRadius: "10px",
+                }}
+              >
+                <label style={receiptLabel}>💳 SECURITY DEPOSIT (ONE-TIME)</label>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={receiptValue}>₹{selectedStay.deposit_amount}</span>
+                  <span style={{ color: BRAND_GREEN, fontWeight: "bold" }}>
+                    Paid (Refundable)
+                  </span>
+                </div>
+              </div>
+            )}
 
-        /* PG DETAILS */
-        pg.pg_name,
-        pr.room_no,
-        b.room_type,
-        b.check_in_date AS join_date,
-
-        /* AMOUNTS */
-        b.rent_amount,
-        b.security_deposit AS deposit_amount,
-        b.maintenance_amount,
-
-        (b.rent_amount + b.maintenance_amount) AS monthly_total,
-
-        /* ✅ NEW: CORRECT TOTAL PAID */
-        (b.rent_amount + b.maintenance_amount + b.security_deposit) AS total_paid,
-
-        /* ✅ FULL REFUND */
-        (
-          SELECT r1.status
-          FROM refunds r1
-          WHERE r1.booking_id = b.id
-          AND r1.refund_type = 'FULL'
-          ORDER BY r1.created_at DESC
-          LIMIT 1
-        ) AS full_refund_status,
-
-        (
-          SELECT r1.amount
-          FROM refunds r1
-          WHERE r1.booking_id = b.id
-          AND r1.refund_type = 'FULL'
-          ORDER BY r1.created_at DESC
-          LIMIT 1
-        ) AS full_refund_amount,
-
-        /* ✅ DEPOSIT REFUND */
-        (
-          SELECT r2.status
-          FROM refunds r2
-          WHERE r2.booking_id = b.id
-          AND r2.refund_type = 'DEPOSIT'
-          ORDER BY r2.created_at DESC
-          LIMIT 1
-        ) AS deposit_refund_status,
-
-        (
-          SELECT r2.amount
-          FROM refunds r2
-          WHERE r2.booking_id = b.id
-          AND r2.refund_type = 'DEPOSIT'
-          ORDER BY r2.created_at DESC
-          LIMIT 1
-        ) AS deposit_refund_amount,
-
-        /* 🔥 FIX: ADD THIS ONLY */
-        (
-          SELECT r2.user_approval
-          FROM refunds r2
-          WHERE r2.booking_id = b.id
-          AND r2.refund_type = 'DEPOSIT'
-          ORDER BY r2.created_at DESC
-          LIMIT 1
-        ) AS deposit_user_approval,
-
-        /* JOIN STATUS */
-        (SELECT COUNT(*) 
-         FROM pg_checkins pc 
-         WHERE pc.booking_id = b.id) AS is_joined,
-
-        'ACTIVE' AS status
-
-      FROM bookings b
-      JOIN pgs pg ON pg.id = b.pg_id
-      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-
-      WHERE b.user_id = ?
-        AND b.status IN ('confirmed','left')
-
-        AND EXISTS (
-          SELECT 1 FROM payments p 
-          WHERE p.booking_id = b.id 
-            AND p.status = 'paid'
-        )
-
-      ORDER BY b.updated_at DESC
-    `, [userId]);
-
-    res.json(rows);
-
-  } catch (err) {
-    console.error("GET ACTIVE STAY ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
+            <div style={footerNote}>
+              <div
+                style={{ textAlign: "left", marginBottom: "20px", color: "#4b5563" }}
+              >
+                <p>
+                  ✔ Verified Transaction:{" "}
+                  <strong>{selectedStay.order_id || "N/A"}</strong>
+                </p>
+                <p>
+                  ✔ This is a digital proof of stay generated by Nepxall.
+                </p>
+              </div>
+              <p
+                style={{
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: "20px",
+                }}
+              >
+                * System-generated receipt. No signature required.
+              </p>
+              <p
+                style={{ fontWeight: "bold", marginTop: 5, color: BRAND_BLUE }}
+              >
+                THANK YOU FOR STAYING WITH US!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
-
-
-
-
-exports.getReceiptDetails = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    const userId = req.user.id;
-
-    const [rows] = await db.query(
-      `SELECT 
-        b.id AS receipt_no,
-        b.order_id, 
-        b.updated_at AS verified_date,
-        u.name AS tenant_name,
-        u.phone AS tenant_phone,
-        p.pg_name,
-        pr.room_no,
-        b.room_type,
-        p.location,
-
-        /* SEND ALL AMOUNTS */
-        b.rent_amount,
-        b.security_deposit,
-        b.maintenance_amount,
-
-        /* TOTAL */
-        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
-
-        b.status
-      FROM bookings b
-      JOIN users u ON u.id = b.user_id
-      JOIN pgs p ON p.id = b.pg_id
-      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
-      WHERE b.id = ? AND b.user_id = ? AND b.status = 'confirmed'`,
-      [bookingId, userId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "Receipt not found or not yet verified." });
-    }
-
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+/* ===== STYLES ===== */
+const mainContent = {
+  maxWidth: 900,
+  margin: "40px auto",
+  padding: "0 20px",
+  fontFamily: "Inter, sans-serif",
 };
 
-
-exports.requestRefund = async (req, res) => {
-  const connection = await db.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const { bookingId, reason, upi_id } = req.body;
-    const userId = req.user.id;
-
-    //////////////////////////////////////////////////////
-    // ✅ VALIDATION
-    //////////////////////////////////////////////////////
-    if (!bookingId || !reason || !upi_id) {
-      return res.status(400).json({
-        message: "Booking ID, reason and UPI ID are required"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ CHECK BOOKING
-    //////////////////////////////////////////////////////
-    const [[booking]] = await connection.query(
-      "SELECT * FROM bookings WHERE id=? AND user_id=?",
-      [bookingId, userId]
-    );
-
-    if (!booking) {
-      throw new Error("Booking not found");
-    }
-
-    //////////////////////////////////////////////////////
-    // ❌ BLOCK IF USER ALREADY JOINED
-    //////////////////////////////////////////////////////
-    const [[checkin]] = await connection.query(
-      "SELECT id FROM pg_checkins WHERE booking_id=?",
-      [bookingId]
-    );
-
-    if (checkin) {
-      throw new Error("Already joined PG. Use vacate option.");
-    }
-
-    //////////////////////////////////////////////////////
-    // ❌ BLOCK DUPLICATE REQUEST
-    //////////////////////////////////////////////////////
-    const [[existing]] = await connection.query(
-      `SELECT * FROM refunds 
-       WHERE booking_id=? 
-       ORDER BY created_at DESC 
-       LIMIT 1`,
-      [bookingId]
-    );
-
-    if (existing && existing.status !== "rejected") {
-      throw new Error("Refund already requested");
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ CALCULATE FULL REFUND AMOUNT
-    //////////////////////////////////////////////////////
-    const amount =
-      (Number(booking.rent_amount) || 0) +
-      (Number(booking.security_deposit) || 0) +
-      (Number(booking.maintenance_amount) || 0);
-
-    //////////////////////////////////////////////////////
-    // ✅ INSERT FULL REFUND → PENDING (🔥 FIX)
-    //////////////////////////////////////////////////////
-    await connection.query(
-      `INSERT INTO refunds 
-      (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
-      VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
-      [bookingId, userId, amount, reason, upi_id]
-    );
-
-    //////////////////////////////////////////////////////
-    // ❌ DO NOT UPDATE STATUS HERE
-    //////////////////////////////////////////////////////
-    // NO pg_users update
-    // NO bookings update
-
-    //////////////////////////////////////////////////////
-    // ✅ COMMIT
-    //////////////////////////////////////////////////////
-    await connection.commit();
-
-    res.json({
-      success: true,
-      message: "Refund request submitted successfully",
-      status: "pending"
-    });
-
-  } catch (err) {
-    await connection.rollback();
-    console.error("❌ REFUND ERROR:", err);
-
-    res.status(500).json({
-      message: err.message
-    });
-
-  } finally {
-    connection.release();
-  }
+const staySelector = {
+  marginBottom: 20,
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
 };
 
-
-exports.requestVacate = async (req, res) => {
-  try {
-    const {
-      bookingId,
-      vacate_date,
-      reason,
-      account_number,
-      ifsc_code,
-      upi_id
-    } = req.body;
-
-    const userId = req.user.id;
-
-    //////////////////////////////////////////////////////
-    // ✅ VALIDATION
-    //////////////////////////////////////////////////////
-    if (!bookingId || !vacate_date || !reason) {
-      return res.status(400).json({
-        message: "Booking ID, vacate date and reason required"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ CHECK BOOKING
-    //////////////////////////////////////////////////////
-    const [[booking]] = await db.query(
-      "SELECT * FROM bookings WHERE id=? AND user_id=?",
-      [bookingId, userId]
-    );
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ CHECK PG USER
-    //////////////////////////////////////////////////////
-    const [[pgUser]] = await db.query(
-      "SELECT * FROM pg_users WHERE booking_id=?",
-      [bookingId]
-    );
-
-    if (!pgUser) {
-      return res.status(404).json({ message: "PG user record not found" });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ CHECK LAST REFUND (🔥 IMPORTANT FIX)
-    //////////////////////////////////////////////////////
-    const [[lastRefund]] = await db.query(
-      `SELECT status FROM refunds 
-       WHERE booking_id=? 
-       ORDER BY id DESC LIMIT 1`,
-      [bookingId]
-    );
-
-    // ❌ BLOCK only if NOT rejected
-    if (
-      pgUser.vacate_status === "requested" &&
-      lastRefund &&
-      lastRefund.status !== "rejected"
-    ) {
-      return res.status(400).json({
-        message: "Vacate already requested"
-      });
-    }
-
-    // ❌ BLOCK IF COMPLETED
-    if (pgUser.vacate_status === "completed") {
-      return res.status(400).json({
-        message: "Already vacated"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // ✅ UPDATE PG USER
-    //////////////////////////////////////////////////////
-    await db.query(
-      `UPDATE pg_users 
-       SET status='LEAVING',
-           vacate_status='requested',
-           vacate_reason=?,
-           vacate_request_date=NOW(),
-           move_out_date=? 
-       WHERE booking_id=?`,
-      [reason, vacate_date, bookingId]
-    );
-
-    //////////////////////////////////////////////////////
-    // ✅ CALCULATE REFUND AMOUNT
-    //////////////////////////////////////////////////////
-    let refundAmount = booking.security_deposit || 0;
-
-    //////////////////////////////////////////////////////
-    // ✅ CHECK EXISTING REFUND
-    //////////////////////////////////////////////////////
-    const [[existingRefund]] = await db.query(
-      `SELECT * FROM refunds 
-       WHERE booking_id=? AND refund_type='DEPOSIT'
-       ORDER BY created_at DESC LIMIT 1`,
-      [bookingId]
-    );
-
-    //////////////////////////////////////////////////////
-    // 🔁 UPDATE EXISTING
-    //////////////////////////////////////////////////////
-    if (existingRefund) {
-      await db.query(
-        `UPDATE refunds 
-         SET status='pending',
-             user_approval='pending',
-             amount=?,
-             upi_id=?,
-             account_number=?,
-             ifsc_code=?,
-             created_at=NOW()
-         WHERE id=?`,
-        [
-          refundAmount,
-          upi_id,
-          account_number,
-          ifsc_code,
-          existingRefund.id
-        ]
-      );
-    } else {
-      //////////////////////////////////////////////////////
-      // ✅ INSERT NEW
-      //////////////////////////////////////////////////////
-      await db.query(
-        `INSERT INTO refunds 
-        (booking_id, user_id, amount, reason, upi_id, account_number, ifsc_code, refund_type, status, user_approval)
-        VALUES (?,?,?,?,?,?,?,'DEPOSIT','pending','pending')`,
-        [
-          bookingId,
-          userId,
-          refundAmount,
-          "Deposit refund after vacate",
-          upi_id || null,
-          account_number || null,
-          ifsc_code || null
-        ]
-      );
-    }
-
-    res.json({
-      success: true,
-      message: "Vacate request submitted successfully"
-    });
-
-  } catch (err) {
-    console.error("VACATE ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
+const selectorLabel = {
+  fontSize: 14,
+  fontWeight: 500,
+  color: "#374151",
 };
 
-
-
-
-
-
-exports.acceptRefund = async (req, res) => {
-  try {
-    const { bookingId } = req.body;
-    const userId = req.user.id;
-
-    const [[refund]] = await db.query(
-      `SELECT * FROM refunds 
-       WHERE booking_id=? AND user_id=? 
-       ORDER BY created_at DESC LIMIT 1`,
-      [bookingId, userId]
-    );
-
-    if (!refund) {
-      return res.status(404).json({ message: "Refund not found" });
-    }
-
-    if (refund.status !== "approved") {
-      return res.status(400).json({
-        message: "Refund not approved yet"
-      });
-    }
-
-    await db.query(
-      `UPDATE refunds 
-       SET user_approval='accepted', status='pending'
-       WHERE id=?`,
-      [refund.id]
-    );
-
-    res.json({
-      success: true,
-      message: "Refund accepted"
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
-  }
+const selector = {
+  padding: "8px 12px",
+  borderRadius: 8,
+  border: "1px solid #d1d5db",
+  fontSize: 14,
+  backgroundColor: "#fff",
+  cursor: "pointer",
 };
-exports.rejectRefund = async (req, res) => {
-  try {
-    const { bookingId } = req.body;
-    const userId = req.user.id;
 
-    const [[refund]] = await db.query(
-      `SELECT * FROM refunds 
-       WHERE booking_id=? AND user_id=? 
-       ORDER BY created_at DESC LIMIT 1`,
-      [bookingId, userId]
-    );
-
-    if (!refund) {
-      return res.status(404).json({ message: "Refund not found" });
-    }
-
-    if (refund.status !== "approved") {
-      return res.status(400).json({
-        message: "Refund not approved yet"
-      });
-    }
-
-    await db.query(
-      `UPDATE refunds 
-       SET user_approval='rejected', status='pending'
-       WHERE id=?`,
-      [refund.id]
-    );
-
-    res.json({
-      success: true,
-      message: "Refund rejected"
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
-  }
+const contentCard = {
+  background: "#fff",
+  borderRadius: 16,
+  boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+  overflow: "hidden",
 };
+
+const cardHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "24px 30px",
+  borderBottom: "1px solid #f0f0f0",
+  background: "#fff",
+};
+
+const pgName = {
+  fontSize: 20,
+  fontWeight: 700,
+  color: "#111827",
+  margin: 0,
+};
+
+const roomInfo = {
+  fontSize: 14,
+  color: "#6b7280",
+  margin: "5px 0 0 0",
+};
+
+const viewContent = {
+  padding: "30px",
+};
+
+const infoGrid = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "10px",
+  marginBottom: 20,
+};
+
+const labelStyle = {
+  fontSize: "11px",
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+  fontWeight: "600",
+};
+
+const valStyle = {
+  margin: "2px 0 0 0",
+  fontWeight: "700",
+  fontSize: "15px",
+  color: "#111827",
+};
+
+const priceList = {
+  marginBottom: 20,
+  background: "#f9fafb",
+  padding: "15px",
+  borderRadius: "12px",
+};
+
+const priceRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  color: "#4b5563",
+  margin: "10px 0",
+  fontSize: "14px",
+};
+
+const totalBox = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginTop: 15,
+  padding: "15px",
+  background: "#f0fdf4",
+  borderRadius: "8px",
+  color: "#166534",
+};
+
+const infoItem = { display: "flex", flexDirection: "column" };
+const btn = {
+  flex: 1,
+  minWidth: "100px",
+  padding: "12px",
+  background: BRAND_BLUE,
+  color: "#fff",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontWeight: "600",
+  fontSize: "13px",
+};
+
+const emptyBox = {
+  textAlign: "center",
+  padding: 60,
+  background: "#fff",
+  borderRadius: 16,
+  border: "2px dashed #e5e7eb",
+};
+
+const detailsContainer = {
+  animation: "fadeIn 0.3s ease",
+};
+
+// 3-dot button styles
+const dotBtn = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: "6px 10px",
+  borderRadius: "8px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+  alignItems: "center",
+  transition: "background 0.15s",
+};
+
+const dot = {
+  display: "block",
+  width: "4px",
+  height: "4px",
+  borderRadius: "50%",
+  background: "#6b7280",
+};
+
+const dropdownMenu = {
+  position: "absolute",
+  top: "calc(100% + 6px)",
+  right: 0,
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: "12px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+  zIndex: 999,
+  minWidth: "190px",
+  overflow: "hidden",
+};
+
+const dropdownItem = {
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  padding: "12px 16px",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: "500",
+  textAlign: "left",
+  fontFamily: "Inter, sans-serif",
+  transition: "background 0.12s",
+};
+
+// Receipt styles
+const modernReceiptContainer = {
+  width: "210mm",
+  minHeight: "297mm",
+  padding: "60px",
+  background: "#ffffff",
+  color: "#111827",
+  fontFamily: "Helvetica, Arial, sans-serif",
+};
+
+const receiptHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  paddingBottom: "20px",
+  marginBottom: "30px",
+};
+
+const logoText = {
+  margin: 0,
+  fontSize: "36px",
+  fontWeight: "900",
+  letterSpacing: "-1px",
+};
+
+const tagline = { margin: 0, fontSize: "12px", color: "#6b7280" };
+const receiptTitle = { margin: 0, fontSize: "22px", color: "#111827" };
+const orderIdText = { margin: 0, fontSize: "14px", fontWeight: "bold" };
+const mainReceiptBody = {
+  display: "flex",
+  gap: "30px",
+  marginBottom: "40px",
+};
+const sectionBlock = { marginBottom: "20px" };
+const receiptLabel = {
+  fontSize: "11px",
+  color: "#9ca3af",
+  fontWeight: "bold",
+  letterSpacing: "1px",
+  display: "block",
+  marginBottom: "5px",
+};
+const receiptValue = {
+  fontSize: "16px",
+  fontWeight: "bold",
+  margin: 0,
+  color: "#111827",
+};
+const receiptSubValue = { fontSize: "13px", color: "#4b5563", margin: "2px 0" };
+const paymentStatusBox = {
+  width: "200px",
+  background: "#f8fafc",
+  borderRadius: "15px",
+  border: "1px solid #e2e8f0",
+  padding: "20px",
+  textAlign: "center",
+};
+const statusCircle = { fontSize: "30px", marginBottom: "5px" };
+const statusText = { margin: 0, fontSize: "18px", fontWeight: "bold" };
+const dateText = { fontSize: "12px", color: "#6b7280", margin: "5px 0" };
+const amountDisplay = {
+  fontSize: "24px",
+  fontWeight: "900",
+  color: "#111827",
+  marginTop: "10px",
+};
+const tableContainer = { marginTop: "10px" };
+const tableHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "12px",
+  color: "#fff",
+  borderRadius: "8px 8px 0 0",
+  fontWeight: "bold",
+};
+const tableRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "15px 12px",
+  borderBottom: "1px solid #e5e7eb",
+};
+const footerNote = {
+  marginTop: "50px",
+  textAlign: "center",
+  color: "#9ca3af",
+  fontSize: "12px",
+};
+
+export default UserActiveStay;
