@@ -50,8 +50,9 @@ exports.approveRefund = async (req, res) => {
   }
 };
 
-
-
+/* =========================================
+   👑 ADMIN → COMPLETE FULL REFUND (FINAL FIX)
+========================================= */
 exports.markRefundCompletedAdmin = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -60,6 +61,9 @@ exports.markRefundCompletedAdmin = async (req, res) => {
 
     const { id } = req.params;
 
+    //////////////////////////////////////////////////////
+    // ✅ GET REFUND
+    //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT * FROM refunds WHERE id=?`,
       [id]
@@ -73,34 +77,50 @@ exports.markRefundCompletedAdmin = async (req, res) => {
 
     const bookingId = refund.booking_id;
 
-    // ✅ UPDATE REFUND
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE REFUND → COMPLETED
+    //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds SET status='completed' WHERE id=?`,
       [id]
     );
 
-    // ✅ UPDATE BOOKING
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE BOOKINGS → LEFT (🔥 FIXED HERE)
+    //////////////////////////////////////////////////////
     await connection.query(
-      `UPDATE bookings SET status='cancelled' WHERE id=?`,
+      `UPDATE bookings 
+       SET status='LEFT'
+       WHERE id=?`,
       [bookingId]
     );
 
-    // ✅ UPDATE PG_USERS
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE PG_USERS → LEFT
+    //////////////////////////////////////////////////////
     await connection.query(
-      `UPDATE pg_users SET status='LEFT' WHERE booking_id=?`,
+      `UPDATE pg_users 
+       SET status='LEFT'
+       WHERE booking_id=?`,
       [bookingId]
     );
 
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
     await connection.commit();
 
     res.json({
       success: true,
-      message: "Refund completed successfully"
+      message: "FULL refund completed & user exited successfully"
     });
 
   } catch (err) {
     await connection.rollback();
+    console.error("❌ FULL REFUND ERROR:", err);
+
     res.status(500).json({ message: err.message });
+
   } finally {
     connection.release();
   }
