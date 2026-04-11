@@ -9,7 +9,7 @@ router.get("/refunds", firebaseAuth, adminController.getAllRefunds);
 
 router.post("/refunds/:id/approve", firebaseAuth, adminController.approveRefund);
 
-router.post("/refunds/:id/reject", firebaseAuth, adminController.rejectRefund);
+
 
 router.post("/refunds/:id/paid", firebaseAuth, adminController.markRefundPaidAdmin);
 
