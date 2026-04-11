@@ -299,6 +299,7 @@ exports.getVacateRequests = async (req, res) => {
       `
       SELECT 
         b.id AS booking_id,
+         r.id AS id, 
         p.pg_name,
         u.name AS user_name,
 
