@@ -310,7 +310,6 @@ function maskUPI(upi) {
   if (parts.length !== 2) return "****";
   return parts[0].slice(0, 2) + "***@" + parts[1];
 }
-
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -359,16 +358,48 @@ exports.getVacateRequests = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔐 DECRYPT + MASK (ONLY ADD THIS BLOCK)
+    // 🔐 DECRYPT + CONDITION BASED SHOW
     //////////////////////////////////////////////////////
     rows.forEach(r => {
-      const acc = decrypt(r.account_number);
-      const ifsc = decrypt(r.ifsc_code);
-      const upi = decrypt(r.upi_id);
+      let acc = null;
+      let ifsc = null;
+      let upi = null;
 
-      r.account_number = maskAccount(acc);
-      r.ifsc_code = maskIFSC(ifsc);
-      r.upi_id = maskUPI(upi);
+      try {
+        acc = r.account_number ? decrypt(r.account_number) : null;
+        ifsc = r.ifsc_code ? decrypt(r.ifsc_code) : null;
+        upi = r.upi_id ? decrypt(r.upi_id) : null;
+      } catch (err) {
+        console.log("⚠️ Decrypt skipped");
+        acc = r.account_number;
+        ifsc = r.ifsc_code;
+        upi = r.upi_id;
+      }
+
+      //////////////////////////////////////////////////////
+      // 🎯 CONDITION LOGIC
+      //////////////////////////////////////////////////////
+
+      // ✅ Approved → show FULL details
+      if (r.refund_status === "approved") {
+        r.account_number = acc;
+        r.ifsc_code = ifsc;
+        r.upi_id = upi;
+      }
+
+      // ✅ Completed → show MASKED
+      else if (r.refund_status === "completed") {
+        r.account_number = maskAccount(acc);
+        r.ifsc_code = maskIFSC(ifsc);
+        r.upi_id = maskUPI(upi);
+      }
+
+      // ✅ Pending / others → MASKED
+      else {
+        r.account_number = maskAccount(acc);
+        r.ifsc_code = maskIFSC(ifsc);
+        r.upi_id = maskUPI(upi);
+      }
     });
 
     res.json(rows);
@@ -378,7 +409,6 @@ exports.getVacateRequests = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.rejectVacateRequest = async (req, res) => {
   try {
     const { bookingId } = req.params;
