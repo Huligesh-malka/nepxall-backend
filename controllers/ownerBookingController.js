@@ -578,3 +578,53 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
+
+
+
+
+
+
+
+exports.getOwnerActiveTenants = async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+
+    const [rows] = await db.query(`
+      SELECT 
+        pu.id,
+        pu.join_date,
+        pu.status,
+
+        u.name,
+        u.phone,
+        u.email,
+
+        p.pg_name,
+        pr.room_no,
+
+        b.rent_amount,
+        b.security_deposit
+
+      FROM pg_users pu
+
+      JOIN users u ON u.id = pu.user_id
+      JOIN pgs p ON p.id = pu.pg_id
+      LEFT JOIN bookings b ON b.id = pu.booking_id
+      LEFT JOIN pg_rooms pr ON pr.id = pu.room_id
+
+      WHERE pu.owner_id=? 
+      AND pu.status='ACTIVE'
+
+      ORDER BY pu.join_date DESC
+    `, [ownerId]);
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
+  } catch (err) {
+    console.error("ACTIVE TENANTS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
