@@ -583,43 +583,106 @@ exports.markRefundPaid = async (req, res) => {
 
 
 
-
-
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
     const ownerId = req.user.id;
 
     const [rows] = await db.query(`
       SELECT 
-        pu.id,
+        //////////////////////////////////////////////////////
+        // 🔑 PG USER (JOIN INFO)
+        //////////////////////////////////////////////////////
+        pu.id AS pg_user_id,
         pu.join_date,
         pu.status,
 
+        //////////////////////////////////////////////////////
+        // 👤 USER INFO
+        //////////////////////////////////////////////////////
+        u.id AS user_id,
         u.name,
         u.phone,
         u.email,
 
+        //////////////////////////////////////////////////////
+        // 🏠 PG INFO
+        //////////////////////////////////////////////////////
+        p.id AS pg_id,
         p.pg_name,
+
+        //////////////////////////////////////////////////////
+        // 🚪 ROOM
+        //////////////////////////////////////////////////////
         pr.room_no,
 
+        //////////////////////////////////////////////////////
+        // 📦 BOOKING DETAILS (FULL)
+        //////////////////////////////////////////////////////
+        b.id AS booking_id,
+        b.order_id,
+        b.check_in_date,
+        b.duration,
+        b.room_type,
+        b.food_preference,
+
+        //////////////////////////////////////////////////////
+        // 💰 FINANCIALS
+        //////////////////////////////////////////////////////
         b.rent_amount,
-        b.security_deposit
+        b.security_deposit,
+        b.maintenance_amount,
+        b.owner_amount,
+        b.platform_fee,
+
+        //////////////////////////////////////////////////////
+        // 📊 STATUS
+        //////////////////////////////////////////////////////
+        b.status AS booking_status,
+        b.kyc_verified,
+        b.agreement_signed,
+        b.move_in_completed,
+
+        //////////////////////////////////////////////////////
+        // 🧾 SETTLEMENT
+        //////////////////////////////////////////////////////
+        b.owner_settlement,
+        b.admin_settlement,
+        b.settlement_date,
+
+        //////////////////////////////////////////////////////
+        // 📅 META
+        //////////////////////////////////////////////////////
+        b.created_at
 
       FROM pg_users pu
 
       JOIN users u ON u.id = pu.user_id
       JOIN pgs p ON p.id = pu.pg_id
-      LEFT JOIN bookings b ON b.id = pu.booking_id
-      LEFT JOIN pg_rooms pr ON pr.id = pu.room_id
 
-      WHERE pu.owner_id=? 
-      AND pu.status='ACTIVE'
+      //////////////////////////////////////////////////////
+      // 🔥 IMPORTANT FIX (CORRECT JOIN)
+      //////////////////////////////////////////////////////
+      LEFT JOIN bookings b 
+        ON b.id = pu.booking_id
 
+      LEFT JOIN pg_rooms pr 
+        ON pr.id = pu.room_id
+
+      //////////////////////////////////////////////////////
+      // 🎯 FILTER
+      //////////////////////////////////////////////////////
+      WHERE pu.owner_id = ? 
+      AND pu.status = 'ACTIVE'
+
+      //////////////////////////////////////////////////////
+      // 📅 ORDER
+      //////////////////////////////////////////////////////
       ORDER BY pu.join_date DESC
     `, [ownerId]);
 
     res.json({
       success: true,
+      count: rows.length,
       data: rows
     });
 
