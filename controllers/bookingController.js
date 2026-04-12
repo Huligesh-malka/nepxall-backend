@@ -4,7 +4,6 @@ const { encrypt } = require("../utils/encryption");
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
 //////////////////////////////////////////////////////
-
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
@@ -82,25 +81,36 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 RENT CALCULATION (🔥 FIXED)
+    // 💰 RENT CALCULATION (🔥 FINAL FIX)
     //////////////////////////////////////////////////////
     let rent = 0;
 
     // normalize room_type
     const normalized = room_type.toLowerCase().replace(/\s/g, "");
 
-    // ✅ PG CATEGORY (FIXED)
+    //////////////////////////////////////////////////////
+    // ✅ PG CATEGORY
+    //////////////////////////////////////////////////////
     if (pg.pg_category === "pg") {
       if (normalized === "singlesharing") rent = pg.single_sharing || 0;
       else if (normalized === "doublesharing") rent = pg.double_sharing || 0;
       else if (normalized === "triplesharing") rent = pg.triple_sharing || 0;
       else if (normalized === "foursharing") rent = pg.four_sharing || 0;
-
       else if (normalized === "singleroom") rent = pg.single_room || 0;
       else if (normalized === "doubleroom") rent = pg.double_room || 0;
     }
 
+    //////////////////////////////////////////////////////
+    // 🔥 COLIVING CATEGORY (YOUR FIX)
+    //////////////////////////////////////////////////////
+    if (pg.pg_category === "coliving") {
+      if (normalized === "singleroom") rent = pg.co_living_single_room || 0;
+      else if (normalized === "doubleroom") rent = pg.co_living_double_room || 0;
+    }
+
+    //////////////////////////////////////////////////////
     // ✅ TO-LET CATEGORY
+    //////////////////////////////////////////////////////
     if (pg.pg_category === "to_let") {
       const type = room_type.toUpperCase().replace(/\s/g, "");
 
@@ -126,7 +136,7 @@ exports.createBooking = async (req, res) => {
     const maintenance = pg.maintenance_amount || 0;
 
     //////////////////////////////////////////////////////
-    // 📝 STEP 4: INSERT BOOKING
+    // 📝 INSERT BOOKING
     //////////////////////////////////////////////////////
     const [result] = await db.query(
       `
@@ -151,7 +161,7 @@ exports.createBooking = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // ✅ SUCCESS RESPONSE
+    // ✅ SUCCESS
     //////////////////////////////////////////////////////
     res.json({
       success: true,
