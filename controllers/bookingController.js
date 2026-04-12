@@ -2,7 +2,7 @@ const db = require("../db");
 const { encrypt } = require("../utils/encryption");
 
 //////////////////////////////////////////////////////
-// 🧑 CREATE BOOKING → PRODUCTION SAFE
+// 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
 //////////////////////////////////////////////////////
 
 exports.createBooking = async (req, res) => {
@@ -82,30 +82,36 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 RENT CALCULATION
+    // 💰 RENT CALCULATION (🔥 FIXED)
     //////////////////////////////////////////////////////
     let rent = 0;
 
-    // ✅ PG CATEGORY
+    // normalize room_type
+    const normalized = room_type.toLowerCase().replace(/\s/g, "");
+
+    // ✅ PG CATEGORY (FIXED)
     if (pg.pg_category === "pg") {
-      if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
-      else if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
-      else if (room_type === "Triple Sharing") rent = pg.triple_sharing || 0;
-      else if (room_type === "Four Sharing") rent = pg.four_sharing || 0;
-      else if (room_type === "Single Room") rent = pg.single_room || 0;
-      else if (room_type === "Double Room") rent = pg.double_room || 0;
+      if (normalized === "singlesharing") rent = pg.single_sharing || 0;
+      else if (normalized === "doublesharing") rent = pg.double_sharing || 0;
+      else if (normalized === "triplesharing") rent = pg.triple_sharing || 0;
+      else if (normalized === "foursharing") rent = pg.four_sharing || 0;
+
+      else if (normalized === "singleroom") rent = pg.single_room || 0;
+      else if (normalized === "doubleroom") rent = pg.double_room || 0;
     }
 
-    // ✅ TO-LET CATEGORY (NEW ADDED)
+    // ✅ TO-LET CATEGORY
     if (pg.pg_category === "to_let") {
-      if (room_type === "1BHK") rent = pg.price_1bhk || 0;
-      else if (room_type === "2BHK") rent = pg.price_2bhk || 0;
-      else if (room_type === "3BHK") rent = pg.price_3bhk || 0;
-      else if (room_type === "4BHK") rent = pg.price_4bhk || 0;
+      const type = room_type.toUpperCase().replace(/\s/g, "");
+
+      if (type === "1BHK") rent = pg.price_1bhk || 0;
+      else if (type === "2BHK") rent = pg.price_2bhk || 0;
+      else if (type === "3BHK") rent = pg.price_3bhk || 0;
+      else if (type === "4BHK") rent = pg.price_4bhk || 0;
     }
 
     //////////////////////////////////////////////////////
-    // ❗ VALIDATION (IMPORTANT)
+    // ❗ VALIDATION
     //////////////////////////////////////////////////////
     if (!rent || rent === 0) {
       return res.status(400).json({
