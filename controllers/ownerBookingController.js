@@ -599,6 +599,10 @@ exports.getOwnerActiveTenants = async (req, res) => {
         b.maintenance_amount,
         b.owner_amount,
 
+
+        COALESCE(b.maintenance_amount, 0) AS maintenance_amount,
+
+
         pc.checkin_time,   -- ✅🔥 REAL CHECK-IN TIME
 
         b.status AS booking_status,
