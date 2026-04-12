@@ -1,8 +1,6 @@
 const db = require("../db");
 
-//////////////////////////////////////////////////////
-// GET PENDING OWNER SETTLEMENTS
-//////////////////////////////////////////////////////
+const { decrypt } = require("../utils/encryption");
 exports.getPendingSettlements = async (req, res) => {
   try {
 
@@ -48,12 +46,33 @@ exports.getPendingSettlements = async (req, res) => {
       LEFT JOIN owner_bank_details obd
         ON obd.owner_id = b.owner_id
 
-      /* 🔥 FIX APPLIED HERE */
       WHERE b.admin_settlement = 'PENDING'
       AND b.owner_amount > 0
 
       ORDER BY pay.created_at DESC
     `);
+
+    //////////////////////////////////////////////////////
+    // 🔓 DECRYPT FOR ADMIN (FULL DETAILS)
+    //////////////////////////////////////////////////////
+    rows.forEach(r => {
+      try {
+        r.account_holder_name = r.account_holder_name
+          ? decrypt(r.account_holder_name)
+          : null;
+
+        r.account_number = r.account_number
+          ? decrypt(r.account_number)
+          : null;
+
+        r.ifsc = r.ifsc
+          ? decrypt(r.ifsc)
+          : null;
+
+      } catch (err) {
+        console.log("⚠️ Decrypt skipped (old/plain data)");
+      }
+    });
 
     res.json({
       success: true,
