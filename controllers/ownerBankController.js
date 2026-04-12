@@ -41,7 +41,13 @@ exports.saveOwnerBank = async (req, res) => {
       });
     }
 
-    /* ================= SAVE BANK ================= */
+    //////////////////////////////////////////////////////
+    // 🔐 ENCRYPT DATA
+    //////////////////////////////////////////////////////
+    const enc_account = encrypt(account_number);
+    const enc_ifsc = encrypt(ifsc);
+    const enc_holder = encrypt(account_holder_name);
+
     await db.query(
       `INSERT INTO owner_bank_details
        (owner_id, account_holder_name, account_number, ifsc, bank_name, branch)
@@ -52,17 +58,17 @@ exports.saveOwnerBank = async (req, res) => {
        ifsc = VALUES(ifsc),
        bank_name = VALUES(bank_name),
        branch = VALUES(branch)`,
+
       [
         owner.id,
-        account_holder_name,
-        account_number,
-        ifsc,
+        enc_holder,
+        enc_account,
+        enc_ifsc,
         bank_name || null,
         branch || null
       ]
     );
 
-    /* ================= MARK OWNER AS VERIFIED ================= */
     await db.query(
       `UPDATE users 
        SET owner_verification_status = 'verified'
@@ -102,9 +108,26 @@ exports.getOwnerBank = async (req, res) => {
       [owner.id]
     );
 
+    let data = rows[0] || null;
+
+    if (data) {
+      try {
+        const holder = decrypt(data.account_holder_name);
+        const acc = decrypt(data.account_number);
+        const ifsc = decrypt(data.ifsc);
+
+        data.account_holder_name = holder;
+        data.account_number = maskAccount(acc); // 🔒 masked
+        data.ifsc = maskIFSC(ifsc); // 🔒 masked
+
+      } catch (err) {
+        console.log("⚠️ Decrypt skipped (old data)");
+      }
+    }
+
     res.json({
       success: true,
-      data: rows[0] || null
+      data
     });
 
   } catch (err) {
