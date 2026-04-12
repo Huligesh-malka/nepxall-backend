@@ -570,8 +570,6 @@ exports.markRefundPaid = async (req, res) => {
 };
 
 
-
-
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
     const ownerId = req.user.id;
@@ -579,7 +577,6 @@ exports.getOwnerActiveTenants = async (req, res) => {
     const [rows] = await db.query(`
       SELECT 
         pu.id AS pg_user_id,
-        pu.join_date,
         pu.status,
 
         u.id AS user_id,
@@ -594,8 +591,6 @@ exports.getOwnerActiveTenants = async (req, res) => {
 
         b.id AS booking_id,
         b.order_id,
-        b.check_in_date,
-        b.duration,
         b.room_type,
         b.food_preference,
 
@@ -603,16 +598,10 @@ exports.getOwnerActiveTenants = async (req, res) => {
         b.security_deposit,
         b.maintenance_amount,
         b.owner_amount,
-        b.platform_fee,
+
+        pc.checkin_time,   -- ✅🔥 REAL CHECK-IN TIME
 
         b.status AS booking_status,
-        b.kyc_verified,
-        b.agreement_signed,
-        b.move_in_completed,
-
-        b.owner_settlement,
-        b.admin_settlement,
-        b.settlement_date,
 
         b.created_at
 
@@ -627,10 +616,13 @@ exports.getOwnerActiveTenants = async (req, res) => {
       LEFT JOIN pg_rooms pr 
         ON pr.id = pu.room_id
 
+      LEFT JOIN pg_checkins pc   -- ✅ NEW JOIN
+        ON pc.booking_id = pu.booking_id
+
       WHERE pu.owner_id = ? 
       AND pu.status = 'ACTIVE'
 
-      ORDER BY pu.join_date DESC
+      ORDER BY pc.checkin_time DESC
     `, [ownerId]);
 
     res.json({
