@@ -1,5 +1,6 @@
 const db = require("../db");
 const { encrypt } = require("../utils/encryption");
+
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE
 //////////////////////////////////////////////////////
@@ -25,7 +26,7 @@ exports.createBooking = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 🔐 STEP 2: BLOCK ANY ACTIVE BOOKING
+    // 🔐 STEP 2: BLOCK ANY ACTIVE BOOKING (IMPORTANT FIX)
     //////////////////////////////////////////////////////
     const [[existing]] = await db.query(`
       SELECT id, status FROM bookings 
@@ -81,11 +82,10 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 RENT CALCULATION (🔥 FIXED)
+    // 💰 RENT CALCULATION
     //////////////////////////////////////////////////////
     let rent = 0;
 
-    // ✅ PG SHARING
     if (pg.pg_category === "pg") {
       if (room_type === "Single Sharing") rent = pg.single_sharing || 0;
       else if (room_type === "Double Sharing") rent = pg.double_sharing || 0;
@@ -95,26 +95,6 @@ exports.createBooking = async (req, res) => {
       else if (room_type === "Double Room") rent = pg.double_room || 0;
     }
 
-    // ✅ BHK / TO-LET / COLIVING 🔥
-    if (pg.pg_category === "to_let" || pg.pg_category === "coliving") {
-      if (room_type === "1BHK") rent = pg.price_1bhk || 0;
-      else if (room_type === "2BHK") rent = pg.price_2bhk || 0;
-      else if (room_type === "3BHK") rent = pg.price_3bhk || 0;
-      else if (room_type === "4BHK") rent = pg.price_4bhk || 0;
-    }
-
-    //////////////////////////////////////////////////////
-    // ❌ SAFETY CHECK (VERY IMPORTANT)
-    //////////////////////////////////////////////////////
-    if (!rent || rent === 0) {
-      return res.status(400).json({
-        message: "Invalid room type or rent not configured"
-      });
-    }
-
-    //////////////////////////////////////////////////////
-    // 💰 OTHER CHARGES
-    //////////////////////////////////////////////////////
     const deposit = pg.deposit_amount || 0;
     const maintenance = pg.maintenance_amount || 0;
 
@@ -149,9 +129,6 @@ exports.createBooking = async (req, res) => {
     res.json({
       success: true,
       bookingId: result.insertId,
-      rent,
-      deposit,
-      maintenance,
       message: "Booking created successfully"
     });
 
