@@ -1,5 +1,7 @@
 const db = require("../db");
 
+
+const { decrypt } = require("../utils/encryption"); // ✅ ADD THIS AT TOP
 /* ======================================================
    🧠 GET OWNER FROM FIREBASE UID
 ====================================================== */
@@ -288,6 +290,27 @@ exports.approveVacateRequest = async (req, res) => {
   }
 };
 
+
+
+
+// ✅ MASK FUNCTIONS (ADD ABOVE OR BELOW)
+function maskAccount(acc) {
+  if (!acc) return "";
+  return "XXXXXX" + acc.slice(-4);
+}
+
+function maskIFSC(ifsc) {
+  if (!ifsc) return "";
+  return ifsc.slice(0, 4) + "****";
+}
+
+function maskUPI(upi) {
+  if (!upi) return "";
+  const parts = upi.split("@");
+  if (parts.length !== 2) return "****";
+  return parts[0].slice(0, 2) + "***@" + parts[1];
+}
+
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -335,6 +358,19 @@ exports.getVacateRequests = async (req, res) => {
       [owner.id]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔐 DECRYPT + MASK (ONLY ADD THIS BLOCK)
+    //////////////////////////////////////////////////////
+    rows.forEach(r => {
+      const acc = decrypt(r.account_number);
+      const ifsc = decrypt(r.ifsc_code);
+      const upi = decrypt(r.upi_id);
+
+      r.account_number = maskAccount(acc);
+      r.ifsc_code = maskIFSC(ifsc);
+      r.upi_id = maskUPI(upi);
+    });
+
     res.json(rows);
 
   } catch (err) {
@@ -342,7 +378,6 @@ exports.getVacateRequests = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.rejectVacateRequest = async (req, res) => {
   try {

@@ -1,4 +1,5 @@
 const db = require("../db");
+const { encrypt } = require("../utils/encryption");
 
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE
@@ -609,6 +610,7 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
+
 exports.requestVacate = async (req, res) => {
   try {
     const {
@@ -622,18 +624,12 @@ exports.requestVacate = async (req, res) => {
 
     const userId = req.user.id;
 
-    //////////////////////////////////////////////////////
-    // ✅ VALIDATION
-    //////////////////////////////////////////////////////
     if (!bookingId || !vacate_date || !reason) {
       return res.status(400).json({
         message: "Booking ID, vacate date and reason required"
       });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK BOOKING
-    //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
       "SELECT * FROM bookings WHERE id=? AND user_id=?",
       [bookingId, userId]
@@ -643,9 +639,6 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK PG USER
-    //////////////////////////////////////////////////////
     const [[pgUser]] = await db.query(
       "SELECT * FROM pg_users WHERE booking_id=?",
       [bookingId]
@@ -655,9 +648,6 @@ exports.requestVacate = async (req, res) => {
       return res.status(404).json({ message: "PG user record not found" });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK LAST REFUND (🔥 IMPORTANT FIX)
-    //////////////////////////////////////////////////////
     const [[lastRefund]] = await db.query(
       `SELECT status FROM refunds 
        WHERE booking_id=? 
@@ -665,7 +655,6 @@ exports.requestVacate = async (req, res) => {
       [bookingId]
     );
 
-    // ❌ BLOCK only if NOT rejected
     if (
       pgUser.vacate_status === "requested" &&
       lastRefund &&
@@ -676,16 +665,12 @@ exports.requestVacate = async (req, res) => {
       });
     }
 
-    // ❌ BLOCK IF COMPLETED
     if (pgUser.vacate_status === "completed") {
       return res.status(400).json({
         message: "Already vacated"
       });
     }
 
-    //////////////////////////////////////////////////////
-    // ✅ UPDATE PG USER
-    //////////////////////////////////////////////////////
     await db.query(
       `UPDATE pg_users 
        SET status='LEAVING',
@@ -697,20 +682,21 @@ exports.requestVacate = async (req, res) => {
       [reason, vacate_date, bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ CALCULATE REFUND AMOUNT
-    //////////////////////////////////////////////////////
     let refundAmount = booking.security_deposit || 0;
 
-    //////////////////////////////////////////////////////
-    // ✅ CHECK EXISTING REFUND
-    //////////////////////////////////////////////////////
     const [[existingRefund]] = await db.query(
       `SELECT * FROM refunds 
        WHERE booking_id=? AND refund_type='DEPOSIT'
        ORDER BY created_at DESC LIMIT 1`,
       [bookingId]
     );
+
+    //////////////////////////////////////////////////////
+    // 🔐 ENCRYPT DATA HERE
+    //////////////////////////////////////////////////////
+    const enc_upi = upi_id ? encrypt(upi_id) : null;
+    const enc_account = account_number ? encrypt(account_number) : null;
+    const enc_ifsc = ifsc_code ? encrypt(ifsc_code) : null;
 
     //////////////////////////////////////////////////////
     // 🔁 UPDATE EXISTING
@@ -728,9 +714,9 @@ exports.requestVacate = async (req, res) => {
          WHERE id=?`,
         [
           refundAmount,
-          upi_id,
-          account_number,
-          ifsc_code,
+          enc_upi,
+          enc_account,
+          enc_ifsc,
           existingRefund.id
         ]
       );
@@ -747,9 +733,9 @@ exports.requestVacate = async (req, res) => {
           userId,
           refundAmount,
           "Deposit refund after vacate",
-          upi_id || null,
-          account_number || null,
-          ifsc_code || null
+          enc_upi,
+          enc_account,
+          enc_ifsc
         ]
       );
     }
@@ -764,7 +750,6 @@ exports.requestVacate = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 
 
