@@ -189,15 +189,11 @@ exports.approveVacateRequest = async (req, res) => {
     const { bookingId } = req.params;
     const { damage_amount = 0, pending_dues = 0 } = req.body;
 
-    //////////////////////////////////////////////////////
-    // ✅ OWNER CHECK
-    //////////////////////////////////////////////////////
+   
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
-    //////////////////////////////////////////////////////
-    // ✅ BOOKING CHECK
-    //////////////////////////////////////////////////////
+    
     const [[booking]] = await connection.query(
       "SELECT * FROM bookings WHERE id=? AND owner_id=?",
       [bookingId, owner.id]
@@ -205,9 +201,7 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!booking) throw new Error("Booking not found");
 
-    //////////////////////////////////////////////////////
-    // ✅ GET REFUND
-    //////////////////////////////////////////////////////
+    
     const [[refund]] = await connection.query(
       "SELECT * FROM refunds WHERE booking_id=? AND refund_type='DEPOSIT'",
       [bookingId]
@@ -215,16 +209,12 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!refund) throw new Error("Vacate request not found");
 
-    //////////////////////////////////////////////////////
-    // 💰 CALCULATE REFUND
-    //////////////////////////////////////////////////////
+    
     const deposit = Number(booking.security_deposit) || 0;
     let refundAmount = deposit - damage_amount - pending_dues;
     if (refundAmount < 0) refundAmount = 0;
 
-    //////////////////////////////////////////////////////
-    // 🔥 IMPORTANT FIX: HANDLE RE-APPROVAL
-    //////////////////////////////////////////////////////
+   
     let newStatus = "approved";
     let newUserApproval = "pending";
 
@@ -582,42 +572,26 @@ exports.markRefundPaid = async (req, res) => {
 
 
 
-
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
     const ownerId = req.user.id;
 
     const [rows] = await db.query(`
       SELECT 
-        //////////////////////////////////////////////////////
-        // 🔑 PG USER (JOIN INFO)
-        //////////////////////////////////////////////////////
         pu.id AS pg_user_id,
         pu.join_date,
         pu.status,
 
-        //////////////////////////////////////////////////////
-        // 👤 USER INFO
-        //////////////////////////////////////////////////////
         u.id AS user_id,
         u.name,
         u.phone,
         u.email,
 
-        //////////////////////////////////////////////////////
-        // 🏠 PG INFO
-        //////////////////////////////////////////////////////
         p.id AS pg_id,
         p.pg_name,
 
-        //////////////////////////////////////////////////////
-        // 🚪 ROOM
-        //////////////////////////////////////////////////////
         pr.room_no,
 
-        //////////////////////////////////////////////////////
-        // 📦 BOOKING DETAILS (FULL)
-        //////////////////////////////////////////////////////
         b.id AS booking_id,
         b.order_id,
         b.check_in_date,
@@ -625,33 +599,21 @@ exports.getOwnerActiveTenants = async (req, res) => {
         b.room_type,
         b.food_preference,
 
-        //////////////////////////////////////////////////////
-        // 💰 FINANCIALS
-        //////////////////////////////////////////////////////
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
         b.owner_amount,
         b.platform_fee,
 
-        //////////////////////////////////////////////////////
-        // 📊 STATUS
-        //////////////////////////////////////////////////////
         b.status AS booking_status,
         b.kyc_verified,
         b.agreement_signed,
         b.move_in_completed,
 
-        //////////////////////////////////////////////////////
-        // 🧾 SETTLEMENT
-        //////////////////////////////////////////////////////
         b.owner_settlement,
         b.admin_settlement,
         b.settlement_date,
 
-        //////////////////////////////////////////////////////
-        // 📅 META
-        //////////////////////////////////////////////////////
         b.created_at
 
       FROM pg_users pu
@@ -659,24 +621,15 @@ exports.getOwnerActiveTenants = async (req, res) => {
       JOIN users u ON u.id = pu.user_id
       JOIN pgs p ON p.id = pu.pg_id
 
-      //////////////////////////////////////////////////////
-      // 🔥 IMPORTANT FIX (CORRECT JOIN)
-      //////////////////////////////////////////////////////
       LEFT JOIN bookings b 
         ON b.id = pu.booking_id
 
       LEFT JOIN pg_rooms pr 
         ON pr.id = pu.room_id
 
-      //////////////////////////////////////////////////////
-      // 🎯 FILTER
-      //////////////////////////////////////////////////////
       WHERE pu.owner_id = ? 
       AND pu.status = 'ACTIVE'
 
-      //////////////////////////////////////////////////////
-      // 📅 ORDER
-      //////////////////////////////////////////////////////
       ORDER BY pu.join_date DESC
     `, [ownerId]);
 
