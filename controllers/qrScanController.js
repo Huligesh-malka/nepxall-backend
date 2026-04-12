@@ -598,6 +598,8 @@ exports.checkAndCheckinUser = async (req, res) => {
 };
 
 
+
+
 exports.joinPGWithRoom = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -654,7 +656,7 @@ exports.joinPGWithRoom = async (req, res) => {
     const finalRoomId = room_id || booking[0].room_id;
 
     //////////////////////////////////////////////////////
-    // ✅ CHECK PAYMENT (ONLY PAID - FINAL FIX)
+    // ✅ CHECK PAYMENT
     //////////////////////////////////////////////////////
     const [[paymentCheck]] = await connection.query(
       `SELECT 
@@ -703,6 +705,49 @@ exports.joinPGWithRoom = async (req, res) => {
       [user_id, pg_id, booking_id]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔥 NEW: ADD/UPDATE pg_users (ACTIVE TENANT)
+    //////////////////////////////////////////////////////
+
+    // 🔍 Get owner_id
+    const [[pg]] = await connection.query(
+      `SELECT owner_id FROM pgs WHERE id=?`,
+      [pg_id]
+    );
+
+    const owner_id = pg.owner_id;
+
+    // 🔍 Check existing pg_user
+    const [existing] = await connection.query(
+      `SELECT id FROM pg_users 
+       WHERE user_id=? AND pg_id=?`,
+      [user_id, pg_id]
+    );
+
+    if (existing.length > 0) {
+      // 🔄 UPDATE
+      await connection.query(
+        `UPDATE pg_users 
+         SET status='ACTIVE',
+             booking_id=?,
+             room_id=?,
+             join_date=NOW()
+         WHERE user_id=? AND pg_id=?`,
+        [booking_id, finalRoomId, user_id, pg_id]
+      );
+    } else {
+      // ➕ INSERT
+      await connection.query(
+        `INSERT INTO pg_users 
+         (user_id, pg_id, owner_id, booking_id, room_id, status, join_date)
+         VALUES (?, ?, ?, ?, ?, 'ACTIVE', NOW())`,
+        [user_id, pg_id, owner_id, booking_id, finalRoomId]
+      );
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ COMMIT
+    //////////////////////////////////////////////////////
     await connection.commit();
 
     return res.json({
