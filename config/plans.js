@@ -3,7 +3,7 @@ const plans = {
     name: "Free",
     listings: 1,
     photos: 10,
-    videos: 1,
+    videos: 0,
     featured: false,
     featured_days: 0
   },
@@ -19,7 +19,7 @@ const plans = {
     name: "Pro",
     listings: 10,
     photos: 20,
-    videos: 3,
+    videos: 5,
     featured: true,
     featured_days: 30
   }
