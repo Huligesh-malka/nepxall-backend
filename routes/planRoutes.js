@@ -5,7 +5,7 @@ const auth = require("../middlewares/authMiddleware");
 
 const {
   createPlanPayment,
-  autoVerifyPlanPayment,   // 🔥 NEW
+  verifyPlanPayment,   // ✅ USE THIS
   getPlanPayments
 } = require("../controllers/planPaymentController");
 
@@ -18,19 +18,14 @@ router.post("/create", auth, createPlanPayment);
 
 
 /* =========================================================
-   🚀 AUTO VERIFY (NO ADMIN)
+   👨‍💼 ADMIN VERIFY (MANUAL)
 ========================================================= */
 
-// User clicks "I Paid"
-router.post("/auto-verify", auth, autoVerifyPlanPayment);
-
-
-/* =========================================================
-   📊 VIEW PAYMENTS (OPTIONAL)
-========================================================= */
-
-// For testing / dashboard
+// Get all payments
 router.get("/admin", auth, getPlanPayments);
+
+// Approve payment
+router.post("/verify/:orderId", auth, verifyPlanPayment);
 
 
 module.exports = router;
