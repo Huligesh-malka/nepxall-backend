@@ -94,8 +94,10 @@ exports.getOwnerBookings = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
 /* ======================================================
-   ✅ OWNER → APPROVE / REJECT BOOKING
+   ✅ OWNER → APPROVE / REJECT BOOKING (FINAL VERSION)
 ====================================================== */
 exports.updateBookingStatus = async (req, res) => {
   const connection = await db.getConnection();
@@ -109,15 +111,18 @@ exports.updateBookingStatus = async (req, res) => {
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
-    // 🚨 VERIFY OWNER
-    if (status === "approved" && owner.owner_verification_status !== "verified") {
-      await connection.rollback();
-      return res.status(403).json({
-        message: "Complete verification before approving booking"
-      });
+    //////////////////////////////////////////////////////
+    // ✅ VALID STATUS CHECK
+    //////////////////////////////////////////////////////
+    const allowedStatus = ["approved", "rejected"];
+
+    if (!allowedStatus.includes(status)) {
+      throw new Error("Invalid status");
     }
 
+    //////////////////////////////////////////////////////
     // 🔒 GET BOOKING
+    //////////////////////////////////////////////////////
     const [[booking]] = await connection.query(
       `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
       [bookingId, owner.id]
@@ -125,7 +130,46 @@ exports.updateBookingStatus = async (req, res) => {
 
     if (!booking) throw new Error("Booking not found");
 
-    // ✅ UPDATE ONLY STATUS (NO pg_users HERE)
+    //////////////////////////////////////////////////////
+    // ❌ BLOCK EXPIRED BOOKING (VERY IMPORTANT)
+    //////////////////////////////////////////////////////
+    if (booking.status === "expired") {
+      throw new Error("Cannot approve expired booking");
+    }
+
+    //////////////////////////////////////////////////////
+    // ❌ BLOCK ALREADY PROCESSED
+    //////////////////////////////////////////////////////
+    if (["approved", "rejected", "cancelled"].includes(booking.status)) {
+      throw new Error(`Booking already ${booking.status}`);
+    }
+
+    //////////////////////////////////////////////////////
+    // 🚨 OWNER VERIFICATION CHECK
+    //////////////////////////////////////////////////////
+    if (status === "approved" && owner.owner_verification_status !== "verified") {
+      throw new Error("Complete verification before approving booking");
+    }
+
+    //////////////////////////////////////////////////////
+    // 🧠 AUTO EXPIRE CHECK (SAFETY)
+    //////////////////////////////////////////////////////
+    const createdAt = new Date(booking.created_at);
+    const now = new Date();
+    const diffHours = (now - createdAt) / (1000 * 60 * 60);
+
+    if (booking.status === "pending" && diffHours > 24) {
+      await connection.query(
+        `UPDATE bookings SET status='expired' WHERE id=?`,
+        [bookingId]
+      );
+
+      throw new Error("Booking expired automatically");
+    }
+
+    //////////////////////////////////////////////////////
+    // ✅ UPDATE STATUS
+    //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings
        SET status = ?, reject_reason = ?
@@ -135,17 +179,24 @@ exports.updateBookingStatus = async (req, res) => {
 
     await connection.commit();
 
-    res.json({ success: true, message: "Booking updated successfully" });
+    res.json({
+      success: true,
+      message: `Booking ${status} successfully`
+    });
 
   } catch (err) {
     await connection.rollback();
     console.error("❌ UPDATE BOOKING:", err);
-    res.status(500).json({ message: err.message });
+
+    res.status(400).json({
+      success: false,
+      message: err.message
+    });
+
   } finally {
     connection.release();
   }
 };
-
 /* ======================================================
    👥 OWNER → ACTIVE TENANTS
 ====================================================== */
