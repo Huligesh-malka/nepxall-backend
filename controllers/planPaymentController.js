@@ -31,29 +31,38 @@ exports.createPlanPayment = async (req, res) => {
 
     const amount = planPrices[plan];
 
-    // ✅ Prevent duplicate pending payment
+    /* =========================================================
+       🔁 CHECK EXISTING PENDING PAYMENT (REUSE QR)
+    ========================================================= */
     const [existing] = await db.query(
       "SELECT * FROM plan_payments WHERE owner_id=? AND status='pending'",
       [ownerId]
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "You already have a pending payment. Please wait for admin approval."
+      const old = existing[0];
+
+      const upiLink = `upi://pay?pa=${UPI_ID}&pn=Nepxall&tr=${old.order_id}&am=${old.amount}&cu=INR`;
+      const qr = await QRCode.toDataURL(upiLink);
+
+      return res.json({
+        success: true,
+        message: "Existing payment reused",
+        orderId: old.order_id,
+        qr,
+        amount: old.amount
       });
     }
 
-    // ✅ Generate order id
+    /* =========================================================
+       🆕 CREATE NEW PAYMENT
+    ========================================================= */
     const orderId = `plan_${ownerId}_${Date.now()}`;
 
-    // ✅ Generate UPI link
     const upiLink = `upi://pay?pa=${UPI_ID}&pn=Nepxall&tr=${orderId}&am=${amount}&cu=INR`;
 
-    // ✅ Generate QR
     const qr = await QRCode.toDataURL(upiLink);
 
-    // ✅ Save payment
     await db.query(
       `INSERT INTO plan_payments (owner_id, plan, amount, order_id, status)
        VALUES (?, ?, ?, ?, 'pending')`,
@@ -90,7 +99,6 @@ exports.verifyPlanPayment = async (req, res) => {
       [orderId]
     );
 
-    // ❌ Not found
     if (!data) {
       return res.status(404).json({
         success: false,
@@ -98,7 +106,6 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ❌ Already verified
     if (data.status === "paid") {
       return res.status(400).json({
         success: false,
@@ -106,13 +113,13 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ Update payment
+    // ✅ Mark as paid
     await db.query(
       "UPDATE plan_payments SET status='paid', verified_by_admin=1 WHERE order_id=?",
       [orderId]
     );
 
-    // ✅ Calculate expiry
+    // ✅ Plan expiry
     const expiry = new Date(
       Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
