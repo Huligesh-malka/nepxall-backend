@@ -7,19 +7,32 @@ const plans = require("../config/plans"); // ✅ ADDED PLAN IMPORT
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
 
 function safeParsePhotos(value) {
-  if (!value) return [];
-  if (Buffer.isBuffer(value)) value = value.toString("utf8");
-  if (Array.isArray(value)) return value;
+  try {
+    if (!value) return [];
 
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
+    // Already array
+    if (Array.isArray(value)) return value;
+
+    // Buffer → string
+    if (Buffer.isBuffer(value)) {
+      value = value.toString("utf8");
     }
+
+    // String → JSON
+    if (typeof value === "string") {
+      return JSON.parse(value);
+    }
+
+    // Object → array
+    if (typeof value === "object") {
+      return Object.values(value);
+    }
+
+    return [];
+  } catch (err) {
+    console.error("Parse error:", err);
+    return [];
   }
-  return [];
 }
 
 const normalizePrices = (pg) => {
@@ -206,8 +219,7 @@ exports.uploadPhotosOnly = async (req, res) => {
       });
     }
 
-    const newPhotos = files.map(f => f.path);
-
+    const newPhotos = files.map(f => f.secure_url || f.path);
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
       [id, req.user.id]
@@ -217,7 +229,8 @@ exports.uploadPhotosOnly = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
-    const existing = safeParsePhotos(rows[0].photos);
+    // ✅ FIXED: Using safeParsePhotos instead of direct JSON.parse
+    let existing = safeParsePhotos(rows[0].photos);
 
     // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
@@ -293,7 +306,7 @@ exports.addPG = async (req, res) => {
     }
     // 🔒 PLAN CHECK END
 
-    const photos = (req.files || []).map(f => f.path);
+    const photos = (req.files || []).map(f => f.secure_url || f.path);
 
     let rent_amount = 0;
     if (b.pg_category === "to_let") {
@@ -786,7 +799,7 @@ exports.updatePG = async (req, res) => {
     }
 
     if (files.length > 0) {
-      const newPhotos = files.map(f => f.path);
+      const newPhotos = files.map(f => f.secure_url || f.path);
 
       const [rows] = await db.query(
         "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?",
@@ -797,7 +810,8 @@ exports.updatePG = async (req, res) => {
         return res.status(404).json({ success: false, message: "PG not found" });
       }
 
-      const existing = safeParsePhotos(rows[0].photos);
+      // ✅ FIXED: Using safeParsePhotos instead of direct JSON.parse
+      let existing = safeParsePhotos(rows[0].photos);
       
       // 🔒 Check photo limit on update with expiry
       const currentPlan = await getUserPlanObject(req.user.id);
