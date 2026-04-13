@@ -5,18 +5,32 @@ const auth = require("../middlewares/authMiddleware");
 
 const {
   createPlanPayment,
-  verifyPlanPayment,
+  autoVerifyPlanPayment,   // 🔥 NEW
   getPlanPayments
 } = require("../controllers/planPaymentController");
 
-/* ================= PLAN PAYMENT ================= */
+/* =========================================================
+   💰 PLAN PAYMENT
+========================================================= */
 
+// Create QR
 router.post("/create", auth, createPlanPayment);
 
-/* ================= ADMIN (TEMP WITHOUT AUTH) ================= */
 
-// ⚠️ No adminAuth for now
+/* =========================================================
+   🚀 AUTO VERIFY (NO ADMIN)
+========================================================= */
+
+// User clicks "I Paid"
+router.post("/auto-verify", auth, autoVerifyPlanPayment);
+
+
+/* =========================================================
+   📊 VIEW PAYMENTS (OPTIONAL)
+========================================================= */
+
+// For testing / dashboard
 router.get("/admin", auth, getPlanPayments);
-router.post("/verify/:orderId", auth, verifyPlanPayment);
+
 
 module.exports = router;
