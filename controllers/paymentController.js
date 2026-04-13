@@ -1,5 +1,6 @@
 const QRCode = require("qrcode");
 const db = require("../db");
+
 //////////////////////////////////////////////////////
 // CREATE UPI PAYMENT
 //////////////////////////////////////////////////////
@@ -28,15 +29,12 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    // ❌ Ignore real calculation
-    // const rent = parseFloat(booking.rent_amount) || 0;
-    // const deposit = parseFloat(booking.security_deposit) || 0;
-    // const maintenance = parseFloat(booking.maintenance_amount) || 0;
-    // const platformFee = parseFloat(booking.platform_fee) || 0;
-    // const amount = rent + deposit + maintenance + platformFee;
-
-    // ✅ FIXED TEST AMOUNT
-    const amount = 1;
+    // Convert string → number
+    const rent = parseFloat(booking.rent_amount) || 0;
+    const deposit = parseFloat(booking.security_deposit) || 0;
+    const maintenance = parseFloat(booking.maintenance_amount) || 0;
+    const platformFee = parseFloat(booking.platform_fee) || 0;
+    const amount = rent + deposit + maintenance + platformFee;
 
     if (amount <= 0) {
       return res.status(400).json({ success: false, message: "Invalid amount" });
@@ -50,7 +48,7 @@ exports.createPayment = async (req, res) => {
     const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
     const qr = await QRCode.toDataURL(upiLink);
 
-    // ✅ 4. Save payment
+    // ✅ 4. Save payment (NOW INCLUDING user_id)
     await db.query(
       `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
        VALUES (?, ?, ?, ?, 'pending', NOW())`,
