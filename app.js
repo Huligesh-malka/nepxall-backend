@@ -122,6 +122,7 @@ app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 
 /* ================= OWNER ROUTES ================= */
 app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
+app.use("/api/plan", safeLoad("./routes/planRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBankRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerVerificationRoutes"));
 app.use("/api/owner", safeLoad("./routes/ownerBookingRoutes"));
