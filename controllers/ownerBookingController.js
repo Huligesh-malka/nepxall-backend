@@ -197,6 +197,7 @@ exports.updateBookingStatus = async (req, res) => {
     connection.release();
   }
 };
+
 /* ======================================================
    👥 OWNER → ACTIVE TENANTS
 ====================================================== */

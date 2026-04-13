@@ -206,8 +206,7 @@ exports.uploadPhotosOnly = async (req, res) => {
       });
     }
 
-    const newPhotos = files.map(f => f.path);
-
+    const newPhotos = files.map(f => f.secure_url || f.path);
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
       [id, req.user.id]
@@ -293,7 +292,7 @@ exports.addPG = async (req, res) => {
     }
     // 🔒 PLAN CHECK END
 
-    const photos = (req.files || []).map(f => f.path);
+    const photos = (req.files || []).map(f => f.secure_url || f.path);
 
     let rent_amount = 0;
     if (b.pg_category === "to_let") {
@@ -786,7 +785,7 @@ exports.updatePG = async (req, res) => {
     }
 
     if (files.length > 0) {
-      const newPhotos = files.map(f => f.path);
+      const newPhotos = files.map(f => f.secure_url || f.path);
 
       const [rows] = await db.query(
         "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?",
