@@ -1,7 +1,8 @@
 const db = require("../db");
 const path = require("path");
 const fs = require("fs").promises;
-const plans = require("../config/plans"); // ✅ ADDED PLAN IMPORT
+const plans = require("../config/plans");
+const cloudinary = require("cloudinary").v2; // ✅ ADD CLOUDINARY
 
 /* ================= HELPERS ================= */
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
@@ -82,6 +83,27 @@ const getUserPlanObject = async (userId) => {
   const planName = await getUserPlanWithExpiry(userId);
   return plans[planName];
 };
+
+// 🔥 HELPER: Extract public_id from Cloudinary URL
+function getPublicIdFromUrl(url) {
+  try {
+    if (!url) return null;
+    
+    const parts = url.split("/");
+    const fileName = parts.pop(); // pg-photo-123.jpg or video.mp4
+    const uploadIndex = parts.indexOf("upload");
+    
+    if (uploadIndex === -1) return null;
+    
+    const folder = parts.slice(uploadIndex + 1).join("/");
+    const publicId = `${folder}/${fileName.split(".")[0]}`;
+    
+    return publicId;
+  } catch (error) {
+    console.error("Error extracting public_id:", error);
+    return null;
+  }
+}
 
 /* ================= GET OR CREATE USER ================= */
 const getOrCreateUserId = async (firebase_uid, userData = {}) => {
@@ -229,14 +251,13 @@ exports.uploadPhotosOnly = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
-    // ✅ FIXED: Using safeParsePhotos instead of direct JSON.parse
     let existing = [];
 
-try {
-  existing = JSON.parse(rows[0].photos || "[]");
-} catch {
-  existing = [];
-}
+    try {
+      existing = JSON.parse(rows[0].photos || "[]");
+    } catch {
+      existing = [];
+    }
 
     // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
@@ -816,7 +837,6 @@ exports.updatePG = async (req, res) => {
         return res.status(404).json({ success: false, message: "PG not found" });
       }
 
-      // ✅ FIXED: Using safeParsePhotos instead of direct JSON.parse
       let existing = safeParsePhotos(rows[0].photos);
       
       // 🔒 Check photo limit on update with expiry
@@ -999,6 +1019,20 @@ exports.deleteSinglePhoto = async (req, res) => {
     }
 
     let photos = safeParsePhotos(rows[0].photos);
+    
+    // 🔥 DELETE FROM CLOUDINARY
+    const publicId = getPublicIdFromUrl(photo);
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId);
+        console.log(`✅ Deleted from Cloudinary: ${publicId}`);
+      } catch (cloudinaryError) {
+        console.error("Cloudinary delete error:", cloudinaryError);
+        // Continue with DB deletion even if Cloudinary fails
+      }
+    }
+    
+    // 🔥 REMOVE FROM DB
     photos = photos.filter(p => p !== photo);
 
     await db.query(
@@ -1181,7 +1215,7 @@ exports.deleteSingleVideo = async (req, res) => {
     const { video } = req.body;
 
     if (!video) {
-      return res.status(400).json({ success: false, message: "Video required" });
+      return res.status(400).json({ success: false, message: "Video URL required" });
     }
 
     const [rows] = await db.query(
@@ -1198,6 +1232,20 @@ exports.deleteSingleVideo = async (req, res) => {
       videos = JSON.parse(rows[0].videos || "[]");
     } catch {
       videos = [];
+    }
+
+    // 🔥 DELETE VIDEO FROM CLOUDINARY
+    const publicId = getPublicIdFromUrl(video);
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId, {
+          resource_type: "video"
+        });
+        console.log(`✅ Deleted video from Cloudinary: ${publicId}`);
+      } catch (cloudinaryError) {
+        console.error("Cloudinary video delete error:", cloudinaryError);
+        // Continue with DB deletion even if Cloudinary fails
+      }
     }
 
     const updatedVideos = videos.filter(v => v !== video);
