@@ -7,19 +7,32 @@ const plans = require("../config/plans"); // ✅ ADDED PLAN IMPORT
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
 
 function safeParsePhotos(value) {
-  if (!value) return [];
-  if (Buffer.isBuffer(value)) value = value.toString("utf8");
-  if (Array.isArray(value)) return value;
+  try {
+    if (!value) return [];
 
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
+    // Already array
+    if (Array.isArray(value)) return value;
+
+    // Buffer → string
+    if (Buffer.isBuffer(value)) {
+      value = value.toString("utf8");
     }
+
+    // String → JSON
+    if (typeof value === "string") {
+      return JSON.parse(value);
+    }
+
+    // Object → array
+    if (typeof value === "object") {
+      return Object.values(value);
+    }
+
+    return [];
+  } catch (err) {
+    console.error("Parse error:", err);
+    return [];
   }
-  return [];
 }
 
 const normalizePrices = (pg) => {
