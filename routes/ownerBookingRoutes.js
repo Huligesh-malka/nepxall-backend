@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const firebaseAuth = require("../middlewares/authMiddleware");
+const db = require("../db"); // 🔥 ADD THIS
 
 const ownerController = require("../controllers/ownerBookingController");
 
@@ -8,7 +9,7 @@ const {
   getOwnerBookings,
   updateBookingStatus,
   getActiveTenantsByOwner,
-  getOwnerActiveTenants,   // ✅ NEW (your new API)
+  getOwnerActiveTenants,
   getVacateRequests,
   approveVacateRequest,
   markRefundPaid,
@@ -26,10 +27,7 @@ router.put("/bookings/:bookingId", firebaseAuth, updateBookingStatus);
 // ================= TENANTS =================
 //////////////////////////////////////////////////////
 
-// ✅ OLD (basic)
 router.get("/tenants", firebaseAuth, getActiveTenantsByOwner);
-
-// ✅ NEW (FULL DETAILS - RECOMMENDED)
 router.get("/tenants/active", firebaseAuth, getOwnerActiveTenants);
 
 //////////////////////////////////////////////////////
@@ -38,25 +36,50 @@ router.get("/tenants/active", firebaseAuth, getOwnerActiveTenants);
 
 router.get("/vacate/requests", firebaseAuth, getVacateRequests);
 
-// ✅ OWNER APPROVE VACATE
 router.post(
   "/vacate/approve/:bookingId",
   firebaseAuth,
   approveVacateRequest
 );
 
-// ❌ OWNER REJECT
 router.post(
   "/refund/reject/:bookingId",
   firebaseAuth,
   rejectVacateRequest
 );
 
-// 💰 OWNER MARK AS PAID
 router.post(
   "/refund/mark-paid/:id",
   firebaseAuth,
   markRefundPaid
 );
+
+//////////////////////////////////////////////////////
+// ================= PLAN (🔥 NEW FIX) =================
+//////////////////////////////////////////////////////
+
+router.get("/current-plan", firebaseAuth, async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+
+    const [[user]] = await db.query(
+      "SELECT plan, plan_expiry FROM users WHERE id=?",
+      [ownerId]
+    );
+
+    res.json({
+      success: true,
+      plan: user?.plan || "free",
+      expiry: user?.plan_expiry || null
+    });
+
+  } catch (err) {
+    console.error("Get current plan error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
 
 module.exports = router;
