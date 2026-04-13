@@ -229,7 +229,13 @@ exports.uploadPhotosOnly = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
-    const existing = safeParsePhotos(rows[0].photos);
+    // 🔴 FIX 1: Direct JSON.parse instead of safeParsePhotos
+    let existing = [];
+    try {
+      existing = JSON.parse(rows[0].photos || "[]");
+    } catch (e) {
+      existing = [];
+    }
 
     // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
@@ -809,7 +815,13 @@ exports.updatePG = async (req, res) => {
         return res.status(404).json({ success: false, message: "PG not found" });
       }
 
-      const existing = safeParsePhotos(rows[0].photos);
+      // 🔴 FIX 2: Direct JSON.parse instead of safeParsePhotos
+      let existing = [];
+      try {
+        existing = JSON.parse(rows[0].photos || "[]");
+      } catch (e) {
+        existing = [];
+      }
       
       // 🔒 Check photo limit on update with expiry
       const currentPlan = await getUserPlanObject(req.user.id);
