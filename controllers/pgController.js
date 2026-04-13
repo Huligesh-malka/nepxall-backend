@@ -1,12 +1,29 @@
 const db = require("../db");
 const path = require("path");
 const fs = require("fs").promises;
-const plans = require("../config/plans"); // ✅ ADDED PLAN IMPORT
+const plans = require("../config/plans");
 
 /* ================= HELPERS ================= */
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
 
 function safeParsePhotos(value) {
+  if (!value) return [];
+  if (Buffer.isBuffer(value)) value = value.toString("utf8");
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+// 🔥 SAFE PARSE VIDEOS - FIXED
+function safeParseVideos(value) {
   if (!value) return [];
   if (Buffer.isBuffer(value)) value = value.toString("utf8");
   if (Array.isArray(value)) return value;
@@ -78,21 +95,18 @@ const getOrCreateUserId = async (firebase_uid, userData = {}) => {
     throw new Error('Firebase UID is required');
   }
 
-  // If it's already a numeric ID, return it (for backward compatibility)
   if (!isNaN(firebase_uid) && Number.isInteger(Number(firebase_uid))) {
     console.log('Already numeric ID:', firebase_uid);
     return parseInt(firebase_uid);
   }
 
   try {
-    // Check if user exists
     const [rows] = await db.query(
       'SELECT id FROM users WHERE firebase_uid = ?',
       [firebase_uid]
     );
     
     if (rows.length === 0) {
-      // Create new user
       return await createNewUser(firebase_uid, userData);
     }
     
@@ -112,8 +126,8 @@ const createNewUser = async (firebase_uid, userData) => {
     role: userData.role || "tenant",
     mobile_verified: 0,
     owner_verification_status: "pending",
-    plan: "free", // ✅ DEFAULT PLAN
-    plan_expiry: null, // 🔥 ADDED PLAN EXPIRY
+    plan: "free",
+    plan_expiry: null,
     created_at: new Date()
   };
 
@@ -217,15 +231,28 @@ exports.uploadPhotosOnly = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
+    // 🔥 SAFE PARSE - FIXED
     const existing = safeParsePhotos(rows[0].photos);
 
     // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
 
+    console.log("📸 PHOTO CHECK - Plan:", currentPlan.name, "Limit:", currentPlan.photos);
+    console.log("📸 Existing photos:", existing.length);
+    console.log("📸 New photos:", newPhotos.length);
+
+    // 🔥 FIX 2: HARD BLOCK IF ALREADY EXCEEDED
+    if (existing.length >= currentPlan.photos) {
+      return res.status(400).json({
+        success: false,
+        message: `Photo limit already exceeded (${existing.length}/${currentPlan.photos}). Please delete old photos before adding new ones. Your ${currentPlan.name} plan allows only ${currentPlan.photos} photos.`
+      });
+    }
+
     if (existing.length + newPhotos.length > currentPlan.photos) {
       return res.status(400).json({
         success: false,
-        message: `Photo limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.photos} photos. Upgrade to add more.`
+        message: `Photo limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.photos} photos. You have ${existing.length}/${currentPlan.photos}. Upgrade to add more.`
       });
     }
     // 🔒 PLAN CHECK END
@@ -456,7 +483,7 @@ exports.addPG = async (req, res) => {
       contact_email: b.contact_email || null,
       contact_phone: b.contact_phone,
       photos: JSON.stringify(photos),
-      videos: JSON.stringify([]),
+      videos: JSON.stringify([]), // 🔥 FIXED: Initialize as empty array JSON
       status: "pending",
       is_deleted: 0
     };
@@ -533,11 +560,8 @@ exports.getPGById = async (req, res) => {
     normalizePrices(pg);
     pg.photos = safeParsePhotos(pg.photos);
     
-    try {
-      pg.videos = JSON.parse(pg.videos || "[]");
-    } catch {
-      pg.videos = [];
-    }
+    // 🔥 FIXED: Safe parse videos
+    pg.videos = safeParseVideos(pg.videos);
 
     res.json({ success: true, data: pg });
 
@@ -802,6 +826,14 @@ exports.updatePG = async (req, res) => {
       // 🔒 Check photo limit on update with expiry
       const currentPlan = await getUserPlanObject(req.user.id);
       
+      // 🔥 HARD BLOCK if already exceeded
+      if (existing.length >= currentPlan.photos) {
+        return res.status(400).json({
+          success: false,
+          message: `Photo limit already exceeded (${existing.length}/${currentPlan.photos}). Delete old photos first.`
+        });
+      }
+      
       if (existing.length + newPhotos.length > currentPlan.photos) {
         return res.status(400).json({
           success: false,
@@ -858,7 +890,7 @@ exports.getOwnerDashboardPGs = async (req, res) => {
 
     const data = rows.map(pg => {
       pg.photos = safeParsePhotos(pg.photos);
-      pg.videos = safeParsePhotos(pg.videos);
+      pg.videos = safeParseVideos(pg.videos);
       normalizePrices(pg);
 
       const boolFields = [
@@ -1040,20 +1072,28 @@ exports.uploadPGVideos = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
-    let existing = [];
-    try {
-      existing = JSON.parse(rows[0].videos || "[]");
-    } catch {
-      existing = [];
-    }
+    // 🔥 SAFE PARSE VIDEOS - FIXED
+    let existing = safeParseVideos(rows[0].videos);
 
     // 🔒 PLAN CHECK WITH EXPIRY - VIDEO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
 
+    console.log("🎬 VIDEO CHECK - Plan:", currentPlan.name, "Limit:", currentPlan.videos);
+    console.log("🎬 Existing videos:", existing.length);
+    console.log("🎬 New videos:", newVideos.length);
+
+    // 🔥 FIX 2: HARD BLOCK IF ALREADY EXCEEDED
+    if (existing.length >= currentPlan.videos) {
+      return res.status(400).json({
+        success: false,
+        message: `Video limit already exceeded (${existing.length}/${currentPlan.videos}). Please delete old videos before adding new ones. Your ${currentPlan.name} plan allows only ${currentPlan.videos} video(s).`
+      });
+    }
+
     if (existing.length + newVideos.length > currentPlan.videos) {
       return res.status(400).json({
         success: false,
-        message: `Video limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.videos} video(s). Upgrade to add more.`
+        message: `Video limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.videos} video(s). You have ${existing.length}/${currentPlan.videos}. Upgrade to add more.`
       });
     }
     // 🔒 PLAN CHECK END
@@ -1173,12 +1213,7 @@ exports.deleteSingleVideo = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found or unauthorized" });
     }
 
-    let videos = [];
-    try {
-      videos = JSON.parse(rows[0].videos || "[]");
-    } catch {
-      videos = [];
-    }
+    let videos = safeParseVideos(rows[0].videos);
 
     const updatedVideos = videos.filter(v => v !== video);
 
@@ -1215,8 +1250,8 @@ exports.createUser = async (req, res) => {
       role: role || "tenant",
       mobile_verified: 0,
       owner_verification_status: 'pending',
-      plan: "free", // ✅ Default plan
-      plan_expiry: null, // 🔥 ADDED PLAN EXPIRY
+      plan: "free",
+      plan_expiry: null,
       created_at: new Date()
     };
 
@@ -1317,7 +1352,6 @@ exports.getUserPlan = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 🔥 Get user with expiry check
     const [[user]] = await db.query(
       "SELECT plan, plan_expiry FROM users WHERE id = ?",
       [userId]
@@ -1325,14 +1359,12 @@ exports.getUserPlan = async (req, res) => {
 
     let planName = user?.plan || "free";
     
-    // 🔥 EXPIRY CHECK
     if (user?.plan_expiry && new Date(user.plan_expiry) < new Date()) {
       planName = "free";
     }
     
     const currentPlan = plans[planName];
 
-    // Get current usage
     const [[pgCount]] = await db.query(
       "SELECT COUNT(*) as total FROM pgs WHERE owner_id = ? AND is_deleted = 0",
       [userId]
@@ -1340,20 +1372,18 @@ exports.getUserPlan = async (req, res) => {
 
     res.json({
       success: true,
-      plan: {
-        name: currentPlan.name,
-        max_listings: currentPlan.listings,
-        max_photos_per_pg: currentPlan.photos,
-        max_videos_per_pg: currentPlan.videos,
-        featured_allowed: currentPlan.featured,
-        featured_days: currentPlan.featured_days,
-        current_usage: {
-          total_pgs: pgCount.total,
-          remaining_listings: Math.max(0, currentPlan.listings - pgCount.total)
-        },
-        expiry_date: user?.plan_expiry || null,
-        is_expired: user?.plan_expiry && new Date(user.plan_expiry) < new Date()
-      }
+      name: currentPlan.name,
+      max_listings: currentPlan.listings,
+      max_photos_per_pg: currentPlan.photos,
+      max_videos_per_pg: currentPlan.videos,
+      featured_allowed: currentPlan.featured,
+      featured_days: currentPlan.featured_days,
+      current_usage: {
+        total_pgs: pgCount.total,
+        remaining_listings: Math.max(0, currentPlan.listings - pgCount.total)
+      },
+      expiry_date: user?.plan_expiry || null,
+      is_expired: user?.plan_expiry && new Date(user.plan_expiry) < new Date()
     });
 
   } catch (err) {
@@ -1374,7 +1404,6 @@ exports.upgradeUserPlan = async (req, res) => {
       });
     }
 
-    // Calculate expiry date
     const plan_expiry = new Date();
     plan_expiry.setDate(plan_expiry.getDate() + duration_days);
 
