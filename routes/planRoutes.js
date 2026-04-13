@@ -1,8 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const auth = require("../middlewares/authMiddleware");
-const adminAuth = require("../middlewares/adminAuth");
 
+const auth = require("../middlewares/authMiddleware");
 
 const {
   createPlanPayment,
@@ -10,30 +9,14 @@ const {
   getPlanPayments
 } = require("../controllers/planPaymentController");
 
-/* =========================================================
-   💰 PLAN PAYMENT ROUTES
-   BASE → /api/plan
-========================================================= */
+/* ================= PLAN PAYMENT ================= */
 
-/* =========================================================
-   📤 CREATE PAYMENT (QR)
-   POST /api/plan/create
-   (OWNER ONLY)
-========================================================= */
 router.post("/create", auth, createPlanPayment);
 
-/* =========================================================
-   👨‍💼 ADMIN ROUTES
-========================================================= */
+/* ================= ADMIN (TEMP WITHOUT AUTH) ================= */
 
-/* =========================================================
-   📊 GET ALL PLAN PAYMENTS
-========================================================= */
-router.get("/admin", adminAuth, getPlanPayments);
-
-/* =========================================================
-   ✅ VERIFY PAYMENT
-========================================================= */
-router.post("/verify/:orderId", adminAuth, verifyPlanPayment);
+// ⚠️ No adminAuth for now
+router.get("/admin", auth, getPlanPayments);
+router.post("/verify/:orderId", auth, verifyPlanPayment);
 
 module.exports = router;
