@@ -42,7 +42,7 @@ exports.createPlanPayment = async (req, res) => {
     if (existing.length > 0) {
       const old = existing[0];
 
-      const upiLink = `upi://pay?pa=${UPI_ID}&pn=Nepxall&tr=${old.order_id}&am=${old.amount}&cu=INR`;
+     const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent("Nepxall")}&tr=${old.order_id}&tn=${old.order_id}&am=${old.amount}&cu=INR`;
       const qr = await QRCode.toDataURL(upiLink);
 
       return res.json({
@@ -59,7 +59,7 @@ exports.createPlanPayment = async (req, res) => {
     ========================================================= */
     const orderId = `plan_${ownerId}_${Date.now()}`;
 
-    const upiLink = `upi://pay?pa=${UPI_ID}&pn=Nepxall&tr=${orderId}&am=${amount}&cu=INR`;
+   const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent("Nepxall")}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 
