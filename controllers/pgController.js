@@ -1,6 +1,7 @@
 const db = require("../db");
 const path = require("path");
 const fs = require("fs").promises;
+const plans = require("../config/plans"); // ✅ ADDED PLAN IMPORT
 
 /* ================= HELPERS ================= */
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
@@ -40,8 +41,33 @@ const normalizePrices = (pg) => {
   });
 };
 
-const isfirebase_uid= (uid) => {
+const isfirebase_uid = (uid) => {
   return uid && typeof uid === 'string' && uid.length > 20 && /^[a-zA-Z0-9]+$/.test(uid);
+};
+
+// 🔥 HELPER: Get user's current plan with expiry check
+const getUserPlanWithExpiry = async (userId) => {
+  const [[user]] = await db.query(
+    "SELECT plan, plan_expiry FROM users WHERE id = ?",
+    [userId]
+  );
+  
+  if (!user) return "free";
+  
+  let planName = user.plan || "free";
+  
+  // 🔥 EXPIRY CHECK
+  if (user.plan_expiry && new Date(user.plan_expiry) < new Date()) {
+    planName = "free";
+  }
+  
+  return planName;
+};
+
+// 🔥 HELPER: Get user's plan object with expiry check
+const getUserPlanObject = async (userId) => {
+  const planName = await getUserPlanWithExpiry(userId);
+  return plans[planName];
 };
 
 /* ================= GET OR CREATE USER ================= */
@@ -78,29 +104,20 @@ const getOrCreateUserId = async (firebase_uid, userData = {}) => {
 };
 
 const createNewUser = async (firebase_uid, userData) => {
-  // 🔥 FIXED: Default role is "tenant" not "user"
   const newUser = {
     firebase_uid: firebase_uid,
-
-    name:
-      userData.name ||
-      userData.contact_person ||
-      userData.contact_email ||
-      userData.contact_phone ||
-      `User ${Date.now()}`,
-
+    name: userData.name || userData.contact_person || userData.contact_email || userData.contact_phone || `User ${Date.now()}`,
     phone: userData.contact_phone || userData.phone || null,
     email: userData.contact_email || null,
-
-    role: userData.role || "tenant", // ✅ Fixed: default tenant
-
+    role: userData.role || "tenant",
     mobile_verified: 0,
     owner_verification_status: "pending",
+    plan: "free", // ✅ DEFAULT PLAN
+    plan_expiry: null, // 🔥 ADDED PLAN EXPIRY
     created_at: new Date()
   };
 
   const [result] = await db.query("INSERT INTO users SET ?", newUser);
-
   return result.insertId;
 };
 
@@ -120,7 +137,6 @@ exports.updatePGStatus = async (req, res) => {
       });
     }
 
-    // 1️⃣ Update PG status
     const [updateResult] = await db.query(
       "UPDATE pgs SET status = ? WHERE id = ?",
       [status, id]
@@ -130,7 +146,6 @@ exports.updatePGStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "PG not found" });
     }
 
-    // 2️⃣ Get owner ID
     const [ownerRows] = await db.query(
       `SELECT u.id, u.firebase_uid
        FROM pgs p
@@ -144,7 +159,7 @@ exports.updatePGStatus = async (req, res) => {
     }
 
     const ownerId = ownerRows[0].id;
-    const firebase_uid= ownerRows[0].firebase_uid;
+    const firebase_uid = ownerRows[0].firebase_uid;
 
     let title = "";
     let message = "";
@@ -159,11 +174,9 @@ exports.updatePGStatus = async (req, res) => {
       message = "Your PG was rejected. Please review admin feedback.";
       type = "pg_rejected";
     } else {
-      // No notification for other status changes
       return res.json({ success: true, status });
     }
 
-    // 3️⃣ Insert notification
     await db.query(
       `INSERT INTO notifications 
        (user_id, title, message, type, is_read, created_at)
@@ -171,7 +184,7 @@ exports.updatePGStatus = async (req, res) => {
       [ownerId, title, message, type]
     );
     
-    console.log(`✅ Notification sent to owner: ${firebase_uid|| ownerId}`);
+    console.log(`✅ Notification sent to owner: ${firebase_uid || ownerId}`);
     res.json({ success: true, status });
 
   } catch (err) {
@@ -193,10 +206,8 @@ exports.uploadPhotosOnly = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Use Cloudinary path, not local path
     const newPhotos = files.map(f => f.path);
 
-    // 🔥 FIXED: Added owner_id check for security
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
       [id, req.user.id]
@@ -207,9 +218,20 @@ exports.uploadPhotosOnly = async (req, res) => {
     }
 
     const existing = safeParsePhotos(rows[0].photos);
+
+    // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
+    const currentPlan = await getUserPlanObject(req.user.id);
+
+    if (existing.length + newPhotos.length > currentPlan.photos) {
+      return res.status(400).json({
+        success: false,
+        message: `Photo limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.photos} photos. Upgrade to add more.`
+      });
+    }
+    // 🔒 PLAN CHECK END
+
     const updatedPhotos = [...existing, ...newPhotos];
 
-    // Update database
     await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ? AND owner_id = ?",
       [JSON.stringify(updatedPhotos), id, req.user.id]
@@ -236,9 +258,8 @@ exports.addPG = async (req, res) => {
     const b = req.body;
     console.log('Add PG request body:', b);
 
-    // 🔐 OWNER MUST COME FROM JWT
-    const numericOwnerId = req.user.id;   // ✅ MySQL user id
-    const firebase_uid = req.user.firebase_uid;           // ✅ only for notifications
+    const numericOwnerId = req.user.id;
+    const firebase_uid = req.user.firebase_uid;
 
     console.log('Got numeric user ID:', numericOwnerId);
 
@@ -249,7 +270,6 @@ exports.addPG = async (req, res) => {
       });
     }
 
-    // ✅ Phone validation
     if (!/^[0-9]{10,15}$/.test(b.contact_phone)) {
       return res.status(400).json({
         success: false,
@@ -257,7 +277,22 @@ exports.addPG = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Use Cloudinary path, not local path
+    // 🔒 PLAN CHECK WITH EXPIRY - LISTING LIMIT
+    const currentPlan = await getUserPlanObject(numericOwnerId);
+
+    const [[count]] = await db.query(
+      "SELECT COUNT(*) as total FROM pgs WHERE owner_id=? AND is_deleted=0",
+      [numericOwnerId]
+    );
+
+    if (count.total >= currentPlan.listings) {
+      return res.status(400).json({
+        success: false,
+        message: `Listing limit reached. Your ${currentPlan.name} plan allows only ${currentPlan.listings} PG(s). Please upgrade to add more.`
+      });
+    }
+    // 🔒 PLAN CHECK END
+
     const photos = (req.files || []).map(f => f.path);
 
     let rent_amount = 0;
@@ -430,7 +465,6 @@ exports.addPG = async (req, res) => {
 
     const [result] = await db.query("INSERT INTO pgs SET ?", pgData);
 
-    // Send notification
     await db.query(
       `INSERT INTO notifications 
        (user_id, title, message, type, is_read, created_at)
@@ -565,7 +599,6 @@ exports.updatePG = async (req, res) => {
     const b = req.body;
     const files = req.files || [];
 
-    // 🔥 FIXED: Check if PG belongs to this owner
     const [checkRows] = await db.query(
       "SELECT id FROM pgs WHERE id = ? AND owner_id = ? AND is_deleted = 0",
       [id, req.user.id]
@@ -752,9 +785,7 @@ exports.updatePG = async (req, res) => {
       updateData.rent_amount = rent_amount;
     }
 
-    // Handle photo updates if new files are uploaded
     if (files.length > 0) {
-      // ✅ FIXED: Use Cloudinary path
       const newPhotos = files.map(f => f.path);
 
       const [rows] = await db.query(
@@ -767,10 +798,20 @@ exports.updatePG = async (req, res) => {
       }
 
       const existing = safeParsePhotos(rows[0].photos);
+      
+      // 🔒 Check photo limit on update with expiry
+      const currentPlan = await getUserPlanObject(req.user.id);
+      
+      if (existing.length + newPhotos.length > currentPlan.photos) {
+        return res.status(400).json({
+          success: false,
+          message: `Photo limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.photos} photos.`
+        });
+      }
+      
       updateData.photos = JSON.stringify([...existing, ...newPhotos]);
     }
 
-    // 🔥 FIXED: Added owner_id check in WHERE clause
     const [updateResult] = await db.query(
       "UPDATE pgs SET ? WHERE id = ? AND owner_id = ? AND is_deleted = 0",
       [updateData, id, req.user.id]
@@ -800,7 +841,6 @@ exports.getOwnerDashboardPGs = async (req, res) => {
       });
     }
 
-    // 🔥 IMPROVED: Better dashboard query with booking count
     const [rows] = await db.query(
       `
       SELECT 
@@ -848,10 +888,19 @@ exports.getOwnerDashboardPGs = async (req, res) => {
       return pg;
     });
 
+    // Get user's plan info with expiry check
+    const currentPlan = await getUserPlanObject(userId);
+
     res.json({
       success: true,
       data,
-      count: data.length
+      count: data.length,
+      plan: {
+        name: currentPlan.name,
+        max_listings: currentPlan.listings,
+        used_listings: data.length,
+        remaining_listings: Math.max(0, currentPlan.listings - data.length)
+      }
     });
 
   } catch (err) {
@@ -866,7 +915,6 @@ exports.getOwnerDashboardPGs = async (req, res) => {
 /* ================= DELETE PG ================= */
 exports.deletePG = async (req, res) => {
   try {
-    // 🔥 FIXED: Added owner_id check
     const [result] = await db.query(
       "UPDATE pgs SET is_deleted = 1 WHERE id = ? AND owner_id = ?",
       [req.params.id, req.user.id]
@@ -898,7 +946,6 @@ exports.joinPG = async (req, res) => {
 
     const numericUserId = req.user.id;
 
-    // 🔥 FIXED: Prevent duplicate join requests
     await db.query(
       `INSERT INTO pg_users (user_id, pg_id, status)
        SELECT ?, ?, 'PENDING'
@@ -922,7 +969,6 @@ exports.deleteSinglePhoto = async (req, res) => {
     const { id } = req.params;
     const { photo } = req.body;
 
-    // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND owner_id = ?", 
       [id, req.user.id]
@@ -940,9 +986,6 @@ exports.deleteSinglePhoto = async (req, res) => {
       [JSON.stringify(photos), id, req.user.id]
     );
 
-    // ✅ REMOVED: Don't try to delete from local filesystem with Cloudinary
-    // Files are on Cloudinary, not local server
-
     res.json({ success: true, photos });
 
   } catch (err) {
@@ -957,7 +1000,6 @@ exports.updatePhotoOrder = async (req, res) => {
     const { id } = req.params;
     const { photos } = req.body;
 
-    // 🔥 FIXED: Added owner_id check
     const [result] = await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ? AND owner_id = ?",
       [JSON.stringify(photos), id, req.user.id]
@@ -987,10 +1029,8 @@ exports.uploadPGVideos = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Use Cloudinary path
     const newVideos = req.files.map(file => file.path);
 
-    // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT videos FROM pgs WHERE id = ? AND owner_id = ?",
       [id, req.user.id]
@@ -1006,6 +1046,17 @@ exports.uploadPGVideos = async (req, res) => {
     } catch {
       existing = [];
     }
+
+    // 🔒 PLAN CHECK WITH EXPIRY - VIDEO LIMIT
+    const currentPlan = await getUserPlanObject(req.user.id);
+
+    if (existing.length + newVideos.length > currentPlan.videos) {
+      return res.status(400).json({
+        success: false,
+        message: `Video limit exceeded. Your ${currentPlan.name} plan allows only ${currentPlan.videos} video(s). Upgrade to add more.`
+      });
+    }
+    // 🔒 PLAN CHECK END
 
     const updatedVideos = [...existing, ...newVideos];
 
@@ -1113,7 +1164,6 @@ exports.deleteSingleVideo = async (req, res) => {
       return res.status(400).json({ success: false, message: "Video required" });
     }
 
-    // 🔥 FIXED: Added owner_id check
     const [rows] = await db.query(
       "SELECT videos FROM pgs WHERE id = ? AND owner_id = ?", 
       [id, req.user.id]
@@ -1132,8 +1182,6 @@ exports.deleteSingleVideo = async (req, res) => {
 
     const updatedVideos = videos.filter(v => v !== video);
 
-    // ✅ REMOVED: Don't try to delete from local filesystem with Cloudinary
-
     await db.query(
       "UPDATE pgs SET videos = ? WHERE id = ? AND owner_id = ?",
       [JSON.stringify(updatedVideos), id, req.user.id]
@@ -1150,7 +1198,7 @@ exports.deleteSingleVideo = async (req, res) => {
 /* ================= CREATE USER ================= */
 exports.createUser = async (req, res) => {
   try {
-    const { firebase_uid, name, email, phone, role = 'tenant' } = req.body; // 🔥 FIXED: default tenant
+    const { firebase_uid, name, email, phone, role = 'tenant' } = req.body;
 
     if (!firebase_uid || !name) {
       return res.status(400).json({
@@ -1164,9 +1212,11 @@ exports.createUser = async (req, res) => {
       name,
       email: email || null,
       phone: phone || null,
-      role: role || "tenant", // 🔥 FIXED: default tenant
+      role: role || "tenant",
       mobile_verified: 0,
       owner_verification_status: 'pending',
+      plan: "free", // ✅ Default plan
+      plan_expiry: null, // 🔥 ADDED PLAN EXPIRY
       created_at: new Date()
     };
 
@@ -1185,9 +1235,9 @@ exports.createUser = async (req, res) => {
 };
 
 /* ================= GET USER BY FIREBASE UID ================= */
-exports.getUserByfirebase_uid= async (req, res) => {
+exports.getUserByfirebase_uid = async (req, res) => {
   try {
-    const { firebase_uid} = req.params;
+    const { firebase_uid } = req.params;
 
     const [rows] = await db.query(
       'SELECT * FROM users WHERE firebase_uid = ?',
@@ -1201,7 +1251,18 @@ exports.getUserByfirebase_uid= async (req, res) => {
       });
     }
 
-    res.json({ success: true, data: rows[0] });
+    const user = rows[0];
+    
+    // 🔥 Check expiry for the response
+    let planName = user.plan || "free";
+    if (user.plan_expiry && new Date(user.plan_expiry) < new Date()) {
+      planName = "free";
+    }
+    
+    user.active_plan = planName;
+    user.plan = planName; // Override with active plan
+
+    res.json({ success: true, data: user });
 
   } catch (err) {
     console.error("Error fetching user:", err);
@@ -1212,7 +1273,6 @@ exports.getUserByfirebase_uid= async (req, res) => {
 /* ================= CLEAN INVALID NOTIFICATIONS ================= */
 exports.cleanInvalidNotifications = async (req, res) => {
   try {
-    // Delete notifications with numeric user_ids (these are invalid)
     const [result] = await db.query(
       "DELETE FROM notifications WHERE user_id REGEXP '^[0-9]+$'"
     );
@@ -1232,6 +1292,7 @@ exports.cleanInvalidNotifications = async (req, res) => {
   }
 };
 
+/* ================= BECOME OWNER ================= */
 exports.becomeOwner = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1247,6 +1308,96 @@ exports.becomeOwner = async (req, res) => {
     });
 
   } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= GET USER PLAN INFO ================= */
+exports.getUserPlan = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 🔥 Get user with expiry check
+    const [[user]] = await db.query(
+      "SELECT plan, plan_expiry FROM users WHERE id = ?",
+      [userId]
+    );
+
+    let planName = user?.plan || "free";
+    
+    // 🔥 EXPIRY CHECK
+    if (user?.plan_expiry && new Date(user.plan_expiry) < new Date()) {
+      planName = "free";
+    }
+    
+    const currentPlan = plans[planName];
+
+    // Get current usage
+    const [[pgCount]] = await db.query(
+      "SELECT COUNT(*) as total FROM pgs WHERE owner_id = ? AND is_deleted = 0",
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      plan: {
+        name: currentPlan.name,
+        max_listings: currentPlan.listings,
+        max_photos_per_pg: currentPlan.photos,
+        max_videos_per_pg: currentPlan.videos,
+        featured_allowed: currentPlan.featured,
+        featured_days: currentPlan.featured_days,
+        current_usage: {
+          total_pgs: pgCount.total,
+          remaining_listings: Math.max(0, currentPlan.listings - pgCount.total)
+        },
+        expiry_date: user?.plan_expiry || null,
+        is_expired: user?.plan_expiry && new Date(user.plan_expiry) < new Date()
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching user plan:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= UPGRADE PLAN (Admin only) ================= */
+exports.upgradeUserPlan = async (req, res) => {
+  try {
+    const { userId, plan, duration_days = 30 } = req.body;
+
+    if (!plans[plan]) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid plan name. Valid plans: free, basic, pro"
+      });
+    }
+
+    // Calculate expiry date
+    const plan_expiry = new Date();
+    plan_expiry.setDate(plan_expiry.getDate() + duration_days);
+
+    const [result] = await db.query(
+      "UPDATE users SET plan = ?, plan_expiry = ? WHERE id = ?",
+      [plan, plan_expiry, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `User plan upgraded to ${plans[plan].name}`,
+      plan_expiry: plan_expiry
+    });
+
+  } catch (err) {
+    console.error("Error upgrading plan:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
