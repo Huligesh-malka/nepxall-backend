@@ -88,17 +88,19 @@ const getUserPlanObject = async (userId) => {
 function getPublicIdFromUrl(url) {
   try {
     if (!url) return null;
-    
+
     const parts = url.split("/");
-    const fileName = parts.pop(); // pg-photo-123.jpg or video.mp4
     const uploadIndex = parts.indexOf("upload");
-    
+
     if (uploadIndex === -1) return null;
-    
-    const folder = parts.slice(uploadIndex + 1).join("/");
-    const publicId = `${folder}/${fileName.split(".")[0]}`;
-    
-    return publicId;
+
+    // ✅ SKIP "upload" + version (v123...)
+    const pathParts = parts.slice(uploadIndex + 2);
+
+    const fileName = pathParts.pop(); // pg-photo.jpg
+    const folderPath = pathParts.join("/"); // pg-photos
+
+    return `${folderPath}/${fileName.split(".")[0]}`;
   } catch (error) {
     console.error("Error extracting public_id:", error);
     return null;
