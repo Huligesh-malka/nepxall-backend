@@ -230,7 +230,13 @@ exports.uploadPhotosOnly = async (req, res) => {
     }
 
     // ✅ FIXED: Using safeParsePhotos instead of direct JSON.parse
-    let existing = safeParsePhotos(rows[0].photos);
+    let existing = [];
+
+try {
+  existing = JSON.parse(rows[0].photos || "[]");
+} catch {
+  existing = [];
+}
 
     // 🔒 PLAN CHECK WITH EXPIRY - PHOTO LIMIT
     const currentPlan = await getUserPlanObject(req.user.id);
