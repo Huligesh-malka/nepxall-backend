@@ -43,16 +43,27 @@ exports.createPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ 🚫 BLOCK if pending payment exists
+    // ✅ 🔁 REUSE pending payment (IMPORTANT FIX)
     const [existing] = await db.query(
       "SELECT * FROM plan_payments WHERE owner_id=? AND status='pending'",
       [ownerId]
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "You already have a pending payment"
+      const old = existing[0];
+
+      const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(
+        "Nepxall"
+      )}&tr=${old.order_id}&tn=${old.order_id}&am=${old.amount}&cu=INR`;
+
+      const qr = await QRCode.toDataURL(upiLink);
+
+      return res.json({
+        success: true,
+        message: "Pending payment reused",
+        orderId: old.order_id,
+        qr,
+        amount: old.amount
       });
     }
 
@@ -83,6 +94,7 @@ exports.createPlanPayment = async (req, res) => {
       qr,
       amount
     });
+
   } catch (err) {
     console.error("Create Plan Payment Error:", err);
     res.status(500).json({
@@ -119,13 +131,13 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ 🔥 EXPIRE OLD PLANS
+    // ✅ 🔥 EXPIRE OLD PAID PLANS
     await db.query(
       "UPDATE plan_payments SET status='expired' WHERE owner_id=? AND status='paid'",
       [data.owner_id]
     );
 
-    // ✅ MARK NEW AS PAID
+    // ✅ MARK CURRENT AS PAID
     await db.query(
       "UPDATE plan_payments SET status='paid', verified_by_admin=1 WHERE order_id=?",
       [orderId]
@@ -136,7 +148,7 @@ exports.verifyPlanPayment = async (req, res) => {
       Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
 
-    // ✅ UPDATE USER PLAN (MAIN SOURCE)
+    // ✅ UPDATE USERS TABLE (MAIN SOURCE)
     await db.query(
       "UPDATE users SET plan=?, plan_expiry=? WHERE id=?",
       [data.plan, expiry, data.owner_id]
@@ -147,6 +159,7 @@ exports.verifyPlanPayment = async (req, res) => {
       message: `Plan '${data.plan}' activated successfully 🚀`,
       expiry
     });
+
   } catch (err) {
     console.error("Verify Plan Payment Error:", err);
     res.status(500).json({
@@ -173,6 +186,7 @@ exports.getPlanPayments = async (req, res) => {
       success: true,
       data: rows
     });
+
   } catch (err) {
     console.error("Get Plan Payments Error:", err);
     res.status(500).json({
