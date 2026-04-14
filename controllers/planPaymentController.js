@@ -183,14 +183,17 @@ exports.verifyPlanPayment = async (req, res) => {
     });
   }
 };
-/* =========================================================
-   📊 GET ALL PLAN PAYMENTS (ADMIN)
-========================================================= */
+
 
 exports.getPlanPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT p.*, u.name, u.phone
+      SELECT 
+        p.*, 
+        u.name, 
+        u.phone, 
+        u.plan, 
+        u.plan_expiry
       FROM plan_payments p
       LEFT JOIN users u ON u.id = p.owner_id
       ORDER BY p.created_at DESC
