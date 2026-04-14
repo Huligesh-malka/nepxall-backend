@@ -112,6 +112,7 @@ exports.verifyPlanPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
 
+    // ✅ Get payment
     const [[data]] = await db.query(
       "SELECT * FROM plan_payments WHERE order_id=?",
       [orderId]
@@ -124,6 +125,7 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
+    // ✅ Already approved
     if (data.status === "paid") {
       return res.status(400).json({
         success: false,
@@ -131,24 +133,37 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ 🔥 EXPIRE OLD PAID PLANS
+    // 🔥 NEW FIX: CHECK IF USER ALREADY HAS ACTIVE PLAN
+    const [[user]] = await db.query(
+      "SELECT plan, plan_expiry FROM users WHERE id=?",
+      [data.owner_id]
+    );
+
+    if (user?.plan_expiry && new Date(user.plan_expiry) > new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "User already has an active plan 🚫"
+      });
+    }
+
+    // ✅ OPTIONAL: Expire old paid records (keep DB clean)
     await db.query(
       "UPDATE plan_payments SET status='expired' WHERE owner_id=? AND status='paid'",
       [data.owner_id]
     );
 
-    // ✅ MARK CURRENT AS PAID
+    // ✅ Mark current payment as paid
     await db.query(
       "UPDATE plan_payments SET status='paid', verified_by_admin=1 WHERE order_id=?",
       [orderId]
     );
 
-    // ✅ PLAN EXPIRY (30 DAYS)
+    // ✅ Set new expiry (30 days)
     const expiry = new Date(
       Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
 
-    // ✅ UPDATE USERS TABLE (MAIN SOURCE)
+    // ✅ Update user plan
     await db.query(
       "UPDATE users SET plan=?, plan_expiry=? WHERE id=?",
       [data.plan, expiry, data.owner_id]
@@ -168,7 +183,6 @@ exports.verifyPlanPayment = async (req, res) => {
     });
   }
 };
-
 /* =========================================================
    📊 GET ALL PLAN PAYMENTS (ADMIN)
 ========================================================= */
