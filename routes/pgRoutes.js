@@ -5,6 +5,7 @@ const router = express.Router();
 const controller = require("../controllers/pgController");
 const auth = require("../middlewares/authMiddleware");
 const db = require("../db");
+const { checkPlan } = require("../middlewares/checkPlan");
 
 const { uploadPhotos, uploadVideos } = require("../middlewares/upload");
 
@@ -34,7 +35,7 @@ router.put("/:id", auth, uploadPhotos.array("photos", 10), controller.updatePG);
    ✅ UPLOAD PHOTOS (USED BY FRONTEND)
    POST /api/pg/:id/upload-photos
 ================================================= */
-router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async (req, res) => {
+router.post("/:id/upload-photos", auth, checkPlan, uploadPhotos.array("photos", 10), async (req, res) => {
   try {
     const newPhotos = req.files.map((file) => file.path);
 
@@ -44,6 +45,14 @@ router.post("/:id/upload-photos", auth, uploadPhotos.array("photos", 10), async 
     );
 
     const existingPhotos = parseJSON(rows[0]?.photos);
+    const plan = req.plan;
+
+if (existingPhotos.length + newPhotos.length > plan.photos) {
+  return res.status(400).json({
+    success: false,
+    message: `❌ Your ${req.planName} plan allows only ${plan.photos} photos`
+  });
+}
 
     const updatedPhotos = [...existingPhotos, ...newPhotos];
 
@@ -76,7 +85,7 @@ router.delete("/:id/photo", auth, controller.deleteSinglePhoto);
 /* =================================================
    VIDEOS
 ================================================= */
-router.post("/:id/videos", auth, uploadVideos.array("videos", 5), async (req, res) => {
+router.post("/:id/videos", auth, checkPlan, uploadVideos.array("videos", 5), async (req, res) => {
   try {
     const newVideos = req.files.map((file) => file.path);
 
@@ -86,6 +95,14 @@ router.post("/:id/videos", auth, uploadVideos.array("videos", 5), async (req, re
     );
 
     const existingVideos = parseJSON(rows[0]?.videos);
+    const plan = req.plan;
+
+if (existingVideos.length + newVideos.length > plan.videos) {
+  return res.status(400).json({
+    success: false,
+    message: `❌ Your ${req.planName} plan allows only ${plan.videos} videos`
+  });
+}
 
     const updatedVideos = [...existingVideos, ...newVideos];
 
