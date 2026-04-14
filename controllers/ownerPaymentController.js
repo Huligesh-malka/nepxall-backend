@@ -120,7 +120,10 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-/* ================= OTHER UTILITIES ================= */
+
+
+
+
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -140,8 +143,19 @@ exports.getOwnerPayments = async (req, res) => {
         /* ✅ PAYMENT */
         p.order_id,
 
-        /* 🔥 ADD THIS (VERY IMPORTANT) */
-        pg.pg_name
+        /* 🔥 PG NAME */
+        pg.pg_name,
+
+        /* ✅ JOIN STATUS (ONLY ADD THIS) */
+        CASE 
+  WHEN EXISTS (
+    SELECT 1 
+    FROM pg_checkins pc 
+    WHERE pc.booking_id = b.id
+       OR (pc.user_id = b.user_id AND pc.pg_id = b.pg_id)
+  ) THEN 'JOINED'
+  ELSE 'NOT_JOINED'
+END AS join_status
 
       FROM bookings b
 
@@ -153,7 +167,7 @@ exports.getOwnerPayments = async (req, res) => {
       LEFT JOIN agreements_form af 
         ON b.id = af.booking_id
 
-      /* 🔥 PG JOIN (FIX FOR UNKNOWN PG) */
+      /* PG JOIN */
       LEFT JOIN pgs pg 
         ON pg.id = b.pg_id
 
