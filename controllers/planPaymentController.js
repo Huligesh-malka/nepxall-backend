@@ -103,11 +103,6 @@ exports.createPlanPayment = async (req, res) => {
     });
   }
 };
-
-/* =========================================================
-   👨‍💼 VERIFY PLAN PAYMENT (ADMIN)
-========================================================= */
-
 exports.verifyPlanPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -131,27 +126,27 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ 🔥 EXPIRE OLD PAID PLANS
-    await db.query(
-      "UPDATE plan_payments SET status='expired' WHERE owner_id=? AND status='paid'",
-      [data.owner_id]
-    );
-
-    // ✅ MARK CURRENT AS PAID
+    // ✅ MARK THIS PAYMENT AS PAID
     await db.query(
       "UPDATE plan_payments SET status='paid', verified_by_admin=1 WHERE order_id=?",
       [orderId]
     );
 
-    // ✅ PLAN EXPIRY (30 DAYS)
+    // ✅ EXPIRE OLD USER PLAN (NOT payments table)
     const expiry = new Date(
       Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
 
-    // ✅ UPDATE USERS TABLE (MAIN SOURCE)
+    // ✅ UPDATE USER PLAN (MAIN SOURCE)
     await db.query(
       "UPDATE users SET plan=?, plan_expiry=? WHERE id=?",
       [data.plan, expiry, data.owner_id]
+    );
+
+    // ✅ OPTIONAL: mark other payments as expired AFTER activation
+    await db.query(
+      "UPDATE plan_payments SET status='expired' WHERE owner_id=? AND order_id!=? AND status='paid'",
+      [data.owner_id, orderId]
     );
 
     res.json({
@@ -168,7 +163,6 @@ exports.verifyPlanPayment = async (req, res) => {
     });
   }
 };
-
 /* =========================================================
    📊 GET ALL PLAN PAYMENTS (ADMIN)
 ========================================================= */
