@@ -2,13 +2,13 @@ const db = require("../db");
 const QRCode = require("qrcode");
 
 /* =========================================================
-   ⚙️ CONFIG
+   ⚙️ CONFIG (PRODUCTION)
 ========================================================= */
-const isTestMode = true; // 🔥 change to false in production
 
-const planPrices = isTestMode
-  ? { basic: 1, pro: 1 }
-  : { basic: 199, pro: 599 };
+const planPrices = {
+  basic: 199,
+  pro: 599
+};
 
 const PLAN_DURATION_DAYS = 30;
 const UPI_ID = "huligeshmalka-1@oksbi";
@@ -16,6 +16,7 @@ const UPI_ID = "huligeshmalka-1@oksbi";
 /* =========================================================
    💰 CREATE PLAN PAYMENT (QR)
 ========================================================= */
+
 exports.createPlanPayment = async (req, res) => {
   try {
     const { plan } = req.body;
@@ -29,37 +30,43 @@ exports.createPlanPayment = async (req, res) => {
       });
     }
 
-    const amount = planPrices[plan];
+    // ✅ 🚫 BLOCK if already active plan
+    const [[user]] = await db.query(
+      "SELECT plan_expiry FROM users WHERE id=?",
+      [ownerId]
+    );
 
-    /* =========================================================
-       🔁 CHECK EXISTING PENDING PAYMENT (REUSE QR)
-    ========================================================= */
+    if (user?.plan_expiry && new Date(user.plan_expiry) > new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have an active plan"
+      });
+    }
+
+    // ✅ 🚫 BLOCK if pending payment exists
     const [existing] = await db.query(
       "SELECT * FROM plan_payments WHERE owner_id=? AND status='pending'",
       [ownerId]
     );
 
     if (existing.length > 0) {
-      const old = existing[0];
-
-     const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent("Nepxall")}&tr=${old.order_id}&tn=${old.order_id}&am=${old.amount}&cu=INR`;
-      const qr = await QRCode.toDataURL(upiLink);
-
-      return res.json({
-        success: true,
-        message: "Existing payment reused",
-        orderId: old.order_id,
-        qr,
-        amount: old.amount
+      return res.status(400).json({
+        success: false,
+        message: "You already have a pending payment"
       });
     }
+
+    const amount = planPrices[plan];
 
     /* =========================================================
        🆕 CREATE NEW PAYMENT
     ========================================================= */
+
     const orderId = `plan_${ownerId}_${Date.now()}`;
 
-   const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent("Nepxall")}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+    const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(
+      "Nepxall"
+    )}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
 
     const qr = await QRCode.toDataURL(upiLink);
 
@@ -76,7 +83,6 @@ exports.createPlanPayment = async (req, res) => {
       qr,
       amount
     });
-
   } catch (err) {
     console.error("Create Plan Payment Error:", err);
     res.status(500).json({
@@ -86,10 +92,10 @@ exports.createPlanPayment = async (req, res) => {
   }
 };
 
-
 /* =========================================================
    👨‍💼 VERIFY PLAN PAYMENT (ADMIN)
 ========================================================= */
+
 exports.verifyPlanPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -113,18 +119,24 @@ exports.verifyPlanPayment = async (req, res) => {
       });
     }
 
-    // ✅ Mark as paid
+    // ✅ 🔥 EXPIRE OLD PLANS
+    await db.query(
+      "UPDATE plan_payments SET status='expired' WHERE owner_id=? AND status='paid'",
+      [data.owner_id]
+    );
+
+    // ✅ MARK NEW AS PAID
     await db.query(
       "UPDATE plan_payments SET status='paid', verified_by_admin=1 WHERE order_id=?",
       [orderId]
     );
 
-    // ✅ Plan expiry
+    // ✅ PLAN EXPIRY (30 DAYS)
     const expiry = new Date(
       Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
 
-    // ✅ Activate plan
+    // ✅ UPDATE USER PLAN (MAIN SOURCE)
     await db.query(
       "UPDATE users SET plan=?, plan_expiry=? WHERE id=?",
       [data.plan, expiry, data.owner_id]
@@ -135,7 +147,6 @@ exports.verifyPlanPayment = async (req, res) => {
       message: `Plan '${data.plan}' activated successfully 🚀`,
       expiry
     });
-
   } catch (err) {
     console.error("Verify Plan Payment Error:", err);
     res.status(500).json({
@@ -145,10 +156,10 @@ exports.verifyPlanPayment = async (req, res) => {
   }
 };
 
-
 /* =========================================================
    📊 GET ALL PLAN PAYMENTS (ADMIN)
 ========================================================= */
+
 exports.getPlanPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -162,7 +173,6 @@ exports.getPlanPayments = async (req, res) => {
       success: true,
       data: rows
     });
-
   } catch (err) {
     console.error("Get Plan Payments Error:", err);
     res.status(500).json({
