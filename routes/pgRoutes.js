@@ -5,7 +5,7 @@ const router = express.Router();
 const controller = require("../controllers/pgController");
 const auth = require("../middlewares/authMiddleware");
 const db = require("../db");
-const { checkPlan } = require("../middlewares/checkPlan");
+const { checkPlan } = require("../middlewares/planMiddleware");
 
 const { uploadPhotos, uploadVideos } = require("../middlewares/upload");
 
