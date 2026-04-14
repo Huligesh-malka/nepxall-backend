@@ -148,14 +148,13 @@ exports.getOwnerPayments = async (req, res) => {
 
         /* ✅ JOIN STATUS (ONLY ADD THIS) */
         CASE 
-  WHEN EXISTS (
-    SELECT 1 
-    FROM pg_checkins pc 
-    WHERE pc.booking_id = b.id
-       OR (pc.user_id = b.user_id AND pc.pg_id = b.pg_id)
-  ) THEN 'JOINED'
-  ELSE 'NOT_JOINED'
-END AS join_status
+          WHEN EXISTS (
+            SELECT 1 
+            FROM pg_checkins pc 
+            WHERE pc.booking_id = b.id
+          ) THEN 'JOINED'
+          ELSE 'NOT_JOINED'
+        END AS join_status
 
       FROM bookings b
 
