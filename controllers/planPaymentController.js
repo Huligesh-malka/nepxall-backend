@@ -44,10 +44,10 @@ exports.createPlanPayment = async (req, res) => {
     }
 
     // ✅ 🔁 REUSE pending payment (IMPORTANT FIX)
-    const [existing] = await db.query(
-      "SELECT * FROM plan_payments WHERE owner_id=? AND status='pending'",
-      [ownerId]
-    );
+   const [existing] = await db.query(
+  "SELECT * FROM plan_payments WHERE owner_id=? AND plan=? AND status='pending'",
+  [ownerId, plan]
+);
 
     if (existing.length > 0) {
       const old = existing[0];
