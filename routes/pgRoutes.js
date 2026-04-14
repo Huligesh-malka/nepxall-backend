@@ -179,4 +179,38 @@ router.use((err, req, res, next) => {
   next(err);
 });
 
+
+
+
+router.get("/plan", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [[user]] = await db.query(
+      "SELECT plan, plan_expiry FROM users WHERE id=?",
+      [userId]
+    );
+
+    let planName = user.plan || "free";
+
+    if (user.plan_expiry && new Date(user.plan_expiry) < new Date()) {
+      planName = "free";
+    }
+
+    const plan = plans[planName];
+
+    res.json({
+      success: true,
+      name: planName,
+      max_photos_per_pg: plan.photos,
+      max_videos_per_pg: plan.videos,
+      max_listings: plan.listings,
+      expiry_date: user.plan_expiry
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
