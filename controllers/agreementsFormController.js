@@ -282,3 +282,35 @@ exports.deleteAgreement = async (req, res) => {
     res.status(500).json({ success: false, message: "Delete failed" });
   }
 };
+
+
+
+
+
+
+exports.getUserAgreements = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [rows] = await db.query(`
+      SELECT 
+        af.booking_id,
+        af.signed_pdf,
+        af.agreement_status,
+        af.created_at,
+        p.name AS pg_name
+      FROM agreements_form af
+      JOIN bookings b ON af.booking_id = b.id
+      JOIN pgs p ON b.pg_id = p.id
+      WHERE af.user_id = ?
+      AND af.agreement_status = 'completed'
+      ORDER BY af.created_at DESC
+    `, [userId]);
+
+    res.json({ success: true, data: rows });
+
+  } catch (err) {
+    console.error("Get Agreements Error:", err);
+    res.status(500).json({ success: false });
+  }
+};

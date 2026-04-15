@@ -1,17 +1,27 @@
 const express = require("express");
 const router = express.Router();
+
 const agreementsFormController = require("../controllers/agreementsFormController");
 const uploadAgreement = require("../middlewares/agreementUpload");
 
-/* ================= USER/TENANT ROUTES ================= */
+// ✅ IMPORT AUTH MIDDLEWARE
+const authMiddleware = require("../middlewares/authMiddleware");
 
-// 1. Get status (Now includes registered phone from users table)
-router.get("/status/:bookingId", agreementsFormController.getAgreementByBookingId);
+/* ================= USER / TENANT ROUTES ================= */
 
-// 2. CRITICAL: Verifies the input mobile matches the 'users' table before OTP
-router.post("/tenant/verify", agreementsFormController.verifyTenantForBooking);
+// 1. Get agreement status
+router.get(
+  "/status/:bookingId",
+  agreementsFormController.getAgreementByBookingId
+);
 
-// 3. Form Submission
+// 2. Verify tenant mobile before OTP
+router.post(
+  "/tenant/verify",
+  agreementsFormController.verifyTenantForBooking
+);
+
+// 3. Submit agreement form
 router.post(
   "/submit",
   uploadAgreement.fields([
@@ -23,28 +33,64 @@ router.post(
   async (req, res) => {
     try {
       const result = await agreementsFormController.submitAgreementForm(req);
-      res.status(200).json({ success: true, message: "Form Submitted Successfully", data: result });
+      res.status(200).json({
+        success: true,
+        message: "Form Submitted Successfully",
+        data: result
+      });
     } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
     }
   }
 );
 
-/* ================= SIGNING FLOW ================= */
+// 4. Tenant Final Signing
+router.post(
+  "/tenant/sign",
+  agreementsFormController.tenantFinalSign
+);
 
-// Final signing (Validates against users.phone before applying stamp)
-router.post("/tenant/sign", agreementsFormController.tenantFinalSign);
+// ✅ NEW: GET USER AGREEMENTS (FINAL SIGNED ONLY)
+router.get(
+  "/user/agreements",
+  authMiddleware,
+  agreementsFormController.getUserAgreements
+);
 
 /* ================= ADMIN ROUTES ================= */
 
-router.get("/admin/all", agreementsFormController.getAllAgreements);
-router.get("/admin/:id", agreementsFormController.getAgreementById);
-router.put("/admin/:id/status", agreementsFormController.updateAgreementStatus);
+// Get all agreements
+router.get(
+  "/admin/all",
+  agreementsFormController.getAllAgreements
+);
+
+// Get single agreement
+router.get(
+  "/admin/:id",
+  agreementsFormController.getAgreementById
+);
+
+// Update status
 router.put(
-  "/admin/:id/upload-image", 
-  uploadAgreement.single("final_image"), 
+  "/admin/:id/status",
+  agreementsFormController.updateAgreementStatus
+);
+
+// Upload final image
+router.put(
+  "/admin/:id/upload-image",
+  uploadAgreement.single("final_image"),
   agreementsFormController.uploadFinalImage
 );
-router.delete("/admin/:id", agreementsFormController.deleteAgreement);
+
+// Delete agreement
+router.delete(
+  "/admin/:id",
+  agreementsFormController.deleteAgreement
+);
 
 module.exports = router;
