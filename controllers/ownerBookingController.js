@@ -16,9 +16,8 @@ const getOwner = async (firebase_uid) => {
 
   return rows[0] || null;
 };
-
 /* ======================================================
-   📥 OWNER → GET BOOKINGS
+   📥 OWNER → GET ALL BOOKINGS (PERMANENT DATA)
 ====================================================== */
 exports.getOwnerBookings = async (req, res) => {
   try {
@@ -39,7 +38,7 @@ exports.getOwnerBookings = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 📥 STEP 2: FETCH BOOKINGS (ONLY VALID ONES)
+    // 📥 STEP 2: FETCH ALL BOOKINGS (NO FILTER)
     //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `
@@ -64,30 +63,23 @@ exports.getOwnerBookings = async (req, res) => {
           END AS tenant_phone
 
       FROM bookings b
-
-      /* ✅ ONLY LATEST BOOKING PER USER */
-      JOIN (
-          SELECT MAX(id) id
-          FROM bookings
-          WHERE owner_id = ?
-          GROUP BY pg_id, user_id
-      ) latest ON latest.id = b.id
-
       JOIN pgs p ON p.id = b.pg_id
 
-      /* 🔥 FILTER EXPIRED + OLD PENDING */
       WHERE b.owner_id = ?
-      AND (
-        b.status != 'pending'
-        OR b.created_at >= NOW() - INTERVAL 24 HOUR
-      )
 
       ORDER BY b.created_at DESC
       `,
-      [owner.id, owner.id]
+      [owner.id]
     );
 
-    res.json(rows);
+    //////////////////////////////////////////////////////
+    // ✅ RESPONSE
+    //////////////////////////////////////////////////////
+    res.json({
+      success: true,
+      count: rows.length,
+      data: rows
+    });
 
   } catch (err) {
     console.error("❌ GET OWNER BOOKINGS:", err);
