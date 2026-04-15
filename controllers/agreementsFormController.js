@@ -3,6 +3,9 @@ const db = require("../db");
 // ❌ REMOVED: const sharp = require("sharp");
 const cloudinary = require("cloudinary").v2;
 
+const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+const axios = require("axios");
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -51,52 +54,134 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 };
 
-/* ================= TENANT FINAL SIGNING (SIMPLIFIED - NO PDF EDIT) ================= */
+
+
+
+
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
 
-    // Capture IP Address (checks for proxy headers first, then remote address)
-    const ip_address = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
-    
-    // Capture Device Info (User Agent)
-    const device_info = req.headers['user-agent'] || "Unknown Device";
-    
-    // Fetch to verify the agreement exists and mobile matches
+    // IP + device
+    const ip_address = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const device_info = req.headers['user-agent'];
+
+    // 1. Get signed PDF (owner already signed)
     const [rows] = await db.query(
       `SELECT af.signed_pdf, u.phone 
        FROM agreements_form af
        JOIN users u ON af.user_id = u.id
-       WHERE af.booking_id = ?`, 
+       WHERE af.booking_id = ?`,
       [booking_id]
     );
-    
+
     const data = rows[0];
 
-    if (!data?.signed_pdf) return res.status(400).json({ message: "Owner has not signed yet" });
-    
-    const dbPhone = data.phone.replace(/\D/g, '');
-    const inputMobile = tenant_mobile.replace(/\D/g, '');
-    
-    if (!dbPhone.endsWith(inputMobile)) {
-        return res.status(403).json({ message: "Mobile number mismatch with registered profile." });
+    if (!data?.signed_pdf) {
+      return res.status(400).json({ message: "Owner has not signed yet" });
     }
 
-    // ✅ Just save signature directly (NO sharp, NO PDF edit)
+    // mobile verify
+    const dbPhone = data.phone.replace(/\D/g, '');
+    const inputMobile = tenant_mobile.replace(/\D/g, '');
+
+    if (!dbPhone.endsWith(inputMobile)) {
+      return res.status(403).json({ message: "Mobile mismatch" });
+    }
+
+    // 2. Download existing signed PDF
+    const pdfBytes = await axios.get(data.signed_pdf, {
+      responseType: "arraybuffer"
+    });
+
+    // 3. Load PDF
+    const pdfDoc = await PDFDocument.load(pdfBytes.data);
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1];
+
+    const { width } = page.getSize();
+
+    // 4. Signature image
+    const base64Data = tenant_signature.replace(/^data:image\/\w+;base64,/, "");
+    const sigBuffer = Buffer.from(base64Data, "base64");
+
+    const pngImage = await pdfDoc.embedPng(sigBuffer);
+
+    // 5. Font
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+    // 6. Draw tenant signature BELOW owner
+    page.drawImage(pngImage, {
+      x: width - 220,
+      y: 10,
+      width: 150,
+      height: 50,
+    });
+
+    page.drawText("Digitally Signed by Tenant", {
+      x: width - 220,
+      y: 70,
+      size: 10,
+      font,
+    });
+
+    page.drawText(`Mobile: ${tenant_mobile}`, {
+      x: width - 220,
+      y: 55,
+      size: 9,
+      font,
+    });
+
+    page.drawText(`Date: ${date}`, {
+      x: width - 220,
+      y: 40,
+      size: 9,
+      font,
+    });
+
+    page.drawText("Auth: OTP Verified", {
+      x: width - 220,
+      y: 25,
+      size: 9,
+      font,
+    });
+
+    // 7. Save PDF
+    const finalPdfBytes = await pdfDoc.save();
+
+    // 8. Upload final PDF (owner + tenant)
+    const upload = await cloudinary.uploader.upload(
+      `data:application/pdf;base64,${Buffer.from(finalPdfBytes).toString("base64")}`,
+      {
+        resource_type: "raw",
+        folder: "signed_agreements",
+        format: "pdf"
+      }
+    );
+
+    // 9. Update DB
     await db.query(
       `UPDATE agreements_form 
-       SET agreement_status = 'completed', 
+       SET agreement_status = 'completed',
            tenant_final_signature = ?, 
            tenant_mobile = ?,
            tenant_ip_address = ?,
-           tenant_device_info = ?
-       WHERE booking_id = ?`, 
-      [tenant_signature, tenant_mobile, ip_address, device_info, booking_id]
+           tenant_device_info = ?,
+           signed_pdf = ?
+       WHERE booking_id = ?`,
+      [tenant_signature, tenant_mobile, ip_address, device_info, upload.secure_url, booking_id]
     );
 
-    res.json({ success: true, message: "Signature saved successfully" });
+    res.json({
+      success: true,
+      message: "Tenant signed successfully",
+      signed_pdf: upload.secure_url
+    });
+
   } catch (err) {
-    console.error("🔥 Tenant Signing Error:", err);
+    console.error("🔥 Tenant PDF SIGN ERROR:", err);
     res.status(500).json({ success: false, message: "Tenant signing failed" });
   }
 };
