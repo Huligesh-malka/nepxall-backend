@@ -353,6 +353,8 @@ function maskUPI(upi) {
   return parts[0].slice(0, 2) + "***@" + parts[1];
 }
 
+
+
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -402,7 +404,7 @@ exports.getVacateRequests = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔐 DECRYPT + SMART MASKING
+    // 🔐 DECRYPT + FINAL SECURE MASK LOGIC
     //////////////////////////////////////////////////////
     rows.forEach(r => {
       let acc = null;
@@ -420,17 +422,27 @@ exports.getVacateRequests = async (req, res) => {
       }
 
       //////////////////////////////////////////////////////
-      // 🎯 FINAL LOGIC
+      // 🎯 FINAL LOGIC (FIXED)
       //////////////////////////////////////////////////////
 
-      // ✅ ONLY when owner approved → show FULL
-      if (r.refund_status === "approved") {
+      // ✅ SHOW FULL ONLY when BOTH conditions true
+      if (
+        r.refund_status === "approved" &&
+        r.user_approval === "accepted"
+      ) {
         r.account_number = acc;
         r.ifsc_code = ifsc;
         r.upi_id = upi;
       }
 
-      // 🔒 ALL OTHER STATES → MASKED (including completed)
+      // 🔒 AFTER PAYMENT → ALWAYS MASK
+      else if (r.refund_status === "completed") {
+        r.account_number = maskAccount(acc);
+        r.ifsc_code = maskIFSC(ifsc);
+        r.upi_id = maskUPI(upi);
+      }
+
+      // 🔒 DEFAULT → MASK
       else {
         r.account_number = maskAccount(acc);
         r.ifsc_code = maskIFSC(ifsc);
