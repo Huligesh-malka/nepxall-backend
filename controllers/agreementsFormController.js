@@ -111,43 +111,46 @@ exports.tenantFinalSign = async (req, res) => {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
     const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+// LEFT SIDE POSITION
+const leftX = 50;   // 👈 LEFT margin
+const baseY = 10;   // bottom position
 
-    // 6. Draw tenant signature BELOW owner
-    page.drawImage(pngImage, {
-      x: width - 220,
-      y: 10,
-      width: 150,
-      height: 50,
-    });
+// Signature
+page.drawImage(pngImage, {
+  x: leftX,
+  y: baseY,
+  width: 150,
+  height: 50,
+});
 
-    page.drawText("Digitally Signed by Tenant", {
-      x: width - 220,
-      y: 70,
-      size: 10,
-      font,
-    });
+// Text block
+page.drawText("Digitally Signed by Tenant", {
+  x: leftX,
+  y: baseY + 60,
+  size: 10,
+  font,
+});
 
-    page.drawText(`Mobile: ${tenant_mobile}`, {
-      x: width - 220,
-      y: 55,
-      size: 9,
-      font,
-    });
+page.drawText(`Mobile: ${tenant_mobile}`, {
+  x: leftX,
+  y: baseY + 45,
+  size: 9,
+  font,
+});
 
-    page.drawText(`Date: ${date}`, {
-      x: width - 220,
-      y: 40,
-      size: 9,
-      font,
-    });
+page.drawText(`Date: ${date}`, {
+  x: leftX,
+  y: baseY + 30,
+  size: 9,
+  font,
+});
 
-    page.drawText("Auth: OTP Verified", {
-      x: width - 220,
-      y: 25,
-      size: 9,
-      font,
-    });
-
+page.drawText("Auth: OTP Verified", {
+  x: leftX,
+  y: baseY + 15,
+  size: 9,
+  font,
+});
     // 7. Save PDF
     const finalPdfBytes = await pdfDoc.save();
 
