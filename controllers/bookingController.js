@@ -795,6 +795,7 @@ exports.requestVacate = async (req, res) => {
 
 
 
+
 exports.acceptRefund = async (req, res) => {
   try {
     const { bookingId } = req.body;
@@ -817,9 +818,10 @@ exports.acceptRefund = async (req, res) => {
       });
     }
 
+    // ✅ FIXED (DO NOT CHANGE STATUS)
     await db.query(
       `UPDATE refunds 
-       SET user_approval='accepted', status='pending'
+       SET user_approval='accepted'
        WHERE id=?`,
       [refund.id]
     );
