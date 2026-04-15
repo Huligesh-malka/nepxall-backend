@@ -485,8 +485,6 @@ exports.rejectVacateRequest = async (req, res) => {
   }
 };
 
-
-
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -551,12 +549,11 @@ exports.markRefundPaid = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE REFUND
+    // 💰 UPDATE REFUND (FIXED)
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE refunds 
-       SET status='completed',
-           updated_at = NOW()
+       SET status='completed'
        WHERE id=?`,
       [id]
     );
@@ -588,12 +585,12 @@ exports.markRefundPaid = async (req, res) => {
     await connection.commit();
 
     //////////////////////////////////////////////////////
-    // 🔥 IMPORTANT RESPONSE (FRONTEND FIX)
+    // 🔥 RESPONSE (IMPORTANT FOR FRONTEND)
     //////////////////////////////////////////////////////
     res.json({
       success: true,
       message: "Refund completed successfully",
-      status: "completed",   // ✅ VERY IMPORTANT
+      status: "completed",
       booking_id: bookingId
     });
 
@@ -611,7 +608,6 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
-
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
     const ownerId = req.user.id;
