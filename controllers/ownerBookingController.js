@@ -24,12 +24,12 @@ exports.getOwnerBookings = async (req, res) => {
     const owner = await getOwner(req.user.firebase_uid);
 
     if (!owner) {
-      return res.status(403).json({ message: "Not an owner" });
+      return res.status(403).json({
+        success: false,
+        message: "Not an owner"
+      });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔥 STEP 1: AUTO EXPIRE OLD BOOKINGS (24 HOURS)
-    //////////////////////////////////////////////////////
     await db.query(`
       UPDATE bookings
       SET status = 'expired'
@@ -37,9 +37,6 @@ exports.getOwnerBookings = async (req, res) => {
       AND created_at < NOW() - INTERVAL 24 HOUR
     `);
 
-    //////////////////////////////////////////////////////
-    // 📥 STEP 2: FETCH ALL BOOKINGS (NO FILTER)
-    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `
       SELECT 
@@ -50,12 +47,16 @@ exports.getOwnerBookings = async (req, res) => {
           b.status,
           b.created_at,
 
+          b.owner_amount,
+          b.owner_settlement,
+          b.admin_settlement,
+          b.rent_amount,
+          b.security_deposit,
+
           p.pg_name,
 
-          /* ✅ SNAPSHOT TENANT NAME */
           b.name AS tenant_name,
 
-          /* 🔒 SHOW PHONE ONLY AFTER APPROVAL */
           CASE 
             WHEN b.status IN ('approved','confirmed') 
             THEN b.phone
@@ -72,22 +73,20 @@ exports.getOwnerBookings = async (req, res) => {
       [owner.id]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ RESPONSE
-    //////////////////////////////////////////////////////
     res.json({
       success: true,
       count: rows.length,
-      data: rows
+      data: rows || []
     });
 
   } catch (err) {
-    console.error("❌ GET OWNER BOOKINGS:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("GET OWNER BOOKINGS ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
-
-
 /* ======================================================
    ✅ OWNER → APPROVE / REJECT BOOKING (FINAL VERSION)
 ====================================================== */
