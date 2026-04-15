@@ -1,6 +1,6 @@
 const db = require("../db");
-const axios = require("axios");
-const sharp = require("sharp");
+// ❌ REMOVED: const axios = require("axios");
+// ❌ REMOVED: const sharp = require("sharp");
 const cloudinary = require("cloudinary").v2;
 
 cloudinary.config({
@@ -51,7 +51,7 @@ exports.verifyTenantForBooking = async (req, res) => {
   }
 };
 
-/* ================= TENANT FINAL SIGNING (UPDATED WITH IP & DEVICE) ================= */
+/* ================= TENANT FINAL SIGNING (SIMPLIFIED - NO PDF EDIT) ================= */
 exports.tenantFinalSign = async (req, res) => {
   try {
     const { booking_id, tenant_signature, tenant_mobile } = req.body;
@@ -62,9 +62,9 @@ exports.tenantFinalSign = async (req, res) => {
     // Capture Device Info (User Agent)
     const device_info = req.headers['user-agent'] || "Unknown Device";
     
-    // Fetch draft PDF and official user phone
+    // Fetch to verify the agreement exists and mobile matches
     const [rows] = await db.query(
-      `SELECT af.signed_pdf, af.city, af.state, u.phone 
+      `SELECT af.signed_pdf, u.phone 
        FROM agreements_form af
        JOIN users u ON af.user_id = u.id
        WHERE af.booking_id = ?`, 
@@ -82,51 +82,19 @@ exports.tenantFinalSign = async (req, res) => {
         return res.status(403).json({ message: "Mobile number mismatch with registered profile." });
     }
 
-    // PDF Overlay Logic
-    const response = await axios.get(data.signed_pdf, { responseType: "arraybuffer" });
-    const baseImage = Buffer.from(response.data);
-    const metadata = await sharp(baseImage).metadata();
-    
-    const sigBuffer = Buffer.from(tenant_signature.split(",")[1], "base64");
-    const resizedSig = await sharp(sigBuffer).resize(180, 70).png().toBuffer();
-
-    const now = new Date();
-    const istDate = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short" }).format(now);
-    const istTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "medium" }).format(now);
-
-    const svgText = `
-    <svg width="350" height="160">
-      <text x="0" y="18" font-family="Arial" font-size="13" fill="black" font-weight="bold">Digitally Signed by Tenant</text>
-      <text x="0" y="38" font-family="Arial" font-size="11" fill="#444">Mobile ${tenant_mobile}</text>
-      <text x="0" y="55" font-family="Arial" font-size="11" fill="#444">Location: ${data.city || ""}, ${data.state || ""}</text>
-      <text x="0" y="72" font-family="Arial" font-size="11" fill="#444">Date: ${istDate} ${istTime}</text>
-    </svg>`;
-
-    const finalImageBuffer = await sharp(baseImage)
-      .composite([
-        { input: Buffer.from(svgText), top: metadata.height - 340, left: 80 },
-        { input: resizedSig, top: metadata.height - 270, left: 80 }
-      ]).png().toBuffer();
-
-    const upload = await cloudinary.uploader.upload(
-      `data:image/png;base64,${finalImageBuffer.toString("base64")}`, 
-      { folder: "signed_agreements" }
-    );
-
-    // Updated Query to include tenant_ip_address and tenant_device_info
+    // ✅ Just save signature directly (NO sharp, NO PDF edit)
     await db.query(
       `UPDATE agreements_form 
-       SET signed_pdf = ?, 
-           agreement_status = 'completed', 
+       SET agreement_status = 'completed', 
            tenant_final_signature = ?, 
            tenant_mobile = ?,
            tenant_ip_address = ?,
            tenant_device_info = ?
        WHERE booking_id = ?`, 
-      [upload.secure_url, tenant_signature, tenant_mobile, ip_address, device_info, booking_id]
+      [tenant_signature, tenant_mobile, ip_address, device_info, booking_id]
     );
 
-    res.json({ success: true, url: upload.secure_url });
+    res.json({ success: true, message: "Signature saved successfully" });
   } catch (err) {
     console.error("🔥 Tenant Signing Error:", err);
     res.status(500).json({ success: false, message: "Tenant signing failed" });
