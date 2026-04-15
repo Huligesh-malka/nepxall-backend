@@ -285,12 +285,11 @@ exports.deleteAgreement = async (req, res) => {
 
 
 
-
-
-
 exports.getUserAgreements = async (req, res) => {
   try {
     const userId = req.user.id;
+
+    console.log("USER ID:", userId); // debug
 
     const [rows] = await db.query(`
       SELECT 
@@ -298,10 +297,10 @@ exports.getUserAgreements = async (req, res) => {
         af.signed_pdf,
         af.agreement_status,
         af.created_at,
-        p.name AS pg_name
+        COALESCE(p.name, 'PG') AS pg_name
       FROM agreements_form af
-      JOIN bookings b ON af.booking_id = b.id
-      JOIN pgs p ON b.pg_id = p.id
+      LEFT JOIN bookings b ON af.booking_id = b.id
+      LEFT JOIN pgs p ON b.pg_id = p.id
       WHERE af.user_id = ?
       AND af.agreement_status = 'completed'
       ORDER BY af.created_at DESC
@@ -310,7 +309,7 @@ exports.getUserAgreements = async (req, res) => {
     res.json({ success: true, data: rows });
 
   } catch (err) {
-    console.error("Get Agreements Error:", err);
-    res.status(500).json({ success: false });
+    console.error("🔥 Get Agreements Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
