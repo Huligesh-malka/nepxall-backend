@@ -50,7 +50,7 @@ exports.signOwnerAgreement = async (req, res) => {
 
     // 2. Verify booking exists
     const [verification] = await db.query(`
-      SELECT af.booking_id 
+      SELECT af.booking_id, af.final_pdf
       FROM agreements_form af
       JOIN bookings b ON af.booking_id = b.id
       WHERE af.booking_id = ?
@@ -60,7 +60,7 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(404).json({ success: false, message: "Agreement not found" });
     }
 
-    // ✅ SIMPLE FIX: Just save signature to database (NO PDF editing, NO sharp, NO axios)
+    // ✅ FIXED: Save signature to database AND set signed_pdf = final_pdf
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
@@ -68,14 +68,21 @@ exports.signOwnerAgreement = async (req, res) => {
           agreement_status = 'approved', 
           owner_ip_address = ?, 
           owner_device_info = ?, 
-          terms_accepted = 1
+          terms_accepted = 1,
+          signed_pdf = final_pdf  -- ✅ ADD THIS LINE - copies final_pdf to signed_pdf
       WHERE booking_id = ?
     `, [owner_signature, ownerIp, deviceDetail, booking_id]);
+
+    // ✅ FIXED: Get the signed_pdf (which is now final_pdf) from DB to return
+    const [pdfRow] = await db.query(
+      "SELECT signed_pdf FROM agreements_form WHERE booking_id = ?",
+      [booking_id]
+    );
 
     res.json({ 
       success: true, 
       message: "Signed successfully",
-      signed_pdf: null // No PDF generated on owner side
+      signed_pdf: pdfRow[0]?.signed_pdf || null  // ✅ FIXED: Returns actual PDF URL instead of null
     });
 
   } catch (err) {
@@ -83,10 +90,6 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
-
-
-
-
 
 exports.getOwnerPayments = async (req, res) => {
   try {
