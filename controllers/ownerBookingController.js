@@ -352,9 +352,11 @@ function maskUPI(upi) {
   if (parts.length !== 2) return "****";
   return parts[0].slice(0, 2) + "***@" + parts[1];
 }
+
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
+
     if (!owner) {
       return res.status(403).json({ message: "Not an owner" });
     }
@@ -363,7 +365,7 @@ exports.getVacateRequests = async (req, res) => {
       `
       SELECT 
         b.id AS booking_id,
-         r.id AS id, 
+        r.id AS id, 
         p.pg_name,
         u.name AS user_name,
 
@@ -400,7 +402,7 @@ exports.getVacateRequests = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔐 DECRYPT + CONDITION BASED SHOW
+    // 🔐 DECRYPT + SMART MASKING
     //////////////////////////////////////////////////////
     rows.forEach(r => {
       let acc = null;
@@ -411,32 +413,24 @@ exports.getVacateRequests = async (req, res) => {
         acc = r.account_number ? decrypt(r.account_number) : null;
         ifsc = r.ifsc_code ? decrypt(r.ifsc_code) : null;
         upi = r.upi_id ? decrypt(r.upi_id) : null;
-      } catch (err) {
-        console.log("⚠️ Decrypt skipped");
+      } catch {
         acc = r.account_number;
         ifsc = r.ifsc_code;
         upi = r.upi_id;
       }
 
       //////////////////////////////////////////////////////
-      // 🎯 CONDITION LOGIC
+      // 🎯 FINAL LOGIC
       //////////////////////////////////////////////////////
 
-      // ✅ Approved → show FULL details
+      // ✅ ONLY when owner approved → show FULL
       if (r.refund_status === "approved") {
         r.account_number = acc;
         r.ifsc_code = ifsc;
         r.upi_id = upi;
       }
 
-      // ✅ Completed → show MASKED
-      else if (r.refund_status === "completed") {
-        r.account_number = maskAccount(acc);
-        r.ifsc_code = maskIFSC(ifsc);
-        r.upi_id = maskUPI(upi);
-      }
-
-      // ✅ Pending / others → MASKED
+      // 🔒 ALL OTHER STATES → MASKED (including completed)
       else {
         r.account_number = maskAccount(acc);
         r.ifsc_code = maskIFSC(ifsc);
@@ -451,6 +445,8 @@ exports.getVacateRequests = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
 exports.rejectVacateRequest = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -491,32 +487,22 @@ exports.rejectVacateRequest = async (req, res) => {
 
 
 
-
-
-/* ======================================================
-   💰 MARK REFUND AS COMPLETED (FINAL FIX)
-====================================================== */
 exports.markRefundPaid = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    //////////////////////////////////////////////////////
-    // ✅ GET REFUND ID
-    //////////////////////////////////////////////////////
     const { id } = req.params;
 
     //////////////////////////////////////////////////////
-    // ✅ OPTIONAL OWNER CHECK
+    // 🔐 OWNER VALIDATION
     //////////////////////////////////////////////////////
-    let owner = null;
-    if (req.user?.firebase_uid) {
-      owner = await getOwner(req.user.firebase_uid);
-    }
+    const owner = await getOwner(req.user.firebase_uid);
+    if (!owner) throw new Error("Not an owner");
 
     //////////////////////////////////////////////////////
-    // ✅ GET REFUND + BOOKING
+    // 📦 GET REFUND + BOOKING
     //////////////////////////////////////////////////////
     const [[refund]] = await connection.query(
       `SELECT r.*, b.owner_id, b.user_id, b.pg_id
@@ -526,24 +512,16 @@ exports.markRefundPaid = async (req, res) => {
       [id]
     );
 
-    if (!refund) {
-      throw new Error("Refund not found");
+    if (!refund) throw new Error("Refund not found");
+
+    //////////////////////////////////////////////////////
+    // 🔒 SECURITY CHECK
+    //////////////////////////////////////////////////////
+    if (refund.owner_id !== owner.id) {
+      throw new Error("Unauthorized");
     }
 
     const bookingId = refund.booking_id;
-
-    //////////////////////////////////////////////////////
-    // 🔒 OWNER SECURITY CHECK
-    //////////////////////////////////////////////////////
-    if (refund.refund_type === "DEPOSIT") {
-      if (!owner) {
-        throw new Error("Not an owner");
-      }
-
-      if (refund.owner_id !== owner.id) {
-        throw new Error("Unauthorized");
-      }
-    }
 
     //////////////////////////////////////////////////////
     // ✅ VALIDATION
@@ -551,31 +529,40 @@ exports.markRefundPaid = async (req, res) => {
     const userApproval = (refund.user_approval || "").toLowerCase();
     const status = (refund.status || "").toLowerCase();
 
-    // ✅ FIX: use "completed" instead of "paid"
-    const alreadyCompleted = status === "completed";
-
-    if (refund.refund_type === "DEPOSIT" && userApproval !== "accepted") {
+    if (userApproval !== "accepted") {
       throw new Error("User has not accepted refund yet");
     }
 
-    if (!alreadyCompleted && !["pending", "approved"].includes(status)) {
+    //////////////////////////////////////////////////////
+    // ✅ ALREADY COMPLETED FIX
+    //////////////////////////////////////////////////////
+    if (status === "completed") {
+      await connection.commit();
+
+      return res.json({
+        success: true,
+        message: "Already paid",
+        status: "completed"
+      });
+    }
+
+    if (!["pending", "approved"].includes(status)) {
       throw new Error("Invalid refund state");
     }
 
     //////////////////////////////////////////////////////
-    // 💰 UPDATE REFUND → COMPLETED
+    // 💰 UPDATE REFUND
     //////////////////////////////////////////////////////
-    if (!alreadyCompleted) {
-      await connection.query(
-        `UPDATE refunds 
-         SET status='completed'
-         WHERE id=?`,
-        [id]
-      );
-    }
+    await connection.query(
+      `UPDATE refunds 
+       SET status='completed',
+           updated_at = NOW()
+       WHERE id=?`,
+      [id]
+    );
 
     //////////////////////////////////////////////////////
-    // 🏠 UPDATE PG_USERS → LEFT
+    // 🏠 UPDATE PG_USERS
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE pg_users 
@@ -586,7 +573,7 @@ exports.markRefundPaid = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 📦 UPDATE BOOKINGS → LEFT
+    // 📦 UPDATE BOOKINGS
     //////////////////////////////////////////////////////
     await connection.query(
       `UPDATE bookings 
@@ -600,15 +587,19 @@ exports.markRefundPaid = async (req, res) => {
     //////////////////////////////////////////////////////
     await connection.commit();
 
+    //////////////////////////////////////////////////////
+    // 🔥 IMPORTANT RESPONSE (FRONTEND FIX)
+    //////////////////////////////////////////////////////
     res.json({
       success: true,
-      message: alreadyCompleted
-        ? "Already completed, status synced"
-        : "Refund completed successfully"
+      message: "Refund completed successfully",
+      status: "completed",   // ✅ VERY IMPORTANT
+      booking_id: bookingId
     });
 
   } catch (err) {
     await connection.rollback();
+
     console.error("❌ MARK COMPLETED ERROR:", err);
 
     res.status(500).json({
@@ -620,7 +611,6 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
-
 
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
