@@ -110,44 +110,51 @@ exports.tenantFinalSign = async (req, res) => {
     // 5. Font
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+    
+
+
+
 // LEFT SIDE POSITION
-const leftX = 50;   // 👈 LEFT margin
-const baseY = 10;   // bottom position
+// LEFT SIDE (same spacing as owner)
+const leftX = 60;
 
 // Signature
 page.drawImage(pngImage, {
   x: leftX,
-  y: baseY,
+  y: 80,
   width: 150,
   height: 50,
 });
 
-// Text block
+// Date
+const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+// Text block (same spacing as owner)
 page.drawText("Digitally Signed by Tenant", {
   x: leftX,
-  y: baseY + 60,
+  y: 150,
   size: 10,
   font,
+  color: rgb(0, 0, 0),
 });
 
 page.drawText(`Mobile: ${tenant_mobile}`, {
   x: leftX,
-  y: baseY + 45,
+  y: 135,
   size: 9,
   font,
 });
 
 page.drawText(`Date: ${date}`, {
   x: leftX,
-  y: baseY + 30,
+  y: 120,
   size: 9,
   font,
 });
 
 page.drawText("Auth: OTP Verified", {
   x: leftX,
-  y: baseY + 15,
+  y: 105,
   size: 9,
   font,
 });
