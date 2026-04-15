@@ -284,12 +284,9 @@ exports.deleteAgreement = async (req, res) => {
 };
 
 
-
 exports.getUserAgreements = async (req, res) => {
   try {
     const userId = req.user.id;
-
-    console.log("USER ID:", userId); // debug
 
     const [rows] = await db.query(`
       SELECT 
@@ -297,7 +294,7 @@ exports.getUserAgreements = async (req, res) => {
         af.signed_pdf,
         af.agreement_status,
         af.created_at,
-        COALESCE(p.name, 'PG') AS pg_name
+        COALESCE(p.pg_name, 'PG') AS pg_name
       FROM agreements_form af
       LEFT JOIN bookings b ON af.booking_id = b.id
       LEFT JOIN pgs p ON b.pg_id = p.id
