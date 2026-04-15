@@ -84,7 +84,10 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-/* ================= GET OWNER PAYMENTS ================= */
+
+
+
+
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -101,10 +104,13 @@ exports.getOwnerPayments = async (req, res) => {
         af.signed_pdf,
         af.viewed_by_owner,
 
+        /* ✅ PAYMENT */
         p.order_id,
 
+        /* 🔥 PG NAME */
         pg.pg_name,
 
+        /* ✅ JOIN STATUS (ONLY ADD THIS) */
         CASE 
           WHEN EXISTS (
             SELECT 1 
@@ -115,14 +121,22 @@ exports.getOwnerPayments = async (req, res) => {
         END AS join_status
 
       FROM bookings b
+
+      /* PAYMENT JOIN */
       INNER JOIN payments p 
         ON b.id = p.booking_id
+
+      /* AGREEMENT JOIN */
       LEFT JOIN agreements_form af 
         ON b.id = af.booking_id
+
+      /* PG JOIN */
       LEFT JOIN pgs pg 
         ON pg.id = b.pg_id
+
       WHERE b.owner_id = ?
       AND p.status = 'paid'
+
       ORDER BY p.created_at DESC
     `, [req.user.id]);
 
@@ -133,6 +147,7 @@ exports.getOwnerPayments = async (req, res) => {
 
   } catch (err) {
     console.error("Owner payments error:", err);
+
     res.status(500).json({
       success: false,
       message: "Failed to load owner payments"
