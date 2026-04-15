@@ -1,5 +1,7 @@
 const db = require("../db");
 const cloudinary = require("cloudinary").v2;
+const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+const axios = require("axios");
 
 /* ================= CLOUDINARY CONFIG ================= */
 cloudinary.config({
@@ -33,7 +35,8 @@ exports.verifyOwnerForBooking = async (req, res) => {
   }
 };
 
-/* ================= OWNER SIDE: SIGN AGREEMENT ================= */
+
+
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info, owner_location } = req.body;
 
@@ -42,51 +45,109 @@ exports.signOwnerAgreement = async (req, res) => {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    // 1. Capture Metadata
-    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "0.0.0.0";
-    const ownerIp = rawIp.split(",")[0].trim();
-    const deviceDetail = owner_device_info || req.headers["user-agent"] || "Unknown Device";
-    const location = owner_location || "Bangalore, Karnataka";
+    // 1. Get PDF from DB
+    const [rows] = await db.query(
+      "SELECT final_pdf FROM agreements_form WHERE booking_id = ?",
+      [booking_id]
+    );
 
-    // 2. Verify booking exists
-    const [verification] = await db.query(`
-      SELECT af.booking_id, af.final_pdf
-      FROM agreements_form af
-      JOIN bookings b ON af.booking_id = b.id
-      WHERE af.booking_id = ?
-    `, [booking_id]);
-
-    if (!verification.length) {
+    if (!rows.length) {
       return res.status(404).json({ success: false, message: "Agreement not found" });
     }
 
-    // ✅ FIXED: Save signature to database AND set signed_pdf = final_pdf
+    const pdfUrl = rows[0].final_pdf;
+
+    // 2. Download PDF
+    const pdfBytes = await axios.get(pdfUrl, { responseType: "arraybuffer" });
+
+    // 3. Load PDF
+    const pdfDoc = await PDFDocument.load(pdfBytes.data);
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1]; // last page
+
+    const { width, height } = page.getSize();
+
+    // 4. Prepare signature image
+    const base64Data = owner_signature.replace(/^data:image\/\w+;base64,/, "");
+    const sigBuffer = Buffer.from(base64Data, "base64");
+
+    const pngImage = await pdfDoc.embedPng(sigBuffer);
+
+    // 5. Embed font
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    // 6. Draw signature
+    page.drawImage(pngImage, {
+      x: width - 220,
+      y: 80,
+      width: 150,
+      height: 50,
+    });
+
+    // 7. Draw text
+    const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+    page.drawText("Digitally Signed by Owner", {
+      x: width - 220,
+      y: 150,
+      size: 10,
+      font,
+      color: rgb(0, 0, 0),
+    });
+
+    page.drawText(`Mobile: ${owner_mobile}`, {
+      x: width - 220,
+      y: 135,
+      size: 9,
+      font,
+    });
+
+    page.drawText(`Date: ${date}`, {
+      x: width - 220,
+      y: 120,
+      size: 9,
+      font,
+    });
+
+    page.drawText("Auth: OTP Verified", {
+      x: width - 220,
+      y: 105,
+      size: 9,
+      font,
+    });
+
+    // 8. Save PDF
+    const finalPdfBytes = await pdfDoc.save();
+
+    // 9. Upload to Cloudinary
+    const upload = await cloudinary.uploader.upload(
+      `data:application/pdf;base64,${Buffer.from(finalPdfBytes).toString("base64")}`,
+      {
+        resource_type: "raw",
+        folder: "signed_agreements",
+        format: "pdf"
+      }
+    );
+
+    // 10. Save to DB
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
           owner_signed_at = NOW(),
-          agreement_status = 'approved', 
-          owner_ip_address = ?, 
-          owner_device_info = ?, 
-          terms_accepted = 1,
-          signed_pdf = final_pdf  -- ✅ ADD THIS LINE - copies final_pdf to signed_pdf
+          agreement_status = 'approved',
+          signed_pdf = ?,
+          owner_device_info = ?
       WHERE booking_id = ?
-    `, [owner_signature, ownerIp, deviceDetail, booking_id]);
+    `, [owner_signature, upload.secure_url, owner_device_info, booking_id]);
 
-    // ✅ FIXED: Get the signed_pdf (which is now final_pdf) from DB to return
-    const [pdfRow] = await db.query(
-      "SELECT signed_pdf FROM agreements_form WHERE booking_id = ?",
-      [booking_id]
-    );
-
-    res.json({ 
-      success: true, 
-      message: "Signed successfully",
-      signed_pdf: pdfRow[0]?.signed_pdf || null  // ✅ FIXED: Returns actual PDF URL instead of null
+    res.json({
+      success: true,
+      message: "PDF signed successfully",
+      signed_pdf: upload.secure_url
     });
 
   } catch (err) {
-    console.error("Signing Error:", err);
+    console.error("PDF SIGN ERROR:", err);
     res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
