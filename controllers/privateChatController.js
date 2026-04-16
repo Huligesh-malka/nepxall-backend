@@ -81,16 +81,17 @@ exports.getMe = (req,res)=> res.json(req.me);
 /* =========================================================
    CHAT LIST
 ========================================================= */
-exports.getMyChatList = async (req,res)=>{
-
-  try{
-
+exports.getMyChatList = async (req, res) => {
+  try {
     const me = req.me;
 
     const [rows] = await db.query(`
 SELECT
 u.id,
-COALESCE(b.name,u.name,u.phone) AS name,
+
+-- ✅ FIXED NAME LOGIC (NO PHONE)
+COALESCE(NULLIF(b.name,''), NULLIF(u.name,''), 'Tenant') AS name,
+
 pm.pg_id,
 p.pg_name,
 u.firebase_uid,
@@ -139,68 +140,17 @@ pg_id
 
 ORDER BY last_time DESC
 `,
-      [me.id,me.id,me.id,me.id,me.id]
+      [me.id, me.id, me.id, me.id, me.id]
     );
 
     res.json(rows);
 
-  }catch(err){
-
-    console.error("Chat list error:",err);
-
-    res.status(500).json({
-      success:false,
-      message:"Server error"
-    });
-
-  }
-
-};
-
-
-/* =========================================================
-   GET USER (OWNER) BY PG
-   ✅ FIXED: Always return PG OWNER (not same user)
-========================================================= */
-exports.getUserById = async (req, res) => {
-  try {
-    const pg_id = Number(req.query.pg_id);
-
-    if (!pg_id) {
-      return res.status(400).json({
-        message: "pg_id required",
-      });
-    }
-
-    // ✅ Get OWNER of this PG
-    const [rows] = await db.query(`
-      SELECT
-        u.id,
-        COALESCE(b.name, u.name, u.phone) AS name,
-        p.pg_name,
-        u.firebase_uid
-      FROM pgs p
-      JOIN users u ON u.id = p.owner_id   -- ✅ OWNER JOIN
-      LEFT JOIN bookings b
-        ON b.user_id = u.id
-        AND b.pg_id = p.id
-      WHERE p.id = ?
-      LIMIT 1
-    `, [pg_id]);
-
-    if (!rows.length) {
-      return res.status(404).json({
-        message: "Owner not found",
-      });
-    }
-
-    res.json(rows[0]);
-
   } catch (err) {
-    console.error("getUserById error:", err);
+    console.error("Chat list error:", err);
 
     res.status(500).json({
-      message: "Server error",
+      success: false,
+      message: "Server error"
     });
   }
 };
