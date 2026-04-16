@@ -158,6 +158,56 @@ ORDER BY last_time DESC
 };
 
 /* =========================================================
+   GET USER + PG
+========================================================= */
+exports.getUserById = async (req,res)=>{
+
+  try{
+
+    const otherId = Number(req.params.id);
+    const pg_id = Number(req.query.pg_id);
+
+    if(!pg_id){
+      return res.status(400).json({
+        message:"pg_id required"
+      });
+    }
+
+    const [rows] = await db.query(`
+SELECT
+u.id,
+COALESCE(b.name,u.name,u.phone) AS name,
+p.pg_name
+FROM users u
+JOIN pgs p ON p.id=?
+LEFT JOIN bookings b
+ON b.user_id=u.id
+AND b.pg_id=p.id
+WHERE u.id=?
+LIMIT 1
+`,
+      [pg_id,otherId]
+    );
+
+    if(!rows.length){
+      return res.status(404).json({ message:"User not found" });
+    }
+
+    res.json(rows[0]);
+
+  }catch(err){
+
+    console.error(err);
+
+    res.status(500).json({
+      message:"Server error"
+    });
+
+  }
+
+};
+
+/* =========================================================
    GET PRIVATE MESSAGES
 ========================================================= */
 exports.getPrivateMessages = async (req,res)=>{
