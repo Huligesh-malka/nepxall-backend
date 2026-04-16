@@ -177,11 +177,13 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-//////////////////////////////////////////////////////
-// 📜 USER BOOKINGS
-//////////////////////////////////////////////////////
+
+
+
 exports.getUserBookings = async (req, res) => {
   try {
+    const includeAgreement = req.query.agreement === "true"; // 👈 NEW
+
     const [rows] = await db.query(
       `
       SELECT 
@@ -195,17 +197,14 @@ exports.getUserBookings = async (req, res) => {
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
-        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
-        b.kyc_verified,
         b.agreement_signed,
-        b.move_in_completed,
         b.created_at,
         p.pg_name,
         p.city,
         p.area,
         p.contact_phone AS owner_phone,
         pr.room_no
-        FROM bookings b
+      FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
       WHERE b.user_id=?
@@ -214,7 +213,25 @@ exports.getUserBookings = async (req, res) => {
       [req.user.id]
     );
 
-    res.json(rows);
+    // 🔥 MODIFY TOTAL BASED ON AGREEMENT
+    const updated = rows.map((item) => {
+      let total =
+        Number(item.rent_amount || 0) +
+        Number(item.security_deposit || 0) +
+        Number(item.maintenance_amount || 0);
+
+      if (includeAgreement) {
+        total += 500; // 👉 agreement charge (you can change)
+      }
+
+      return {
+        ...item,
+        total_amount: total,
+        agreement_added: includeAgreement,
+      };
+    });
+
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
