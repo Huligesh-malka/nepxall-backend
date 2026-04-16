@@ -177,7 +177,6 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.getUserBookings = async (req, res) => {
   try {
     const includeAgreement = req.query.agreement === "true";
@@ -199,10 +198,9 @@ exports.getUserBookings = async (req, res) => {
         b.created_at,
 
         p.pg_name,
-        p.location,              -- ✅ USE THIS (FULL LOCATION)
         p.area,
         p.city,
-        p.contact_phone,         -- ✅ DIRECT PHONE
+        p.contact_phone,
 
         pr.room_no
 
@@ -216,7 +214,7 @@ exports.getUserBookings = async (req, res) => {
     );
 
     const updated = rows.map((item) => {
-      // 💰 TOTAL
+      // 💰 TOTAL CALCULATION
       let total =
         Number(item.rent_amount || 0) +
         Number(item.security_deposit || 0) +
@@ -226,11 +224,16 @@ exports.getUserBookings = async (req, res) => {
         total += 500;
       }
 
-      // 📍 LOCATION PRIORITY
-      const finalLocation =
-        item.location ||
-        `${item.area || ""}, ${item.city || ""}`.trim() ||
-        null;
+      // 📍 SHORT LOCATION (IMPORTANT FIX)
+      let shortLocation = null;
+
+      if (item.area && item.city) {
+        shortLocation = `${item.area}, ${item.city}`;
+      } else if (item.city) {
+        shortLocation = item.city;
+      } else if (item.area) {
+        shortLocation = item.area;
+      }
 
       // 🔐 SHOW ONLY AFTER APPROVAL
       const showDetails =
@@ -241,13 +244,13 @@ exports.getUserBookings = async (req, res) => {
         pg_id: item.pg_id,
         pg_name: item.pg_name,
 
-        // ✅ LOCATION
-        location: showDetails ? finalLocation : null,
+        // ✅ SHORT LOCATION ONLY
+        location: showDetails ? shortLocation : null,
 
-        // ✅ PHONE
+        // ✅ PHONE ONLY AFTER APPROVED
         phone: showDetails ? item.contact_phone : null,
 
-        // ✅ ROOM
+        // ✅ ROOM DETAILS
         room_no: item.room_no,
         room_type: item.room_type,
         check_in_date: item.check_in_date,
