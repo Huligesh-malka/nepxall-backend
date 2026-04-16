@@ -51,10 +51,19 @@ async function getMe(firebaseUser) {
   };
 }
 
-/* ========================================================= */
-exports.loadMe = async (req,res,next)=>{
 
+
+
+
+exports.loadMe = async (req,res,next)=>{
   try{
+
+    if(!req.user){
+      return res.status(401).json({
+        success:false,
+        message:"User not authenticated"
+      });
+    }
 
     if(!req.me){
       req.me = await getMe(req.user);
@@ -72,9 +81,7 @@ exports.loadMe = async (req,res,next)=>{
     });
 
   }
-
 };
-
 /* ========================================================= */
 exports.getMe = (req,res)=> res.json(req.me);
 
