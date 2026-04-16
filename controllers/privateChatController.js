@@ -177,7 +177,7 @@ exports.getUserById = async (req, res) => {
     const [rows] = await db.query(`
       SELECT
         u.id,
-        COALESCE(b.name, u.name, u.phone) AS name,
+        COALESCE(u.name, u.phone) AS name,
         p.pg_name,
         u.firebase_uid
       FROM pgs p
