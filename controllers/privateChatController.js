@@ -51,19 +51,10 @@ async function getMe(firebaseUser) {
   };
 }
 
-
-
-
-
+/* ========================================================= */
 exports.loadMe = async (req,res,next)=>{
-  try{
 
-    if(!req.user){
-      return res.status(401).json({
-        success:false,
-        message:"User not authenticated"
-      });
-    }
+  try{
 
     if(!req.me){
       req.me = await getMe(req.user);
@@ -81,24 +72,25 @@ exports.loadMe = async (req,res,next)=>{
     });
 
   }
+
 };
+
 /* ========================================================= */
 exports.getMe = (req,res)=> res.json(req.me);
 
 /* =========================================================
    CHAT LIST
 ========================================================= */
-exports.getMyChatList = async (req, res) => {
-  try {
+exports.getMyChatList = async (req,res)=>{
+
+  try{
+
     const me = req.me;
 
     const [rows] = await db.query(`
 SELECT
 u.id,
-
--- ✅ FIXED NAME LOGIC (NO PHONE)
-COALESCE(NULLIF(b.name,''), NULLIF(u.name,''), 'Tenant') AS name,
-
+COALESCE(b.name,u.name,u.phone) AS name,
 pm.pg_id,
 p.pg_name,
 u.firebase_uid,
@@ -147,19 +139,22 @@ pg_id
 
 ORDER BY last_time DESC
 `,
-      [me.id, me.id, me.id, me.id, me.id]
+      [me.id,me.id,me.id,me.id,me.id]
     );
 
     res.json(rows);
 
-  } catch (err) {
-    console.error("Chat list error:", err);
+  }catch(err){
+
+    console.error("Chat list error:",err);
 
     res.status(500).json({
-      success: false,
-      message: "Server error"
+      success:false,
+      message:"Server error"
     });
+
   }
+
 };
 
 /* =========================================================
