@@ -2,6 +2,9 @@ const db = require("../db");
 const cloudinary = require("cloudinary").v2;
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const axios = require("axios");
+const { decrypt } = require("../utils/encryption");
+
+
 
 /* ================= CLOUDINARY CONFIG ================= */
 cloudinary.config({
@@ -242,7 +245,11 @@ exports.getOwnerSettlementSummary = async (req, res) => {
   }
 };
 
+
+
 /* ================= GET OWNER RECEIPT DETAILS ================= */
+const { decrypt } = require("../utils/encryption");
+
 exports.getOwnerReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -303,9 +310,25 @@ exports.getOwnerReceiptDetails = async (req, res) => {
 
     const data = rows[0];
 
-    if (data.account_number) {
-      const last4 = data.account_number.slice(-4);
-      data.account_number = "XXXX" + last4;
+    /* ======================================================
+       🔐 DECRYPT BANK DETAILS
+    ====================================================== */
+    try {
+      if (data.account_holder_name) {
+        data.account_holder_name = decrypt(data.account_holder_name);
+      }
+
+      if (data.account_number) {
+        const acc = decrypt(data.account_number);
+        data.account_number = "XXXX" + acc.slice(-4); // ✅ MASK
+      }
+
+      if (data.ifsc) {
+        data.ifsc = decrypt(data.ifsc); // ✅ SHOW FULL IFSC
+      }
+
+    } catch (err) {
+      console.log("⚠️ Decryption failed (old data or invalid format)");
     }
 
     res.json({
@@ -321,6 +344,9 @@ exports.getOwnerReceiptDetails = async (req, res) => {
     });
   }
 };
+
+
+
 
 /* ================= MARK AS PAID ================= */
 exports.markAsPaid = async (req, res) => {
