@@ -178,11 +178,9 @@ exports.createBooking = async (req, res) => {
   }
 };
 
-
-
 exports.getUserBookings = async (req, res) => {
   try {
-    const includeAgreement = req.query.agreement === "true"; // 👈 NEW
+    const includeAgreement = req.query.agreement === "true";
 
     const [rows] = await db.query(
       `
@@ -199,11 +197,15 @@ exports.getUserBookings = async (req, res) => {
         b.maintenance_amount,
         b.agreement_signed,
         b.created_at,
+
         p.pg_name,
-        p.city,
+        p.location,              -- ✅ USE THIS (FULL LOCATION)
         p.area,
-        p.contact_phone AS owner_phone,
+        p.city,
+        p.contact_phone,         -- ✅ DIRECT PHONE
+
         pr.room_no
+
       FROM bookings b
       JOIN pgs p ON p.id = b.pg_id
       LEFT JOIN pg_rooms pr ON pr.id = b.room_id
@@ -213,26 +215,63 @@ exports.getUserBookings = async (req, res) => {
       [req.user.id]
     );
 
-    // 🔥 MODIFY TOTAL BASED ON AGREEMENT
     const updated = rows.map((item) => {
+      // 💰 TOTAL
       let total =
         Number(item.rent_amount || 0) +
         Number(item.security_deposit || 0) +
         Number(item.maintenance_amount || 0);
 
       if (includeAgreement) {
-        total += 500; // 👉 agreement charge (you can change)
+        total += 500;
       }
 
+      // 📍 LOCATION PRIORITY
+      const finalLocation =
+        item.location ||
+        `${item.area || ""}, ${item.city || ""}`.trim() ||
+        null;
+
+      // 🔐 SHOW ONLY AFTER APPROVAL
+      const showDetails =
+        item.status === "approved" || item.status === "confirmed";
+
       return {
-        ...item,
+        id: item.id,
+        pg_id: item.pg_id,
+        pg_name: item.pg_name,
+
+        // ✅ LOCATION
+        location: showDetails ? finalLocation : null,
+
+        // ✅ PHONE
+        phone: showDetails ? item.contact_phone : null,
+
+        // ✅ ROOM
+        room_no: item.room_no,
+        room_type: item.room_type,
+        check_in_date: item.check_in_date,
+
+        // ✅ STATUS
+        status: item.status,
+
+        // ✅ PRICE
+        rent_amount: item.rent_amount,
+        security_deposit: item.security_deposit,
+        maintenance_amount: item.maintenance_amount,
         total_amount: total,
+
+        // ✅ AGREEMENT
+        agreement_signed: item.agreement_signed,
         agreement_added: includeAgreement,
+
+        created_at: item.created_at,
       };
     });
 
     res.json(updated);
   } catch (err) {
+    console.error("GET BOOKINGS ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
