@@ -248,7 +248,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
 
 
 /* ================= GET OWNER RECEIPT DETAILS ================= */
-const { decrypt } = require("../utils/encryption");
+
 
 exports.getOwnerReceiptDetails = async (req, res) => {
   try {
