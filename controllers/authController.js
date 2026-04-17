@@ -48,16 +48,13 @@ exports.registerUser = async (req, res) => {
     //////////////////////////////////////////////////////
 
     if (existingUser) {
+      // Check if user needs to provide name (name is null, empty, or same as phone)
+      const needsName = !existingUser.name || 
+                        existingUser.name.trim() === "" || 
+                        existingUser.name === existingUser.phone;
 
-      // 🔥 UPDATE NAME IF NOT SET OR WRONG (phone saved as name)
-      if (
-        name &&
-        (
-          !existingUser.name ||
-          existingUser.name.startsWith("+") ||
-          existingUser.name === existingUser.phone
-        )
-      ) {
+      // If name is provided and user needs name, update it
+      if (name && needsName) {
         await db.query(
           "UPDATE users SET name = ? WHERE firebase_uid = ?",
           [name, firebase_uid]
@@ -72,14 +69,16 @@ exports.registerUser = async (req, res) => {
           success: true,
           message: "User updated successfully ✅",
           user: updatedUser,
+          needsName: false,
         });
       }
 
-      // ✅ NORMAL LOGIN (NO NAME ASK)
+      // Return user with needsName flag
       return res.json({
         success: true,
         message: "User already exists ✅",
         user: existingUser,
+        needsName: needsName,
       });
     }
 
@@ -87,15 +86,16 @@ exports.registerUser = async (req, res) => {
     // ✅ CASE 2: NEW USER (FIRST TIME)
     //////////////////////////////////////////////////////
 
+    // Store phone temporarily as name (indicates needs update)
     const [result] = await db.query(
       `INSERT INTO users 
        (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        name || null,        // ✅ DO NOT SAVE PHONE AS NAME
+        phone,  // Temporary store phone as name
         phone,
         firebase_uid,
-        "tenant",            // ✅ ALWAYS tenant first
+        "tenant",
         1,
         email,
         new Date()
@@ -115,6 +115,7 @@ exports.registerUser = async (req, res) => {
       success: true,
       message: "User registered successfully ✅",
       user: newUser,
+      needsName: true, // New user needs to provide name
     });
 
   } catch (err) {
