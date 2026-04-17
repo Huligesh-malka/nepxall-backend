@@ -131,6 +131,7 @@
   app.use("/api/admin", safeLoad("./routes/adminRoutes"));
   app.use("/api/admin", safeLoad("./routes/adminRefundRoutes"));
   app.use("/api/admin/settlements", safeLoad("./routes/adminSettlementRoutes"));
+  app.use("/api/admin/owners", safeLoad("./routes/ownerApprovalRoutes"));
 
   /* ================= VENDOR ROUTES ================= */
   app.use("/api/vendor", safeLoad("./routes/vendorRoutes"));
