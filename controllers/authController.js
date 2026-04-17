@@ -3,12 +3,14 @@ const db = require("../db");
 /* ================= REGISTER USER ================= */
 exports.registerUser = async (req, res) => {
   try {
-    const { name, phone, role } = req.body;
+    const { name, phone } = req.body;
 
     // 🔐 From Firebase middleware
     const firebase_uid = req.user.firebase_uid;
 
-    /* ================= VALIDATION ================= */
+    //////////////////////////////////////////////////////
+    // 🔐 VALIDATION
+    //////////////////////////////////////////////////////
 
     if (!firebase_uid) {
       return res.status(401).json({
@@ -24,7 +26,6 @@ exports.registerUser = async (req, res) => {
       });
     }
 
-    // 📞 Phone validation
     if (!/^[0-9]{10,15}$/.test(phone)) {
       return res.status(400).json({
         success: false,
@@ -32,46 +33,46 @@ exports.registerUser = async (req, res) => {
       });
     }
 
-    // 🔐 Role protection (VERY IMPORTANT)
-    const allowedRoles = ["tenant", "owner"];
-    const safeRole = allowedRoles.includes(role) ? role : "tenant";
+    //////////////////////////////////////////////////////
+    // 🔍 CHECK EXISTING USER
+    //////////////////////////////////////////////////////
 
-    /* ================= CHECK EXISTING USER ================= */
-
-    const [existing] = await db.query(
+    const [[existingUser]] = await db.query(
       "SELECT * FROM users WHERE firebase_uid = ?",
       [firebase_uid]
     );
 
-    if (existing.length > 0) {
+    if (existingUser) {
       return res.json({
         success: true,
-        message: "User already registered ✅",
-        user: existing[0],
+        message: "User already exists ✅",
+        user: existingUser,
       });
     }
 
-    /* ================= CREATE USER ================= */
-
-    const userData = {
-      name,
-      phone,
-      role: safeRole,
-      firebase_uid,
-      email: req.user.email || null, // optional from Firebase
-      mobile_verified: 1, // since Firebase verified
-      owner_verification_status: safeRole === "owner" ? "pending" : null,
-      created_at: new Date(),
-    };
+    //////////////////////////////////////////////////////
+    // 🆕 CREATE USER (DEFAULT TENANT ONLY)
+    //////////////////////////////////////////////////////
 
     const [result] = await db.query(
-      "INSERT INTO users SET ?",
-      userData
+      `INSERT INTO users 
+       (name, phone, firebase_uid, role, mobile_verified, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        name,
+        phone,
+        firebase_uid,
+        "tenant", // ✅ ALWAYS tenant first (REAL WORLD)
+        1,
+        new Date()
+      ]
     );
 
-    /* ================= FETCH CREATED USER ================= */
+    //////////////////////////////////////////////////////
+    // 📦 FETCH NEW USER
+    //////////////////////////////////////////////////////
 
-    const [newUser] = await db.query(
+    const [[newUser]] = await db.query(
       "SELECT * FROM users WHERE id = ?",
       [result.insertId]
     );
@@ -79,7 +80,7 @@ exports.registerUser = async (req, res) => {
     res.json({
       success: true,
       message: "User registered successfully ✅",
-      user: newUser[0],
+      user: newUser,
     });
 
   } catch (err) {
