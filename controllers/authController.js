@@ -35,11 +35,28 @@ exports.registerUser = async (req, res) => {
         user.name.startsWith("+") ||
         /^[0-9]+$/.test(user.name);
 
-      // 🔥 If name provided → update
-      if (name && needsName) {
+      //////////////////////////////////////////////////////
+      // 🔒 VALIDATE NAME (🔥 MAIN FIX)
+      //////////////////////////////////////////////////////
+      const isValidName =
+        name &&
+        name.trim().length >= 3 &&
+        !/^[0-9+]+$/.test(name); // ❌ reject phone numbers
+
+      // ❌ If invalid name → force user again
+      if (name && !isValidName) {
+        return res.json({
+          success: false,
+          message: "Please enter a valid name (not phone number)",
+          needsName: true,
+        });
+      }
+
+      // ✅ Update only valid name
+      if (isValidName && needsName) {
         await db.query(
           "UPDATE users SET name = ? WHERE firebase_uid = ?",
-          [name, firebase_uid]
+          [name.trim(), firebase_uid]
         );
 
         const [[updatedUser]] = await db.query(
@@ -50,14 +67,14 @@ exports.registerUser = async (req, res) => {
         return res.json({
           success: true,
           user: updatedUser,
-          needsName: false
+          needsName: false,
         });
       }
 
       return res.json({
         success: true,
         user,
-        needsName
+        needsName,
       });
     }
 
@@ -71,13 +88,13 @@ exports.registerUser = async (req, res) => {
        (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        null,               // ✅ IMPORTANT FIX
+        null,              // ❌ DO NOT store phone as name
         cleanPhone,
         firebase_uid,
         "tenant",
         1,
         email,
-        new Date()
+        new Date(),
       ]
     );
 
@@ -89,7 +106,7 @@ exports.registerUser = async (req, res) => {
     return res.json({
       success: true,
       user: newUser,
-      needsName: true // 🔥 FORCE name step
+      needsName: true, // 🔥 FORCE name step
     });
 
   } catch (err) {
