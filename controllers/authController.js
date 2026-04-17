@@ -48,13 +48,15 @@ exports.registerUser = async (req, res) => {
     //////////////////////////////////////////////////////
 
     if (existingUser) {
-      // Check if user needs to provide name (name is null, empty, or same as phone)
+      // Check if user needs to provide name (name is null, empty, or starts with + or contains only numbers)
       const needsName = !existingUser.name || 
                         existingUser.name.trim() === "" || 
+                        existingUser.name.startsWith("+") ||
+                        /^[0-9]+$/.test(existingUser.name) || // Only numbers
                         existingUser.name === existingUser.phone;
 
       // If name is provided and user needs name, update it
-      if (name && needsName) {
+      if (name && needsName && name !== existingUser.name) {
         await db.query(
           "UPDATE users SET name = ? WHERE firebase_uid = ?",
           [name, firebase_uid]
@@ -69,7 +71,7 @@ exports.registerUser = async (req, res) => {
           success: true,
           message: "User updated successfully ✅",
           user: updatedUser,
-          needsName: false,
+          needsName: false, // After update, no longer needs name
         });
       }
 
@@ -78,22 +80,24 @@ exports.registerUser = async (req, res) => {
         success: true,
         message: "User already exists ✅",
         user: existingUser,
-        needsName: needsName,
+        needsName: needsName, // Will be true if name is phone number
       });
     }
 
     //////////////////////////////////////////////////////
     // ✅ CASE 2: NEW USER (FIRST TIME)
     //////////////////////////////////////////////////////
-
-    // Store phone temporarily as name (indicates needs update)
+    
+    // Clean phone number (remove +91 if present)
+    const cleanPhone = phone.replace(/^\+91/, '');
+    
     const [result] = await db.query(
       `INSERT INTO users 
        (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        phone,  // Store phone as name to indicate this user needs to provide real name
-        phone,
+        phone,  // Store phone as name temporarily (will be updated later)
+        cleanPhone,
         firebase_uid,
         "tenant",
         1,
@@ -111,7 +115,7 @@ exports.registerUser = async (req, res) => {
       [result.insertId]
     );
 
-    // Always return needsName: true for new users
+    // ALWAYS return needsName: true for new users
     res.json({
       success: true,
       message: "User registered successfully ✅",
