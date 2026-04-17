@@ -82,4 +82,43 @@ router.get("/current-plan", firebaseAuth, async (req, res) => {
   }
 });
 
+
+
+
+router.post("/become-owner", firebaseAuth, async (req, res) => {
+  try {
+    const firebase_uid = req.user.firebase_uid;
+
+    const [[user]] = await db.query(
+      "SELECT id, role FROM users WHERE firebase_uid = ?",
+      [firebase_uid]
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.role === "owner" || user.role === "pending_owner") {
+      return res.json({
+        success: false,
+        message: "Already applied or already owner"
+      });
+    }
+
+    await db.query(
+      "UPDATE users SET role = 'pending_owner' WHERE id = ?",
+      [user.id]
+    );
+
+    res.json({
+      success: true,
+      message: "Request sent for approval"
+    });
+
+  } catch (err) {
+    console.error("Become Owner Error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 module.exports = router;
