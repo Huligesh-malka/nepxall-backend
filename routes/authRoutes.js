@@ -33,9 +33,6 @@ router.post("/firebase", async (req, res) => {
     let user;
     let role = "tenant";
 
-    /////////////////////////////////////////////////////////
-    // 🆕 NEW USER
-    /////////////////////////////////////////////////////////
     if (!rows.length) {
       const allowedRoles = ["tenant", "owner", "vendor"];
 
@@ -51,7 +48,7 @@ router.post("/firebase", async (req, res) => {
         `INSERT INTO users
         (firebase_uid, name, email, phone, role, created_at)
         VALUES (?, ?, ?, ?, ?, NOW())`,
-        [firebase_uid, null, email, phone, role] // ✅ name NULL
+        [firebase_uid, null, email, phone, role]
       );
 
       const [[newUser]] = await db.query(
@@ -60,12 +57,7 @@ router.post("/firebase", async (req, res) => {
       );
 
       user = newUser;
-    }
-
-    /////////////////////////////////////////////////////////
-    // ✅ EXISTING USER
-    /////////////////////////////////////////////////////////
-    else {
+    } else {
       user = rows[0];
       role = user.role;
 
@@ -84,18 +76,12 @@ router.post("/firebase", async (req, res) => {
       }
     }
 
-    /////////////////////////////////////////////////////////
-    // 🔥 CHECK NAME REQUIRED
-    /////////////////////////////////////////////////////////
     const needsName =
       !user.name ||
       user.name.trim() === "" ||
       user.name.startsWith("+") ||
       /^[0-9]+$/.test(user.name);
 
-    /////////////////////////////////////////////////////////
-    // 🔐 TOKEN
-    /////////////////////////////////////////////////////////
     const token = jwt.sign(
       {
         id: user.id,
@@ -116,13 +102,17 @@ router.post("/firebase", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(401).json({ message: "Invalid token" });
+    console.error("🔥 FIREBASE ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Firebase auth failed",
+      error: err.message
+    });
   }
 });
 
 /////////////////////////////////////////////////////////
-// ✅ REGISTER NAME (🔥 IMPORTANT FIX)
+// ✅ REGISTER NAME
 /////////////////////////////////////////////////////////
 router.post("/register", authMiddleware, registerUser);
 
