@@ -92,7 +92,7 @@ exports.registerUser = async (req, res) => {
        (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        phone,  // Temporary store phone as name
+        phone,  // Store phone as name to indicate this user needs to provide real name
         phone,
         firebase_uid,
         "tenant",
@@ -111,11 +111,12 @@ exports.registerUser = async (req, res) => {
       [result.insertId]
     );
 
+    // Always return needsName: true for new users
     res.json({
       success: true,
       message: "User registered successfully ✅",
       user: newUser,
-      needsName: true, // New user needs to provide name
+      needsName: true, // Force name collection for new users
     });
 
   } catch (err) {
