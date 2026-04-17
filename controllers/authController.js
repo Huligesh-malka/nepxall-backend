@@ -1,12 +1,13 @@
 const db = require("../db");
 
-/* ================= REGISTER USER ================= */
+/* ================= REGISTER / LOGIN USER ================= */
 exports.registerUser = async (req, res) => {
   try {
     const { name, phone } = req.body;
 
     // 🔐 From Firebase middleware
     const firebase_uid = req.user.firebase_uid;
+    const email = req.user.email || null;
 
     //////////////////////////////////////////////////////
     // 🔐 VALIDATION
@@ -19,10 +20,10 @@ exports.registerUser = async (req, res) => {
       });
     }
 
-    if (!name || !phone) {
+    if (!phone) {
       return res.status(400).json({
         success: false,
-        message: "Name and phone are required",
+        message: "Phone is required",
       });
     }
 
@@ -42,7 +43,39 @@ exports.registerUser = async (req, res) => {
       [firebase_uid]
     );
 
+    //////////////////////////////////////////////////////
+    // ✅ CASE 1: USER EXISTS
+    //////////////////////////////////////////////////////
+
     if (existingUser) {
+
+      // 🔥 UPDATE NAME IF NOT SET OR WRONG (phone saved as name)
+      if (
+        name &&
+        (
+          !existingUser.name ||
+          existingUser.name.startsWith("+") ||
+          existingUser.name === existingUser.phone
+        )
+      ) {
+        await db.query(
+          "UPDATE users SET name = ? WHERE firebase_uid = ?",
+          [name, firebase_uid]
+        );
+
+        const [[updatedUser]] = await db.query(
+          "SELECT * FROM users WHERE firebase_uid = ?",
+          [firebase_uid]
+        );
+
+        return res.json({
+          success: true,
+          message: "User updated successfully ✅",
+          user: updatedUser,
+        });
+      }
+
+      // ✅ NORMAL LOGIN (NO NAME ASK)
       return res.json({
         success: true,
         message: "User already exists ✅",
@@ -51,19 +84,20 @@ exports.registerUser = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🆕 CREATE USER (DEFAULT TENANT ONLY)
+    // ✅ CASE 2: NEW USER (FIRST TIME)
     //////////////////////////////////////////////////////
 
     const [result] = await db.query(
       `INSERT INTO users 
-       (name, phone, firebase_uid, role, mobile_verified, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        name,
+        name || null,        // ✅ DO NOT SAVE PHONE AS NAME
         phone,
         firebase_uid,
-        "tenant", // ✅ ALWAYS tenant first (REAL WORLD)
+        "tenant",            // ✅ ALWAYS tenant first
         1,
+        email,
         new Date()
       ]
     );
