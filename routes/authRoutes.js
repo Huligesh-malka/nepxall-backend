@@ -20,11 +20,9 @@ router.post("/firebase", async (req, res) => {
     const firebase_uid = decoded.uid;
     const email = decoded.email || null;
     const phone = decoded.phone_number || null;
-    const name =
-      decoded.name ||
-      decoded.email ||
-      decoded.phone_number ||
-      "User";
+
+    // ❌ DO NOT AUTO SET NAME
+    const name = null;
 
     console.log("🔥 FIREBASE UID:", firebase_uid);
 
@@ -40,11 +38,10 @@ router.post("/firebase", async (req, res) => {
     let role = "tenant";
 
     /* =====================================================
-       🆕 NEW USER (SECURE ROLE ASSIGNMENT)
+       🆕 NEW USER
     ===================================================== */
     if (!rows.length) {
 
-      // 🔐 STRICT ROLE CONTROL
       const allowedRoles = ["tenant", "owner", "vendor"];
 
       const safeRequestedRole = (requestedRole || "")
@@ -61,16 +58,21 @@ router.post("/firebase", async (req, res) => {
         `INSERT INTO users
         (firebase_uid, name, email, phone, role, created_at)
         VALUES (?, ?, ?, ?, ?, NOW())`,
-        [firebase_uid, name, email, phone, role]
+        [
+          firebase_uid,
+          null,      // ✅ ALWAYS NULL
+          email,
+          phone,
+          role
+        ]
       );
 
-      user = {
-        id: result.insertId,
-        name,
-        email,
-        phone,
-        role
-      };
+      const [[newUser]] = await db.query(
+        "SELECT * FROM users WHERE id = ?",
+        [result.insertId]
+      );
+
+      user = newUser;
 
       console.log("🆕 NEW USER CREATED");
     }
@@ -101,6 +103,15 @@ router.post("/firebase", async (req, res) => {
     }
 
     /* =====================================================
+       🔥 CHECK IF NAME REQUIRED
+    ===================================================== */
+    const needsName =
+      !user.name ||
+      user.name.trim() === "" ||
+      user.name.startsWith("+") ||
+      /^[0-9]+$/.test(user.name);
+
+    /* =====================================================
        🔐 CREATE JWT
     ===================================================== */
     const token = jwt.sign(
@@ -121,7 +132,8 @@ router.post("/firebase", async (req, res) => {
       token,
       role,
       name: user.name,
-      userId: user.id
+      userId: user.id,
+      needsName // 🔥 IMPORTANT
     });
 
   } catch (err) {
