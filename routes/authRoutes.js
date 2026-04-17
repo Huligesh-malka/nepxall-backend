@@ -5,7 +5,7 @@ const jwt = require("jsonwebtoken");
 const admin = require("../firebaseAdmin");
 const db = require("../db");
 
-const authMiddleware = require("../middleware/authMiddleware");
+const authMiddleware = require("../middlewares/authMiddleware");
 const { registerUser } = require("../controllers/authController");
 
 /////////////////////////////////////////////////////////
