@@ -156,7 +156,6 @@ exports.signOwnerAgreement = async (req, res) => {
 };
 
 
-
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -164,8 +163,15 @@ exports.getOwnerPayments = async (req, res) => {
         b.id AS booking_id,
         b.name AS tenant_name,
 
-        /* ✅ ONLY OWNER EARNING (NO AGREEMENT FEE) */
-        (b.rent_amount + b.security_deposit) AS owner_amount,
+        /* ✅ OWNER AMOUNT (INCLUDING MAINTENANCE) */
+        (
+          COALESCE(b.rent_amount, 0) + 
+          COALESCE(b.security_deposit, 0) + 
+          COALESCE(b.maintenance_amount, 0)
+        ) AS owner_amount,
+
+        /* 🔥 TOTAL PAID (FOR DEBUG / REFERENCE) */
+        p.amount AS total_paid_amount,
 
         b.owner_settlement,
         b.admin_settlement,
@@ -175,15 +181,10 @@ exports.getOwnerPayments = async (req, res) => {
         af.final_pdf,
         af.signed_pdf,
         af.viewed_by_owner,
-        af.agreement_status,
 
-        /* ✅ PAYMENT */
         p.order_id,
-
-        /* 🔥 PG NAME */
         pg.pg_name,
 
-        /* ✅ JOIN STATUS */
         CASE 
           WHEN EXISTS (
             SELECT 1 
@@ -195,24 +196,17 @@ exports.getOwnerPayments = async (req, res) => {
 
       FROM bookings b
 
-      /* PAYMENT JOIN */
       INNER JOIN payments p 
         ON b.id = p.booking_id
 
-      /* AGREEMENT JOIN */
       LEFT JOIN agreements_form af 
         ON b.id = af.booking_id
 
-      /* PG JOIN */
       LEFT JOIN pgs pg 
         ON pg.id = b.pg_id
 
       WHERE b.owner_id = ?
       AND p.status = 'paid'
-
-      /* ✅ IMPORTANT FIXES */
-      AND af.agreement_status = 'approved'   -- agreement must be signed
-      AND b.admin_settlement = 'DONE'        -- admin must approve
 
       ORDER BY p.created_at DESC
     `, [req.user.id]);
@@ -230,7 +224,9 @@ exports.getOwnerPayments = async (req, res) => {
       message: "Failed to load owner payments"
     });
   }
-};   
+};
+
+
 
 /* ================= MARK AGREEMENT AS VIEWED ================= */
 exports.markAgreementViewed = async (req, res) => {

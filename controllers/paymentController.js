@@ -1,82 +1,82 @@
 const QRCode = require("qrcode");
 const db = require("../db");
 
-//////////////////////////////////////////////////////
-// CREATE UPI PAYMENT
-//////////////////////////////////////////////////////
-exports.createPayment = async (req, res) => {
-  try {
-    // 🔥 ADD includeAgreement (NEW)
-    const { bookingId, includeAgreement } = req.body;
+  //////////////////////////////////////////////////////
+  // CREATE UPI PAYMENT
+  //////////////////////////////////////////////////////
+  exports.createPayment = async (req, res) => {
+    try {
+      // 🔥 ADD includeAgreement (NEW)
+      const { bookingId, includeAgreement } = req.body;
 
-    if (!bookingId) {
-      return res.status(400).json({ success: false, message: "bookingId required" });
+      if (!bookingId) {
+        return res.status(400).json({ success: false, message: "bookingId required" });
+      }
+
+      // ✅ 1. Get real booking data
+      const [[booking]] = await db.query(
+        `SELECT 
+          user_id, 
+          rent_amount, 
+          security_deposit, 
+          maintenance_amount, 
+          platform_fee 
+        FROM bookings 
+        WHERE id = ?`,
+        [bookingId]
+      );
+
+      if (!booking) {
+        return res.status(404).json({ success: false, message: "Booking not found" });
+      }
+
+      // Convert string → number
+      const rent = parseFloat(booking.rent_amount) || 0;
+      const deposit = parseFloat(booking.security_deposit) || 0;
+      const maintenance = parseFloat(booking.maintenance_amount) || 0;
+      const platformFee = parseFloat(booking.platform_fee) || 0;
+
+      // 🔥 ORIGINAL AMOUNT
+      let amount = rent + deposit + maintenance + platformFee;
+
+      // 🔥 ADD AGREEMENT (ONLY ADD THIS)
+      if (includeAgreement) {
+        amount += 500; // agreement charge
+      }
+
+      if (amount <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid amount" });
+      }
+
+      // ✅ 3. Create Order
+      const orderId = `order_${bookingId}_${Date.now()}`;
+      const upiId = "huligeshmalka-1@oksbi";
+      const merchantName = "Nepxall";
+
+      // 🔥 NOW QR WILL HAVE CORRECT AMOUNT
+      const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+      const qr = await QRCode.toDataURL(upiLink);
+
+      // ✅ 4. Save payment
+      await db.query(
+        `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
+        VALUES (?, ?, ?, ?, 'pending', NOW())`,
+        [bookingId, booking.user_id, orderId, amount]
+      );
+
+      res.json({
+        success: true,
+        orderId,
+        amount,
+        upiLink,
+        qr
+      });
+
+    } catch (err) {
+      console.error("CREATE PAYMENT ERROR:", err);
+      res.status(500).json({ success: false });
     }
-
-    // ✅ 1. Get real booking data
-    const [[booking]] = await db.query(
-      `SELECT 
-        user_id, 
-        rent_amount, 
-        security_deposit, 
-        maintenance_amount, 
-        platform_fee 
-       FROM bookings 
-       WHERE id = ?`,
-      [bookingId]
-    );
-
-    if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
-    }
-
-    // Convert string → number
-    const rent = parseFloat(booking.rent_amount) || 0;
-    const deposit = parseFloat(booking.security_deposit) || 0;
-    const maintenance = parseFloat(booking.maintenance_amount) || 0;
-    const platformFee = parseFloat(booking.platform_fee) || 0;
-
-    // 🔥 ORIGINAL AMOUNT
-    let amount = rent + deposit + maintenance + platformFee;
-
-    // 🔥 ADD AGREEMENT (ONLY ADD THIS)
-    if (includeAgreement) {
-      amount += 500; // agreement charge
-    }
-
-    if (amount <= 0) {
-      return res.status(400).json({ success: false, message: "Invalid amount" });
-    }
-
-    // ✅ 3. Create Order
-    const orderId = `order_${bookingId}_${Date.now()}`;
-    const upiId = "huligeshmalka-1@oksbi";
-    const merchantName = "Nepxall";
-
-    // 🔥 NOW QR WILL HAVE CORRECT AMOUNT
-    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
-    const qr = await QRCode.toDataURL(upiLink);
-
-    // ✅ 4. Save payment
-    await db.query(
-      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
-       VALUES (?, ?, ?, ?, 'pending', NOW())`,
-      [bookingId, booking.user_id, orderId, amount]
-    );
-
-    res.json({
-      success: true,
-      orderId,
-      amount,
-      upiLink,
-      qr
-    });
-
-  } catch (err) {
-    console.error("CREATE PAYMENT ERROR:", err);
-    res.status(500).json({ success: false });
-  }
-};
+  };
 
 //////////////////////////////////////////////////////
 // USER CONFIRM PAYMENT
