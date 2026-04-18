@@ -1,9 +1,9 @@
 const db = require("../db");
 
 const { decrypt } = require("../utils/encryption");
-
 exports.getPendingSettlements = async (req, res) => {
   try {
+
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
@@ -53,37 +53,25 @@ exports.getPendingSettlements = async (req, res) => {
     `);
 
     //////////////////////////////////////////////////////
-    // 🔐 SAFE DECRYPT (FIX)
+    // 🔓 DECRYPT FOR ADMIN (FULL DETAILS)
     //////////////////////////////////////////////////////
-    const safeDecrypt = (val) => {
-      if (!val) return null;
-      try {
-        return decrypt(val);
-      } catch (err) {
-        return val; // fallback for plain or bad data
-      }
-    };
-
     rows.forEach(r => {
-      const holder = safeDecrypt(r.account_holder_name);
-      const acc = safeDecrypt(r.account_number);
-      const ifsc = safeDecrypt(r.ifsc);
+      try {
+        r.account_holder_name = r.account_holder_name
+          ? decrypt(r.account_holder_name)
+          : null;
 
-      // 👤 Name (always readable)
-      r.account_holder_name = holder || "N/A";
+        r.account_number = r.account_number
+          ? decrypt(r.account_number)
+          : null;
 
-      // 💳 Admin can see full OR masked (choose one)
+        r.ifsc = r.ifsc
+          ? decrypt(r.ifsc)
+          : null;
 
-      // 👉 OPTION 1: FULL (recommended for admin)
-      r.account_number = acc || "N/A";
-      r.ifsc = ifsc || "N/A";
-
-      // 👉 OPTION 2: MASKED (if you want)
-      // r.account_number = acc ? "XXXX" + acc.slice(-4) : "XXXXXX";
-      // r.ifsc = ifsc ? ifsc.slice(0, 4) + "XXXX" : "XXXXXX";
-
-      r.bank_name = r.bank_name || "N/A";
-      r.branch = r.branch || "N/A";
+      } catch (err) {
+        console.log("⚠️ Decrypt skipped (old/plain data)");
+      }
     });
 
     res.json({
