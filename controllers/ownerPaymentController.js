@@ -155,13 +155,18 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
+
+
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
         b.id AS booking_id,
         b.name AS tenant_name,
-        b.owner_amount,
+
+        /* ✅ ONLY OWNER EARNING (NO AGREEMENT FEE) */
+        (b.rent_amount + b.security_deposit) AS owner_amount,
+
         b.owner_settlement,
         b.admin_settlement,
         b.settlement_date,
@@ -170,6 +175,7 @@ exports.getOwnerPayments = async (req, res) => {
         af.final_pdf,
         af.signed_pdf,
         af.viewed_by_owner,
+        af.agreement_status,
 
         /* ✅ PAYMENT */
         p.order_id,
@@ -177,7 +183,7 @@ exports.getOwnerPayments = async (req, res) => {
         /* 🔥 PG NAME */
         pg.pg_name,
 
-        /* ✅ JOIN STATUS (ONLY ADD THIS) */
+        /* ✅ JOIN STATUS */
         CASE 
           WHEN EXISTS (
             SELECT 1 
@@ -204,6 +210,10 @@ exports.getOwnerPayments = async (req, res) => {
       WHERE b.owner_id = ?
       AND p.status = 'paid'
 
+      /* ✅ IMPORTANT FIXES */
+      AND af.agreement_status = 'approved'   -- agreement must be signed
+      AND b.admin_settlement = 'DONE'        -- admin must approve
+
       ORDER BY p.created_at DESC
     `, [req.user.id]);
 
@@ -220,7 +230,7 @@ exports.getOwnerPayments = async (req, res) => {
       message: "Failed to load owner payments"
     });
   }
-};
+};   
 
 /* ================= MARK AGREEMENT AS VIEWED ================= */
 exports.markAgreementViewed = async (req, res) => {
