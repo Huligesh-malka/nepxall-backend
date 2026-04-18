@@ -88,6 +88,14 @@ router.get(
   paymentController.getUserPaymentStatus
 );
 
+
+// ✅ ADD HERE 👇
+router.get(
+  "/agreement-status/:bookingId",
+  verifyFirebaseToken,
+  paymentController.getAgreementStatus
+);
+
 // Match bank transaction (for auto-verification)
 router.post(
   "/match-bank-transaction",

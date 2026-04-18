@@ -4,9 +4,6 @@ const router = express.Router();
 const firebaseAuth = require("../middlewares/authMiddleware");
 const bookingController = require("../controllers/bookingController");
 
-/* ✅ IMPORT AGREEMENT FUNCTION */
-const { getAgreementStatus } = require("../controllers/paymentController");
-
 // ================= BOOKINGS =================
 
 // ✅ CREATE BOOKING
@@ -32,20 +29,15 @@ router.put("/owner/bookings/:bookingId", firebaseAuth, bookingController.updateB
 // ✅ OWNER TENANTS
 router.get("/owner/tenants", firebaseAuth, bookingController.getActiveTenantsByOwner);
 
-// ================= AGREEMENT =================
-
-// ✅ CHECK AGREEMENT STATUS (🔥 FIXED)
-router.get("/agreement-status/:bookingId", firebaseAuth, getAgreementStatus);
-
 // ================= 🔥 REFUND =================
 
 // ✅ USER REQUEST REFUND
 router.post("/refunds/request", firebaseAuth, bookingController.requestRefund);
 
-// ✅ USER ACCEPT REFUND
+// ✅ USER ACCEPT REFUND  🔥 NEW
 router.post("/refunds/accept", firebaseAuth, bookingController.acceptRefund);
 
-// ✅ USER REJECT REFUND
+// ✅ USER REJECT REFUND  🔥 NEW
 router.post("/refunds/reject", firebaseAuth, bookingController.rejectRefund);
 
 // ================= 🔥 VACATE =================

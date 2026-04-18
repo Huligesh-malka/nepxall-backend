@@ -728,3 +728,57 @@ exports.updateRefundStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+
+exports.getAgreementStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    // ✅ Get booking + payment
+    const [[row]] = await db.query(`
+      SELECT 
+        b.id,
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+        b.platform_fee,
+        p.amount
+      FROM bookings b
+      LEFT JOIN payments p 
+        ON p.booking_id = b.id 
+        AND p.status = 'paid'
+      WHERE b.id = ?
+    `, [bookingId]);
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    const baseAmount =
+      Number(row.rent_amount || 0) +
+      Number(row.security_deposit || 0) +
+      Number(row.maintenance_amount || 0) +
+      Number(row.platform_fee || 0);
+
+    // ✅ Check if agreement included
+    const hasAgreement = Number(row.amount) > baseAmount;
+
+    res.json({
+      success: true,
+      hasAgreement
+    });
+
+  } catch (err) {
+    console.error("Agreement status error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get agreement status"
+    });
+  }
+};
