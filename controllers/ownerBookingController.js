@@ -611,6 +611,7 @@ exports.markRefundPaid = async (req, res) => {
     connection.release();
   }
 };
+
 exports.getOwnerActiveTenants = async (req, res) => {
   try {
     const ownerId = req.user.id;
@@ -635,19 +636,20 @@ exports.getOwnerActiveTenants = async (req, res) => {
         b.room_type,
         b.food_preference,
 
+        /* ✅ CORRECT OWNER AMOUNT (NO AGREEMENT) */
+        (
+          COALESCE(b.rent_amount, 0) +
+          COALESCE(b.security_deposit, 0) +
+          COALESCE(b.maintenance_amount, 0)
+        ) AS owner_amount,
+
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
-        b.owner_amount,
 
-
-        COALESCE(b.maintenance_amount, 0) AS maintenance_amount,
-
-
-        pc.checkin_time,   -- ✅🔥 REAL CHECK-IN TIME
+        pc.checkin_time,
 
         b.status AS booking_status,
-
         b.created_at
 
       FROM pg_users pu
@@ -661,7 +663,7 @@ exports.getOwnerActiveTenants = async (req, res) => {
       LEFT JOIN pg_rooms pr 
         ON pr.id = pu.room_id
 
-      LEFT JOIN pg_checkins pc   -- ✅ NEW JOIN
+      LEFT JOIN pg_checkins pc
         ON pc.booking_id = pu.booking_id
 
       WHERE pu.owner_id = ? 
@@ -681,11 +683,3 @@ exports.getOwnerActiveTenants = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
-
-
-
-
-
-
