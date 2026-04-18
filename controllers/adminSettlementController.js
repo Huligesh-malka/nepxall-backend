@@ -1,6 +1,8 @@
 const db = require("../db");
 
 const { decrypt } = require("../utils/encryption");
+
+
 exports.getPendingSettlements = async (req, res) => {
   try {
 
@@ -8,7 +10,26 @@ exports.getPendingSettlements = async (req, res) => {
       SELECT 
         b.id AS booking_id,
         b.owner_id,
-        b.owner_amount,
+
+        /* ✅ CORRECT OWNER AMOUNT */
+        (
+          COALESCE(b.rent_amount, 0) +
+          COALESCE(b.security_deposit, 0) +
+          COALESCE(b.maintenance_amount, 0)
+        ) AS owner_amount,
+
+        /* 🔥 FULL PAYMENT (FOR REFERENCE) */
+        pay.amount AS payment_amount,
+
+        /* 🔥 ADMIN PROFIT */
+        (
+          pay.amount - 
+          (
+            COALESCE(b.rent_amount, 0) +
+            COALESCE(b.security_deposit, 0) +
+            COALESCE(b.maintenance_amount, 0)
+          )
+        ) AS admin_profit,
 
         u.name AS owner_name,
         u.phone AS owner_phone,
@@ -26,7 +47,6 @@ exports.getPendingSettlements = async (req, res) => {
 
         pay.id AS payment_id,
         pay.order_id,
-        pay.amount AS payment_amount,
         pay.created_at AS payment_date,
         pay.status AS payment_status,
         pay.utr
@@ -47,13 +67,12 @@ exports.getPendingSettlements = async (req, res) => {
         ON obd.owner_id = b.owner_id
 
       WHERE b.admin_settlement = 'PENDING'
-      AND b.owner_amount > 0
 
       ORDER BY pay.created_at DESC
     `);
 
     //////////////////////////////////////////////////////
-    // 🔓 DECRYPT FOR ADMIN (FULL DETAILS)
+    // 🔓 DECRYPT FOR ADMIN
     //////////////////////////////////////////////////////
     rows.forEach(r => {
       try {
@@ -70,7 +89,7 @@ exports.getPendingSettlements = async (req, res) => {
           : null;
 
       } catch (err) {
-        console.log("⚠️ Decrypt skipped (old/plain data)");
+        console.log("⚠️ Decrypt skipped");
       }
     });
 
@@ -88,6 +107,7 @@ exports.getPendingSettlements = async (req, res) => {
     });
   }
 };
+
 //////////////////////////////////////////////////////
 // MARK OWNER SETTLED
 //////////////////////////////////////////////////////

@@ -572,7 +572,6 @@ exports.viewPaymentScreenshot = async (req, res) => {
   }
 };
 
-
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -595,13 +594,34 @@ exports.getAdminPayments = async (req, res) => {
         b.room_type AS sharing,
         b.check_in_date,
 
-        /* 🔥 ADD THESE (IMPORTANT) */
+        /* BASE AMOUNT */
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
 
-        /* TOTAL */
-        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS total_amount,
+        /* 🔥 TOTAL WITHOUT AGREEMENT */
+        (b.rent_amount + b.security_deposit + b.maintenance_amount) AS base_amount,
+
+        /* 🔥 DETECT AGREEMENT PAID */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN 1
+          ELSE 0
+        END AS agreement_paid,
+
+        /* 🔥 AGREEMENT FEE */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN 500
+          ELSE 0
+        END AS agreement_fee,
+
+        /* 🔥 FINAL TOTAL (WITH AGREEMENT IF PAID) */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN (b.rent_amount + b.security_deposit + b.maintenance_amount + 500)
+          ELSE (b.rent_amount + b.security_deposit + b.maintenance_amount)
+        END AS total_amount,
 
         /* PG */
         pg.pg_name
@@ -610,6 +630,7 @@ exports.getAdminPayments = async (req, res) => {
       LEFT JOIN bookings b ON b.id = p.booking_id
       LEFT JOIN users u ON u.id = b.user_id
       LEFT JOIN pgs pg ON pg.id = b.pg_id
+
       ORDER BY p.created_at DESC
     `);
 
@@ -626,7 +647,6 @@ exports.getAdminPayments = async (req, res) => {
     });
   }
 };
-
 
 
 
