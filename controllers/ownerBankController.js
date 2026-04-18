@@ -90,9 +90,10 @@ exports.saveOwnerBank = async (req, res) => {
   }
 };
 
-/* ======================================================
-   GET BANK
-====================================================== */
+
+
+
+
 exports.getOwnerBank = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -110,19 +111,41 @@ exports.getOwnerBank = async (req, res) => {
 
     let data = rows[0] || null;
 
-    if (data) {
+    // 🔐 Safe decrypt helper
+    const safeDecrypt = (val) => {
+      if (!val) return null;
       try {
-        const holder = decrypt(data.account_holder_name);
-        const acc = decrypt(data.account_number);
-        const ifsc = decrypt(data.ifsc);
-
-        data.account_holder_name = holder;
-        data.account_number = maskAccount(acc); // 🔒 masked
-        data.ifsc = maskIFSC(ifsc); // 🔒 masked
-
+        return decrypt(val);
       } catch (err) {
-        console.log("⚠️ Decrypt skipped (old data)");
+        console.log("❌ Decrypt failed:", err.message);
+        return val; // fallback (handles plain or bad data)
       }
+    };
+
+    // 🔒 Mask helpers (in case not defined)
+    const maskAccount = (acc) => {
+      if (!acc) return "XXXXXX";
+      const str = acc.toString();
+      return "XXXX" + str.slice(-4);
+    };
+
+    const maskIFSC = (ifsc) => {
+      if (!ifsc) return "XXXXXX";
+      const str = ifsc.toString();
+      return str.slice(0, 4) + "XXXX"; // e.g. SBINXXXX
+    };
+
+    if (data) {
+      const holder = safeDecrypt(data.account_holder_name);
+      const acc = safeDecrypt(data.account_number);
+      const ifsc = safeDecrypt(data.ifsc);
+
+      // ✅ Always send clean UI-safe values
+      data.account_holder_name = holder || "N/A";
+      data.account_number = acc ? maskAccount(acc) : "XXXXXX";
+      data.ifsc = ifsc ? maskIFSC(ifsc) : "XXXXXX";
+      data.bank_name = data.bank_name || "N/A";
+      data.branch = data.branch || "N/A";
     }
 
     res.json({
