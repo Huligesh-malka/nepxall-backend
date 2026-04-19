@@ -6,19 +6,48 @@ const db = require("../db");
 exports.getAllRefunds = async (req, res) => {
   try {
     const [rows] = await db.query(`
+      SELECT 
+        r.*,
 
+        /* ✅ Correct order_id from payments */
+        p.order_id,
 
-      SELECT r.*, b.pg_id, b.owner_id, u.name, u.phone, p.order_id
+        b.pg_id,
+        b.owner_id,
+
+        u.name,
+        u.phone
+
       FROM refunds r
-      JOIN bookings b ON b.id = r.booking_id
-      JOIN users u ON u.id = r.user_id
+
+      JOIN bookings b 
+        ON b.id = r.booking_id
+
+      JOIN users u 
+        ON u.id = r.user_id
+
+      /* 🔥 Get order_id from payments */
+      LEFT JOIN payments p 
+        ON p.booking_id = r.booking_id
+        AND p.status = 'paid'
+
       WHERE r.refund_type = 'FULL'
+
       ORDER BY r.created_at DESC
     `);
 
-    res.json(rows);
+    res.json({
+      success: true,
+      data: rows
+    });
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Refund fetch error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 };
 
