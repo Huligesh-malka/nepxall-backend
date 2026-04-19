@@ -6,14 +6,14 @@ const admin = require("../firebaseAdmin");
 const db = require("../db");
 
 const authMiddleware = require("../middlewares/authMiddleware");
-const { registerUser } = require("../controllers/authController");
+// ❌ REMOVED: const { registerUser } = require("../controllers/authController");
 
 /////////////////////////////////////////////////////////
-// 🔥 FIREBASE LOGIN / CHECK USER
+// 🔥 FIREBASE LOGIN / CHECK USER (UPDATED)
 /////////////////////////////////////////////////////////
 router.post("/firebase", async (req, res) => {
   try {
-    const { idToken, role: requestedRole, phone } = req.body;
+    const { idToken, role: requestedRole, phone, name } = req.body;
 
     if (!idToken) {
       return res.status(400).json({ success: false, message: "Token missing" });
@@ -37,7 +37,7 @@ router.post("/firebase", async (req, res) => {
     let isNewUser = false;
 
     if (!rows.length) {
-      // New user - create basic record without name
+      // New user - create record with name if provided
       console.log("Creating new user record");
       isNewUser = true;
       
@@ -51,7 +51,7 @@ router.post("/firebase", async (req, res) => {
         `INSERT INTO users 
          (firebase_uid, name, email, phone, role, mobile_verified, created_at, updated_at) 
          VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [firebase_uid, null, email, cleanPhone, role, 1]
+        [firebase_uid, name || null, email, cleanPhone, role, 1]
       );
 
       const [[newUser]] = await db.query(
@@ -60,13 +60,37 @@ router.post("/firebase", async (req, res) => {
       );
       
       user = newUser;
-      needsName = true; // New user needs to provide name
+      
+      // Check if name was provided during creation
+      const hasValidName = user.name && 
+        user.name.trim() !== "" && 
+        user.name !== user.phone &&
+        !user.name.startsWith("+") &&
+        !/^[0-9]+$/.test(user.name);
+      
+      needsName = !hasValidName;
+      
     } else {
       // Existing user
       user = rows[0];
       isNewUser = false;
       
-      // Check if user has a valid name
+      // 🔥 UPDATE NAME IF PROVIDED AND USER HAS NO VALID NAME
+      if (name && (!user.name || user.name.trim() === "")) {
+        const isValidName = name.trim().length >= 3 && !/^[0-9+]+$/.test(name);
+
+        if (isValidName) {
+          await db.query(
+            "UPDATE users SET name = ?, updated_at = NOW() WHERE firebase_uid = ?",
+            [name.trim(), firebase_uid]
+          );
+
+          user.name = name.trim();
+          console.log("Name updated for existing user:", name.trim());
+        }
+      }
+      
+      // 🔥 SIMPLIFIED needsName LOGIC
       const hasValidName = user.name && 
         user.name.trim() !== "" && 
         user.name !== user.phone &&
@@ -102,7 +126,6 @@ router.post("/firebase", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    // Store token in localStorage on client side
     // Send response with clear structure
     res.json({
       success: true,
@@ -132,97 +155,7 @@ router.post("/firebase", async (req, res) => {
   }
 });
 
-/////////////////////////////////////////////////////////
-// ✅ REGISTER / UPDATE USER NAME
-/////////////////////////////////////////////////////////
-router.post("/register", authMiddleware, async (req, res) => {
-  try {
-    const { name, phone } = req.body;
-    const firebase_uid = req.user.firebase_uid;
-    
-    console.log("Register/Update user:", { firebase_uid, name, phone });
-
-    if (!firebase_uid) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized - No Firebase UID",
-      });
-    }
-
-    // Get existing user
-    const [[existingUser]] = await db.query(
-      "SELECT * FROM users WHERE firebase_uid = ?",
-      [firebase_uid]
-    );
-
-    if (!existingUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    // Validate name
-    if (!name || !name.trim()) {
-      return res.json({
-        success: false,
-        message: "Name is required",
-        needsName: true,
-      });
-    }
-    
-    const isValidName = name.trim().length >= 3 && !/^[0-9+]+$/.test(name);
-    
-    if (!isValidName) {
-      return res.json({
-        success: false,
-        message: "Please enter a valid name (minimum 3 characters, not a phone number)",
-        needsName: true,
-      });
-    }
-    
-    // Update user's name
-    await db.query(
-      "UPDATE users SET name = ?, updated_at = NOW() WHERE firebase_uid = ?",
-      [name.trim(), firebase_uid]
-    );
-
-    // Get updated user
-    const [[updatedUser]] = await db.query(
-      "SELECT * FROM users WHERE firebase_uid = ?",
-      [firebase_uid]
-    );
-
-    // Generate new token with updated name
-    const token = jwt.sign(
-      {
-        id: updatedUser.id,
-        firebase_uid: updatedUser.firebase_uid,
-        role: updatedUser.role,
-        name: updatedUser.name
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    console.log("User updated successfully:", updatedUser);
-
-    res.json({
-      success: true,
-      user: updatedUser,
-      token: token,
-      needsName: false,
-      isNewUser: false,
-      message: "Profile updated successfully!"
-    });
-
-  } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error: " + err.message,
-    });
-  }
-});
+// ❌ STEP 5: REGISTER API COMPLETELY REMOVED
+// router.post("/register", ...) - DELETED
 
 module.exports = router;
