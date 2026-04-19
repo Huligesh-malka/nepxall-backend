@@ -39,38 +39,118 @@ exports.verifyOwnerForBooking = async (req, res) => {
 };
 
 
+
 exports.signOwnerAgreement = async (req, res) => {
-  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info } = req.body;
+  const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info, owner_location } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    // ✅ Upload signature image directly
-    const upload = await cloudinary.uploader.upload(owner_signature, {
-      folder: "signatures"
+    // 1. Get PDF from DB
+    const [rows] = await db.query(
+      "SELECT final_pdf FROM agreements_form WHERE booking_id = ?",
+      [booking_id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "Agreement not found" });
+    }
+
+    const pdfUrl = rows[0].final_pdf;
+
+    // 2. Download PDF
+    const pdfBytes = await axios.get(pdfUrl, { responseType: "arraybuffer" });
+
+    // 3. Load PDF
+    const pdfDoc = await PDFDocument.load(pdfBytes.data);
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1]; // last page
+
+    const { width, height } = page.getSize();
+
+    // 4. Prepare signature image
+    const base64Data = owner_signature.replace(/^data:image\/\w+;base64,/, "");
+    const sigBuffer = Buffer.from(base64Data, "base64");
+
+    const pngImage = await pdfDoc.embedPng(sigBuffer);
+
+    // 5. Embed font
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    // 6. Draw signature
+    page.drawImage(pngImage, {
+      x: width - 220,
+      y: 80,
+      width: 150,
+      height: 50,
     });
 
-    // ✅ Save only signature (NO PDF processing)
+    // 7. Draw text
+    const date = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+    page.drawText("Digitally Signed by Owner", {
+      x: width - 220,
+      y: 150,
+      size: 10,
+      font,
+      color: rgb(0, 0, 0),
+    });
+
+    page.drawText(`Mobile: ${owner_mobile}`, {
+      x: width - 220,
+      y: 135,
+      size: 9,
+      font,
+    });
+
+    page.drawText(`Date: ${date}`, {
+      x: width - 220,
+      y: 120,
+      size: 9,
+      font,
+    });
+
+    page.drawText("Auth: OTP Verified", {
+      x: width - 220,
+      y: 105,
+      size: 9,
+      font,
+    });
+
+    // 8. Save PDF
+    const finalPdfBytes = await pdfDoc.save();
+
+    // 9. Upload to Cloudinary
+    const upload = await cloudinary.uploader.upload(
+      `data:application/pdf;base64,${Buffer.from(finalPdfBytes).toString("base64")}`,
+      {
+        resource_type: "raw",
+        folder: "signed_agreements",
+        format: "pdf"
+      }
+    );
+
+    // 10. Save to DB
     await db.query(`
       UPDATE agreements_form 
       SET owner_signature = ?, 
           owner_signed_at = NOW(),
           agreement_status = 'approved',
-          signed_pdf = ?,  -- you can store image URL here
+          signed_pdf = ?,
           owner_device_info = ?
       WHERE booking_id = ?
-    `, [upload.secure_url, upload.secure_url, owner_device_info, booking_id]);
+    `, [owner_signature, upload.secure_url, owner_device_info, booking_id]);
 
     res.json({
       success: true,
-      message: "Agreement signed successfully",
+      message: "PDF signed successfully",
       signed_pdf: upload.secure_url
     });
 
   } catch (err) {
-    console.error("SIGN ERROR:", err);
+    console.error("PDF SIGN ERROR:", err);
     res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
