@@ -3,47 +3,51 @@ const db = require("../db");
 /* ================= REGISTER / LOGIN USER ================= */
 exports.registerUser = async (req, res) => {
   try {
-    const { name, phone } = req.body;
-
-    const firebase_uid = req.user.firebase_uid;
-    const email = req.user.email || null;
+    const { name, phone, idToken } = req.body;
+    
+    // Get firebase_uid from token if not in request
+    const firebase_uid = req.user?.firebase_uid || req.body.firebase_uid;
+    const email = req.user?.email || null;
 
     if (!firebase_uid) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized",
+        message: "Unauthorized - No Firebase UID",
       });
     }
+
+    console.log("Processing user:", { firebase_uid, phone, name });
 
     //////////////////////////////////////////////////////
     // 🔍 CHECK EXISTING USER
     //////////////////////////////////////////////////////
-    const [[user]] = await db.query(
+    const [[existingUser]] = await db.query(
       "SELECT * FROM users WHERE firebase_uid = ?",
       [firebase_uid]
     );
 
     //////////////////////////////////////////////////////
-    // ✅ EXISTING USER
+    // ✅ EXISTING USER FOUND
     //////////////////////////////////////////////////////
-    if (user) {
-      // Check if user has a valid name
-      const hasValidName = user.name && 
-        user.name.trim() !== "" && 
-        user.name !== user.phone &&
-        !user.name.startsWith("+") &&
-        !/^[0-9]+$/.test(user.name);
+    if (existingUser) {
+      console.log("Existing user found:", existingUser);
+      
+      // Check if user has a valid name (not null, not empty, not a phone number)
+      const hasValidName = existingUser.name && 
+        existingUser.name.trim() !== "" && 
+        existingUser.name !== existingUser.phone &&
+        !existingUser.name.startsWith("+") &&
+        !/^[0-9]+$/.test(existingUser.name);
 
-      // If name is being updated
-      if (name && name.trim()) {
+      // If name is provided in request, update it
+      if (name && name.trim() && !hasValidName) {
         const isValidName = name.trim().length >= 3 && !/^[0-9+]+$/.test(name);
         
         if (!isValidName) {
           return res.json({
             success: false,
-            message: "Please enter a valid name (not phone number)",
+            message: "Please enter a valid name (minimum 3 characters, not a phone number)",
             needsName: true,
-            isExistingUser: true
           });
         }
 
@@ -62,7 +66,7 @@ exports.registerUser = async (req, res) => {
           success: true,
           user: updatedUser,
           needsName: false,
-          isExistingUser: true,
+          isNewUser: false,
           message: "Profile updated successfully"
         });
       }
@@ -70,30 +74,50 @@ exports.registerUser = async (req, res) => {
       // Return existing user info
       return res.json({
         success: true,
-        user: user,
+        user: existingUser,
         needsName: !hasValidName,
-        isExistingUser: true,
+        isNewUser: false,
         message: hasValidName ? "Welcome back!" : "Please complete your profile"
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🆕 NEW USER - Create account without name
+    // 🆕 NEW USER - Create complete account in one go
     //////////////////////////////////////////////////////
     const cleanPhone = phone.replace(/^\+91/, "").replace(/\D/g, "");
     
-    // Insert user without name (name will be collected later)
+    // Validate name for new user
+    if (!name || !name.trim()) {
+      return res.json({
+        success: false,
+        message: "Name is required for new users",
+        needsName: true,
+      });
+    }
+    
+    const isValidName = name.trim().length >= 3 && !/^[0-9+]+$/.test(name);
+    
+    if (!isValidName) {
+      return res.json({
+        success: false,
+        message: "Please enter a valid name (minimum 3 characters, not a phone number)",
+        needsName: true,
+      });
+    }
+    
+    // Insert new user with name
     const [result] = await db.query(
       `INSERT INTO users 
-       (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (name, phone, firebase_uid, role, mobile_verified, email, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        null,  // Name will be set in the next step
+        name.trim(),  // Store name immediately
         cleanPhone,
         firebase_uid,
         "tenant",
         1,
         email,
+        new Date(),
         new Date(),
       ]
     );
@@ -103,20 +127,21 @@ exports.registerUser = async (req, res) => {
       [result.insertId]
     );
 
-    // Return needsName: true for new users
+    console.log("New user created with name:", newUser);
+
     return res.json({
       success: true,
       user: newUser,
-      needsName: true,
-      isExistingUser: false,
-      message: "Please complete your profile"
+      needsName: false,  // No need for name collection
+      isNewUser: true,
+      message: "Account created successfully!"
     });
 
   } catch (err) {
     console.error("Register error:", err);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server error: " + err.message,
     });
   }
 };
