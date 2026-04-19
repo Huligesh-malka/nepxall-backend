@@ -2,7 +2,6 @@ const db = require("../db");
 
 const { decrypt } = require("../utils/encryption");
 
-
 exports.getPendingSettlements = async (req, res) => {
   try {
 
@@ -11,14 +10,14 @@ exports.getPendingSettlements = async (req, res) => {
         b.id AS booking_id,
         b.owner_id,
 
-        /* ✅ CORRECT OWNER AMOUNT */
+        /* ✅ OWNER AMOUNT */
         (
           COALESCE(b.rent_amount, 0) +
           COALESCE(b.security_deposit, 0) +
           COALESCE(b.maintenance_amount, 0)
         ) AS owner_amount,
 
-        /* 🔥 FULL PAYMENT (FOR REFERENCE) */
+        /* 🔥 TOTAL PAYMENT */
         pay.amount AS payment_amount,
 
         /* 🔥 ADMIN PROFIT */
@@ -30,6 +29,16 @@ exports.getPendingSettlements = async (req, res) => {
             COALESCE(b.maintenance_amount, 0)
           )
         ) AS admin_profit,
+
+        /* ✅ JOIN STATUS ADDED */
+        CASE 
+          WHEN EXISTS (
+            SELECT 1 
+            FROM pg_checkins pc 
+            WHERE pc.booking_id = b.id
+          ) THEN 'JOINED'
+          ELSE 'NOT_JOINED'
+        END AS join_status,
 
         u.name AS owner_name,
         u.phone AS owner_phone,
@@ -71,9 +80,7 @@ exports.getPendingSettlements = async (req, res) => {
       ORDER BY pay.created_at DESC
     `);
 
-    //////////////////////////////////////////////////////
-    // 🔓 DECRYPT FOR ADMIN
-    //////////////////////////////////////////////////////
+    // 🔓 Decrypt
     rows.forEach(r => {
       try {
         r.account_holder_name = r.account_holder_name
