@@ -27,33 +27,27 @@ exports.registerUser = async (req, res) => {
     // ✅ EXISTING USER
     //////////////////////////////////////////////////////
     if (user) {
+      // Check if user has a valid name
+      const hasValidName = user.name && 
+        user.name.trim() !== "" && 
+        user.name !== user.phone &&
+        !user.name.startsWith("+") &&
+        !/^[0-9]+$/.test(user.name);
 
-      const needsName =
-        !user.name ||
-        user.name.trim() === "" ||
-        user.name === user.phone ||
-        user.name.startsWith("+") ||
-        /^[0-9]+$/.test(user.name);
+      // If name is being updated
+      if (name && name.trim()) {
+        const isValidName = name.trim().length >= 3 && !/^[0-9+]+$/.test(name);
+        
+        if (!isValidName) {
+          return res.json({
+            success: false,
+            message: "Please enter a valid name (not phone number)",
+            needsName: true,
+            isExistingUser: true
+          });
+        }
 
-      //////////////////////////////////////////////////////
-      // 🔒 VALIDATE NAME (🔥 MAIN FIX)
-      //////////////////////////////////////////////////////
-      const isValidName =
-        name &&
-        name.trim().length >= 3 &&
-        !/^[0-9+]+$/.test(name); // ❌ reject phone numbers
-
-      // ❌ If invalid name → force user again
-      if (name && !isValidName) {
-        return res.json({
-          success: false,
-          message: "Please enter a valid name (not phone number)",
-          needsName: true,
-        });
-      }
-
-      // ✅ Update only valid name
-      if (isValidName && needsName) {
+        // Update user's name
         await db.query(
           "UPDATE users SET name = ? WHERE firebase_uid = ?",
           [name.trim(), firebase_uid]
@@ -68,27 +62,33 @@ exports.registerUser = async (req, res) => {
           success: true,
           user: updatedUser,
           needsName: false,
+          isExistingUser: true,
+          message: "Profile updated successfully"
         });
       }
 
+      // Return existing user info
       return res.json({
         success: true,
-        user,
-        needsName,
+        user: user,
+        needsName: !hasValidName,
+        isExistingUser: true,
+        message: hasValidName ? "Welcome back!" : "Please complete your profile"
       });
     }
 
     //////////////////////////////////////////////////////
-    // 🆕 NEW USER
+    // 🆕 NEW USER - Create account without name
     //////////////////////////////////////////////////////
-    const cleanPhone = phone.replace(/^\+91/, "");
-
+    const cleanPhone = phone.replace(/^\+91/, "").replace(/\D/g, "");
+    
+    // Insert user without name (name will be collected later)
     const [result] = await db.query(
       `INSERT INTO users 
        (name, phone, firebase_uid, role, mobile_verified, email, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        null,              // ❌ DO NOT store phone as name
+        null,  // Name will be set in the next step
         cleanPhone,
         firebase_uid,
         "tenant",
@@ -103,10 +103,13 @@ exports.registerUser = async (req, res) => {
       [result.insertId]
     );
 
+    // Return needsName: true for new users
     return res.json({
       success: true,
       user: newUser,
-      needsName: true, // 🔥 FORCE name step
+      needsName: true,
+      isExistingUser: false,
+      message: "Please complete your profile"
     });
 
   } catch (err) {
