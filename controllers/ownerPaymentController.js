@@ -155,7 +155,6 @@ exports.signOwnerAgreement = async (req, res) => {
   }
 };
 
-
 exports.getOwnerPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -178,8 +177,9 @@ exports.getOwnerPayments = async (req, res) => {
         b.settlement_date,
         b.room_type,
 
-        af.final_pdf,
-        af.signed_pdf,
+        /* 🔥 FIX: REMOVE "0" VALUE */
+        COALESCE(NULLIF(af.final_pdf, '0'), NULL) AS final_pdf,
+        COALESCE(NULLIF(af.signed_pdf, '0'), NULL) AS signed_pdf,
         af.viewed_by_owner,
 
         p.order_id,
