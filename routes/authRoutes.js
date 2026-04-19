@@ -6,11 +6,10 @@ const db = require("../db");
 
 /**
  * @route   POST /api/auth/firebase
- * @desc    Verify Firebase ID Token, check/create user, and return JWT
+ * @desc    Verify Firebase ID Token, check/create/update user, and return JWT
  */
 router.post("/firebase", async (req, res) => {
-  // Use a connection from the pool to handle transactions
-  const connection = await db.getConnection();
+  let connection;
   
   try {
     const { idToken, role: requestedRole, phone, name: providedName } = req.body;
@@ -24,16 +23,14 @@ router.post("/firebase", async (req, res) => {
     const firebase_uid = decoded.uid;
     const email = decoded.email || null;
     const firebase_phone = decoded.phone_number || phone || null;
-
-    // 2. Format Phone Number (Standardize to 10 digits)
     const cleanPhone = firebase_phone ? firebase_phone.replace(/^\+91/, "").replace(/\D/g, "") : null;
 
-    // Start Transaction to prevent duplicate users on slow network bursts
-    await connection.beginTransaction();
+    // Get connection from pool
+    connection = await db.getConnection();
 
-    // 3. Check if user exists (Lock the row for update)
+    // 2. Check if user exists
     const [rows] = await connection.query(
-      "SELECT * FROM users WHERE firebase_uid = ? FOR UPDATE",
+      "SELECT * FROM users WHERE firebase_uid = ? LIMIT 1",
       [firebase_uid]
     );
 
@@ -59,42 +56,32 @@ router.post("/firebase", async (req, res) => {
       // --- EXISTING USER FLOW ---
       user = rows[0];
 
-      // Update name if it was just provided in this request (Step 3 completion)
-      // Checks if currently saved name is invalid (empty or just the phone number)
-      const currentNameInvalid = !user.name || user.name.trim() === "" || /^[0-9+]+$/.test(user.name);
-      
-      if (providedName && providedName.trim().length >= 3 && currentNameInvalid) {
+      // 🔥 FIX: Update name if provided and the current name is missing or invalid
+      // This is what solves the "Failed to save profile" loop
+      if (providedName && providedName.trim().length >= 3) {
         await connection.query(
           "UPDATE users SET name = ?, updated_at = NOW() WHERE firebase_uid = ?",
           [providedName.trim(), firebase_uid]
         );
-        user.name = providedName.trim();
+        user.name = providedName.trim(); // Update local object for JWT and Response
       }
 
-      // Sync missing phone/email if they exist in Firebase but not DB
+      // Sync missing phone/email
       if (!user.phone && cleanPhone) {
-        await connection.query("UPDATE users SET phone = ? WHERE id = ?", [cleanPhone, user.id]);
+        await connection.query("UPDATE users SET phone = ? WHERE firebase_uid = ?", [cleanPhone, firebase_uid]);
         user.phone = cleanPhone;
-      }
-      if (!user.email && email) {
-        await connection.query("UPDATE users SET email = ? WHERE id = ?", [email, user.id]);
-        user.email = email;
       }
     }
 
-    await connection.commit();
+    // 3. Needs Name Validation
+    // A valid name must exist, be >= 3 chars, and NOT be a phone number
+    const isNameValid = user.name && 
+                        user.name.trim().length >= 3 && 
+                        !/^[0-9+ ]+$/.test(user.name);
+    
+    const needsName = !isNameValid;
 
-    // 4. Final "Needs Name" Validation Logic
-    // Returns true if the user still needs to provide a proper name string
-    const hasValidName = 
-      user.name && 
-      user.name.trim().length >= 3 && 
-      user.name !== user.phone &&
-      !/^[0-9+]+$/.test(user.name);
-
-    const needsName = !hasValidName;
-
-    // 5. Generate Application JWT
+    // 4. Generate Application JWT
     const token = jwt.sign(
       {
         id: user.id,
@@ -106,7 +93,7 @@ router.post("/firebase", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    // 6. Return Structured Response
+    // 5. Success Response
     return res.json({
       success: true,
       token,
@@ -119,21 +106,20 @@ router.post("/firebase", async (req, res) => {
         role: user.role,
         mobile_verified: user.mobile_verified
       },
-      needsName: needsName, 
+      needsName: needsName,
       isNewUser: isNewUser,
-      message: needsName ? "Complete your profile" : "Authentication successful"
+      message: needsName ? "Please enter your name" : "Welcome back!"
     });
 
   } catch (err) {
-    if (connection) await connection.rollback();
-    console.error("🔥 Auth Logic Error:", err);
+    console.error("🔥 Auth Backend Error:", err);
     return res.status(500).json({
       success: false,
-      message: "Server Error during Authentication",
+      message: "Database error during profile save",
       error: err.message
     });
   } finally {
-    if (connection) connection.release();
+    if (connection) connection.release(); // Always release connection back to pool
   }
 });
 
