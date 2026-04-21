@@ -237,3 +237,36 @@ exports.deleteSinglePhoto = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+
+
+
+
+
+/* ================= ADMIN - ALL PGs ================= */
+exports.getAllPGsAdmin = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        pgs.*,
+        users.name AS owner_name,
+        users.phone AS owner_phone
+      FROM pgs
+      JOIN users ON users.id = pgs.owner_id
+      WHERE pgs.is_deleted = 0
+      ORDER BY pgs.created_at DESC
+    `);
+
+    rows.forEach(pg => {
+      pg.photos = safeParsePhotos(pg.photos);
+      normalizePrices(pg);
+    });
+
+    res.json({ success: true, data: rows });
+
+  } catch (err) {
+    console.error("getAllPGsAdmin error:", err);
+    res.status(500).json({ success: false });
+  }
+};

@@ -16,4 +16,12 @@ router.get("/pg/:id", auth, adminOnly, adminController.getPGById);
 router.patch("/pg/:id/approve", auth, adminOnly, adminController.approvePG);
 router.patch("/pg/:id/reject", auth, adminOnly, adminController.rejectPG);
 
+/* ✅ ALL PGs (IMPORTANT FIX) */
+router.get(
+  "/pgs",                      // cleaner URL
+  auth,
+  adminOnly,
+  adminController.getAllPGsAdmin
+);
+
 module.exports = router;
