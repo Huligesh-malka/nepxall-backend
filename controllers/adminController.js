@@ -270,3 +270,40 @@ exports.getAllPGsAdmin = async (req, res) => {
     res.status(500).json({ success: false });
   }
 };
+
+
+
+
+exports.updatePGField = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { field, value } = req.body;
+
+    // 🔒 Allow only safe fields
+    const allowedFields = [
+      "pg_name", "pg_category", "pg_type",
+      "city", "area", "address",
+      "single_sharing", "double_sharing",
+      "deposit_amount", "maintenance_amount",
+      "description"
+    ];
+
+    if (!allowedFields.includes(field)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid field"
+      });
+    }
+
+    await db.query(
+      `UPDATE pgs SET ${field} = ? WHERE id = ?`,
+      [value, id]
+    );
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("updatePGField error:", err);
+    res.status(500).json({ success: false });
+  }
+};
