@@ -293,51 +293,39 @@ exports.uploadPhotosOnly = async (req, res) => {
     });
   }
 };
-/* ================= ADD PG (UPDATED - ADMIN + OWNER SUPPORT) ================= */
+
+
+
+
 exports.addPG = async (req, res) => {
   try {
     const b = req.body;
     console.log('Add PG request body:', b);
 
-    let numericOwnerId = req.user.id; // default = logged-in user
+    let numericOwnerId = req.user.id;
     const firebase_uid = req.user.firebase_uid;
 
     console.log('Logged-in user ID:', numericOwnerId, 'Role:', req.user.role);
 
-    //////////////////////////////////////////////////////
-    // 🔥 ADMIN FLOW → ASSIGN PG TO OWNER BY PHONE
-    //////////////////////////////////////////////////////
+    // ADMIN FLOW
     if (req.user.role === "admin" && b.contact_phone) {
-
       const cleanPhone = b.contact_phone.replace(/\D/g, "");
-
       const [[existingOwner]] = await db.query(
         "SELECT id FROM users WHERE phone = ?",
         [cleanPhone]
       );
-
       if (existingOwner) {
-        console.log("✅ Owner found:", existingOwner.id);
         numericOwnerId = existingOwner.id;
-
       } else {
-        console.log("⚡ Creating new owner for phone:", cleanPhone);
-
         const [newOwner] = await db.query(
-          `INSERT INTO users 
-           (phone, role, mobile_verified, created_at) 
-           VALUES (?, 'owner', 1, NOW())`,
+          `INSERT INTO users (phone, role, mobile_verified, created_at) VALUES (?, 'owner', 1, NOW())`,
           [cleanPhone]
         );
-
         numericOwnerId = newOwner.insertId;
-        console.log("✅ New owner created:", numericOwnerId);
       }
     }
 
-    //////////////////////////////////////////////////////
     // VALIDATION
-    //////////////////////////////////////////////////////
     if (!numericOwnerId || !b.pg_name || !b.address || !b.contact_phone || !b.city) {
       return res.status(400).json({
         success: false,
@@ -352,16 +340,12 @@ exports.addPG = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // 🔒 PLAN CHECK (ONLY FOR OWNER)
-    //////////////////////////////////////////////////////
+    // PLAN CHECK
     const currentPlan = await getUserPlanObject(numericOwnerId);
-
     const [[count]] = await db.query(
       "SELECT COUNT(*) as total FROM pgs WHERE owner_id=? AND is_deleted=0",
       [numericOwnerId]
     );
-
     if (count.total >= currentPlan.listings) {
       return res.status(400).json({
         success: false,
@@ -369,16 +353,11 @@ exports.addPG = async (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
     // PHOTOS
-    //////////////////////////////////////////////////////
     const photos = (req.files || []).map(f => f.secure_url || f.path);
 
-    //////////////////////////////////////////////////////
     // RENT CALCULATION
-    //////////////////////////////////////////////////////
     let rent_amount = 0;
-
     if (b.pg_category === "to_let") {
       rent_amount = Math.min(
         Number(b.price_1bhk || 999999),
@@ -402,13 +381,16 @@ exports.addPG = async (req, res) => {
       );
     }
 
-    //////////////////////////////////////////////////////
-    // PG DATA
-    //////////////////////////////////////////////////////
+    // COMPLETE PG DATA - ADD ALL FIELDS
     const pgData = {
-      owner_id: numericOwnerId, // 🔥 FINAL OWNER
+      // Basic info
+      owner_id: numericOwnerId,
       pg_name: b.pg_name,
       pg_code: "PG" + Math.floor(100000 + Math.random() * 900000),
+      pg_type: b.pg_type,
+      pg_category: b.pg_category,
+      
+      // Location
       location: b.address,
       address: b.address,
       area: b.area,
@@ -417,35 +399,139 @@ exports.addPG = async (req, res) => {
       landmark: b.landmark,
       latitude: b.latitude || null,
       longitude: b.longitude || null,
-      pg_type: b.pg_type,
-      pg_category: b.pg_category,
-      rent_amount,
-      deposit_amount: Number(b.security_deposit || 0),
-      maintenance_amount: Number(b.maintenance_amount || 0),
-      brokerage_amount: Number(b.brokerage_amount || 0),
-
+      pincode: b.pincode || null,
+      state: b.state || null,
+      country: b.country || null,
+      
+      // Contact
       contact_person: b.contact_person,
       contact_email: b.contact_email || null,
       contact_phone: b.contact_phone,
-
+      
+      // Financial
+      rent_amount: rent_amount,
+      deposit_amount: Number(b.security_deposit || 0),
+      maintenance_amount: Number(b.maintenance_amount || 0),
+      
+      // BHK for to_let
+      bhk_type: b.bhk_type || null,
+      furnishing_type: b.furnishing_type || null,
+      price_1bhk: b.price_1bhk ? Number(b.price_1bhk) : null,
+      price_2bhk: b.price_2bhk ? Number(b.price_2bhk) : null,
+      price_3bhk: b.price_3bhk ? Number(b.price_3bhk) : null,
+      price_4bhk: b.price_4bhk ? Number(b.price_4bhk) : null,
+      bedrooms_1bhk: b.bedrooms_1bhk ? Number(b.bedrooms_1bhk) : null,
+      bathrooms_1bhk: b.bathrooms_1bhk ? Number(b.bathrooms_1bhk) : null,
+      bedrooms_2bhk: b.bedrooms_2bhk ? Number(b.bedrooms_2bhk) : null,
+      bathrooms_2bhk: b.bathrooms_2bhk ? Number(b.bathrooms_2bhk) : null,
+      bedrooms_3bhk: b.bedrooms_3bhk ? Number(b.bedrooms_3bhk) : null,
+      bathrooms_3bhk: b.bathrooms_3bhk ? Number(b.bathrooms_3bhk) : null,
+      bedrooms_4bhk: b.bedrooms_4bhk ? Number(b.bedrooms_4bhk) : null,
+      bathrooms_4bhk: b.bathrooms_4bhk ? Number(b.bathrooms_4bhk) : null,
+      
+      // Room rates
+      single_sharing: b.single_sharing ? Number(b.single_sharing) : null,
+      double_sharing: b.double_sharing ? Number(b.double_sharing) : null,
+      triple_sharing: b.triple_sharing ? Number(b.triple_sharing) : null,
+      four_sharing: b.four_sharing ? Number(b.four_sharing) : null,
+      single_room: b.single_room ? Number(b.single_room) : null,
+      double_room: b.double_room ? Number(b.double_room) : null,
+      co_living_single_room: b.co_living_single_room ? Number(b.co_living_single_room) : null,
+      co_living_double_room: b.co_living_double_room ? Number(b.co_living_double_room) : null,
+      
+      // Facilities
+      food_available: b.food_available === "true" ? 1 : 0,
+      food_type: b.food_type || 'veg',
+      meals_per_day: b.meals_per_day ? Number(b.meals_per_day) : null,
+      ac_available: b.ac_available === "true" ? 1 : 0,
+      wifi_available: b.wifi_available === "true" ? 1 : 0,
+      tv: b.tv === "true" ? 1 : 0,
+      parking_available: b.parking_available === "true" ? 1 : 0,
+      bike_parking: b.bike_parking === "true" ? 1 : 0,
+      laundry_available: b.laundry_available === "true" ? 1 : 0,
+      washing_machine: b.washing_machine === "true" ? 1 : 0,
+      refrigerator: b.refrigerator === "true" ? 1 : 0,
+      microwave: b.microwave === "true" ? 1 : 0,
+      geyser: b.geyser === "true" ? 1 : 0,
+      power_backup: b.power_backup === "true" ? 1 : 0,
+      lift_elevator: b.lift_elevator === "true" ? 1 : 0,
+      cctv: b.cctv === "true" ? 1 : 0,
+      security_guard: b.security_guard === "true" ? 1 : 0,
+      gym: b.gym === "true" ? 1 : 0,
+      housekeeping: b.housekeeping === "true" ? 1 : 0,
+      water_purifier: b.water_purifier === "true" ? 1 : 0,
+      fire_safety: b.fire_safety === "true" ? 1 : 0,
+      study_room: b.study_room === "true" ? 1 : 0,
+      common_tv_lounge: b.common_tv_lounge === "true" ? 1 : 0,
+      balcony_open_space: b.balcony_open_space === "true" ? 1 : 0,
+      water_24x7: b.water_24x7 === "true" ? 1 : 0,
+      water_type: b.water_type || 'borewell',
+      
+      // Room furnishings
+      cupboard_available: b.cupboard_available === "true" ? 1 : 0,
+      table_chair_available: b.table_chair_available === "true" ? 1 : 0,
+      dining_table_available: b.dining_table_available === "true" ? 1 : 0,
+      attached_bathroom: b.attached_bathroom === "true" ? 1 : 0,
+      balcony_available: b.balcony_available === "true" ? 1 : 0,
+      wall_mounted_clothes_hook: b.wall_mounted_clothes_hook === "true" ? 1 : 0,
+      bed_with_mattress: b.bed_with_mattress === "true" ? 1 : 0,
+      fan_light: b.fan_light === "true" ? 1 : 0,
+      kitchen_room: b.kitchen_room === "true" ? 1 : 0,
+      
+      // Co-living inclusions
+      co_living_fully_furnished: b.co_living_fully_furnished === "true" ? 1 : 0,
+      co_living_food_included: b.co_living_food_included === "true" ? 1 : 0,
+      co_living_wifi_included: b.co_living_wifi_included === "true" ? 1 : 0,
+      co_living_housekeeping: b.co_living_housekeeping === "true" ? 1 : 0,
+      co_living_power_backup: b.co_living_power_backup === "true" ? 1 : 0,
+      co_living_maintenance: b.co_living_maintenance === "true" ? 1 : 0,
+      
+      // Rules
+      visitor_allowed: b.visitor_allowed === "true" ? 1 : 0,
+      visitor_time_restricted: b.visitor_time_restricted === "true" ? 1 : 0,
+      visitors_allowed_till: b.visitors_allowed_till || null,
+      couple_allowed: b.couple_allowed === "true" ? 1 : 0,
+      family_allowed: b.family_allowed === "true" ? 1 : 0,
+      smoking_allowed: b.smoking_allowed === "true" ? 1 : 0,
+      drinking_allowed: b.drinking_allowed === "true" ? 1 : 0,
+      pets_allowed: b.pets_allowed === "true" ? 1 : 0,
+      late_night_entry_allowed: b.late_night_entry_allowed === "true" ? 1 : 0,
+      entry_curfew_time: b.entry_curfew_time || null,
+      outside_food_allowed: b.outside_food_allowed === "true" ? 1 : 0,
+      parties_allowed: b.parties_allowed === "true" ? 1 : 0,
+      loud_music_restricted: b.loud_music_restricted === "true" ? 1 : 0,
+      lock_in_period: b.lock_in_period === "true" ? 1 : 0,
+      min_stay_months: Number(b.min_stay_months || 0),
+      notice_period: Number(b.notice_period || 1),
+      agreement_mandatory: b.agreement_mandatory === "true" ? 1 : 0,
+      id_proof_mandatory: b.id_proof_mandatory === "true" ? 1 : 0,
+      office_going_only: b.office_going_only === "true" ? 1 : 0,
+      students_only: b.students_only === "true" ? 1 : 0,
+      boys_only: b.boys_only === "true" ? 1 : 0,
+      girls_only: b.girls_only === "true" ? 1 : 0,
+      co_living_allowed: b.co_living_allowed === "true" ? 1 : 0,
+      subletting_allowed: b.subletting_allowed === "true" ? 1 : 0,
+      
+      // Room counts
+      total_rooms: Number(b.total_rooms || 0),
+      available_rooms: Number(b.available_rooms || 0),
+      
+      // Description
+      description: b.description || null,
+      
+      // Photos and status
       photos: JSON.stringify(photos),
       videos: JSON.stringify([]),
-
       status: "pending",
       is_deleted: 0
     };
 
-    //////////////////////////////////////////////////////
     // INSERT
-    //////////////////////////////////////////////////////
     const [result] = await db.query("INSERT INTO pgs SET ?", pgData);
 
-    //////////////////////////////////////////////////////
-    // 🔔 NOTIFICATION TO OWNER
-    //////////////////////////////////////////////////////
+    // NOTIFICATION
     await db.query(
-      `INSERT INTO notifications 
-       (user_id, title, message, type, is_read, created_at)
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
        VALUES (?, ?, ?, ?, 0, NOW())`,
       [
         numericOwnerId,
@@ -457,9 +543,6 @@ exports.addPG = async (req, res) => {
       ]
     );
 
-    //////////////////////////////////////////////////////
-    // RESPONSE
-    //////////////////////////////////////////////////////
     res.json({
       success: true,
       message: "Property created successfully",
