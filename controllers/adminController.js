@@ -272,20 +272,34 @@ exports.getAllPGsAdmin = async (req, res) => {
 };
 
 
-
-
 exports.updatePGField = async (req, res) => {
   try {
     const { id } = req.params;
     const { field, value } = req.body;
 
-    // 🔒 Allow only safe fields
+    console.log("Updating field:", field, "Value:", value);
+
+    // 🔒 Allow ALL important fields (match your DB)
     const allowedFields = [
+      // Basic
       "pg_name", "pg_category", "pg_type",
-      "city", "area", "address",
-      "single_sharing", "double_sharing",
+      "city", "area", "address", "landmark", "pincode",
+
+      // Pricing
+      "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
+      "single_room", "double_room", "triple_room",
+
+      // BHK
+      "price_1bhk", "price_2bhk", "price_3bhk",
+
+      // Co-living
+      "co_living_single_room", "co_living_double_room",
+
+      // Fees
       "deposit_amount", "maintenance_amount",
-      "description"
+
+      // Others
+      "description", "contact_person", "contact_phone", "contact_email"
     ];
 
     if (!allowedFields.includes(field)) {
@@ -295,15 +309,70 @@ exports.updatePGField = async (req, res) => {
       });
     }
 
+    // 🔥 VALUE CLEANING
+    let finalValue = value;
+
+    if (value === "" || value === "—") {
+      finalValue = null;
+    }
+
+    // Convert numbers properly
+    const numberFields = [
+      "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
+      "single_room", "double_room", "triple_room",
+      "price_1bhk", "price_2bhk", "price_3bhk",
+      "co_living_single_room", "co_living_double_room",
+      "deposit_amount", "maintenance_amount"
+    ];
+
+    if (numberFields.includes(field)) {
+      finalValue = finalValue ? Number(finalValue) : null;
+    }
+
+    // 🔥 UPDATE FIELD
     await db.query(
       `UPDATE pgs SET ${field} = ? WHERE id = ?`,
-      [value, id]
+      [finalValue, id]
     );
+
+    // 🔥 AUTO UPDATE RENT_AMOUNT (IMPORTANT)
+    const [rows] = await db.query(
+      "SELECT * FROM pgs WHERE id = ?",
+      [id]
+    );
+
+    if (rows.length > 0) {
+      const pg = rows[0];
+
+      const prices = [
+        pg.single_sharing,
+        pg.double_sharing,
+        pg.triple_sharing,
+        pg.four_sharing,
+        pg.single_room,
+        pg.double_room,
+        pg.price_1bhk,
+        pg.price_2bhk,
+        pg.price_3bhk,
+        pg.co_living_single_room,
+        pg.co_living_double_room
+      ].filter(v => v && v > 0);
+
+      const rent_amount = prices.length ? Math.min(...prices) : 0;
+
+      await db.query(
+        "UPDATE pgs SET rent_amount = ? WHERE id = ?",
+        [rent_amount, id]
+      );
+    }
 
     res.json({ success: true });
 
   } catch (err) {
     console.error("updatePGField error:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 };
