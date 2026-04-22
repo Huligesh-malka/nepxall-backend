@@ -1501,3 +1501,65 @@ exports.upgradeUserPlan = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+
+exports.addPGPublic = async (req, res) => {
+  try {
+    const b = req.body;
+
+    if (!b.contact_phone || !b.pg_name || !b.city) {
+      return res.status(400).json({
+        success: false,
+        message: "Required fields missing"
+      });
+    }
+
+    const phone = b.contact_phone.replace(/\D/g, "");
+
+    // 🔍 Check existing user
+    const [[existing]] = await db.query(
+      "SELECT id FROM users WHERE phone = ?",
+      [phone]
+    );
+
+    let ownerId;
+
+    if (existing) {
+      ownerId = existing.id;
+    } else {
+      const [newUser] = await db.query(
+        `INSERT INTO users (phone, role, mobile_verified, created_at)
+         VALUES (?, 'owner', 0, NOW())`,
+        [phone]
+      );
+      ownerId = newUser.insertId;
+    }
+
+    // ✅ Insert PG (minimal)
+    const [result] = await db.query(
+      `INSERT INTO pgs 
+      (owner_id, pg_name, city, address, contact_phone, status)
+      VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [
+        ownerId,
+        b.pg_name,
+        b.city,
+        b.address || "",
+        phone
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "PG submitted successfully",
+      pg_id: result.insertId
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};

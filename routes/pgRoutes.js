@@ -175,6 +175,9 @@ router.get("/nearby/:lat/:lng", controller.getNearbyPGs);
 
 router.get("/search/advanced", controller.advancedSearchPG);
 
+
+router.post("/add-public", controller.addPGPublic);
+
 /* =================================================
    USER HELPERS
 ================================================= */
