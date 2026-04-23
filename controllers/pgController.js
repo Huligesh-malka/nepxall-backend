@@ -618,7 +618,6 @@ exports.getPGById = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 /* ================= SEARCH PG ================= */
 exports.advancedSearchPG = async (req, res) => {
   try {
@@ -628,6 +627,13 @@ exports.advancedSearchPG = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
 
     const offset = (page - 1) * limit;
+
+    // ✅ Get total count first
+    const [countResult] = await db.query(
+      `SELECT COUNT(*) as total FROM pgs
+       WHERE is_deleted = 0 AND status = 'active'`
+    );
+    const totalCount = countResult[0].total;
 
     // ✅ Load only limited PGs
     const [rows] = await db.query(
@@ -674,12 +680,13 @@ exports.advancedSearchPG = async (req, res) => {
       return pg;
     });
 
-    // ✅ Response
+    // ✅ Response with proper total count
     res.json({
       success: true,
       page,
       limit,
-      total: data.length,
+      total: totalCount,  // ← FIXED: Now returns actual total from DB
+      hasMore: offset + data.length < totalCount,  // ← ADDED: Helper to know if more data exists
       data
     });
 
