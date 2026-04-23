@@ -16,6 +16,7 @@
   "author": "Huligesh",
   "license": "ISC",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.13.5",
     "browser-image-compression": "^2.0.2",

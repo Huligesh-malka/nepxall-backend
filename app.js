@@ -119,7 +119,7 @@
   app.use("/api/announcements", safeLoad("./routes/announcementRoutes"));
   app.use("/api/reviews", safeLoad("./routes/reviewRoutes"));
   app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
-
+app.use("/api/ai", safeLoad("./routes/ai"));
   /* ================= OWNER ROUTES ================= */
   app.use("/api/owner", safeLoad("./routes/ownerPaymentRoutes"));
   app.use("/api/plan", safeLoad("./routes/planRoutes"));
