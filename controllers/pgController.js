@@ -622,14 +622,32 @@ exports.getPGById = async (req, res) => {
 /* ================= SEARCH PG ================= */
 exports.advancedSearchPG = async (req, res) => {
   try {
+
+    // ✅ Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    const offset = (page - 1) * limit;
+
+    // ✅ Load only limited PGs
     const [rows] = await db.query(
-      "SELECT * FROM pgs WHERE is_deleted = 0 AND status = 'active'"
+      `SELECT * FROM pgs
+       WHERE is_deleted = 0
+       AND status = 'active'
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
     );
 
     const data = rows.map(pg => {
+
+      // ✅ Parse photos
       pg.photos = safeParsePhotos(pg.photos);
+
+      // ✅ Normalize prices
       normalizePrices(pg);
 
+      // ✅ Convert DB numbers to boolean
       const boolFields = [
         "food_available", "ac_available", "wifi_available", "tv",
         "parking_available", "bike_parking", "laundry_available",
@@ -656,14 +674,25 @@ exports.advancedSearchPG = async (req, res) => {
       return pg;
     });
 
-    res.json({ success: true, data });
+    // ✅ Response
+    res.json({
+      success: true,
+      page,
+      limit,
+      total: data.length,
+      data
+    });
 
   } catch (err) {
+
     console.error("advancedSearchPG error:", err);
-    res.status(500).json({ success: false, message: err.message });
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 };
-
 /* ================= UPDATE PG ================= */
 exports.updatePG = async (req, res) => {
   try {
