@@ -3,30 +3,81 @@ const router = express.Router();
 
 const auth = require("../middlewares/authMiddleware");
 const adminOnly = require("../middlewares/admin");
+
 const adminController = require("../controllers/adminController");
+
+/* 🔥 IMPORT MULTER / CLOUDINARY UPLOAD */
+const upload = require("../middlewares/upload");
 
 /* ================= ADMIN HEALTH ================= */
 router.get("/health", (req, res) => {
-  res.json({ success: true, message: "Admin API working" });
+  res.json({
+    success: true,
+    message: "Admin API working"
+  });
 });
 
 /* ================= PG LIST ================= */
-router.get("/pgs/pending", auth, adminOnly, adminController.getPendingPGs);
-router.get("/pgs", auth, adminOnly, adminController.getAllPGsAdmin);
+router.get(
+  "/pgs/pending",
+  auth,
+  adminOnly,
+  adminController.getPendingPGs
+);
+
+router.get(
+  "/pgs",
+  auth,
+  adminOnly,
+  adminController.getAllPGsAdmin
+);
 
 /* ================= SINGLE PG ================= */
-router.get("/pg/:id", auth, adminOnly, adminController.getPGById);
+router.get(
+  "/pg/:id",
+  auth,
+  adminOnly,
+  adminController.getPGById
+);
 
 /* ================= APPROVAL ================= */
-router.patch("/pg/:id/approve", auth, adminOnly, adminController.approvePG);
-router.patch("/pg/:id/reject", auth, adminOnly, adminController.rejectPG);
+router.patch(
+  "/pg/:id/approve",
+  auth,
+  adminOnly,
+  adminController.approvePG
+);
 
-/* ================= 🔥 UPDATE FIELD (IMPORTANT) ================= */
+router.patch(
+  "/pg/:id/reject",
+  auth,
+  adminOnly,
+  adminController.rejectPG
+);
+
+/* ================= UPDATE FIELD ================= */
 router.patch(
   "/pg/:id/update-field",
   auth,
   adminOnly,
   adminController.updatePGField
+);
+
+/* ================= UPLOAD PHOTOS ================= */
+router.post(
+  "/pg/:id/photos",
+  auth,
+  adminOnly,
+  upload.array("photos", 20),
+  adminController.uploadPhotosOnly
+);
+
+/* ================= DELETE PHOTO ================= */
+router.delete(
+  "/pg/:id/photo",
+  auth,
+  adminOnly,
+  adminController.deleteSinglePhoto
 );
 
 module.exports = router;
