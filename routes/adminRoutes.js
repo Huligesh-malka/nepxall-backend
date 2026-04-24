@@ -6,8 +6,8 @@ const adminOnly = require("../middlewares/admin");
 
 const adminController = require("../controllers/adminController");
 
-/* 🔥 IMPORT MULTER / CLOUDINARY UPLOAD */
-const upload = require("../middlewares/upload");
+/* ✅ CORRECT IMPORT */
+const { uploadPhotos } = require("../middlewares/upload");
 
 /* ================= ADMIN HEALTH ================= */
 router.get("/health", (req, res) => {
@@ -68,7 +68,7 @@ router.post(
   "/pg/:id/photos",
   auth,
   adminOnly,
-  upload.array("photos", 20),
+  uploadPhotos.array("photos", 20),
   adminController.uploadPhotosOnly
 );
 
