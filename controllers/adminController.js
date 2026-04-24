@@ -174,39 +174,57 @@ exports.getPGById = async (req, res) => {
   }
 };
 
-/* =====================================================
-   UPLOAD PHOTOS ONLY
-===================================================== */
 exports.uploadPhotosOnly = async (req, res) => {
   try {
     const { id } = req.params;
     const files = req.files || [];
 
     if (!files.length) {
-      return res.status(400).json({ success: false, message: "No photos uploaded" });
+      return res.status(400).json({
+        success: false,
+        message: "No photos uploaded"
+      });
     }
 
-    const newPhotos = files.map(f => `/uploads/pg-photos/${f.filename}`);
+    // ✅ FIXED
+    const newPhotos = files.map(
+      (f) => f.secure_url || f.path
+    );
 
     const [[row]] = await db.query(
       "SELECT photos FROM pgs WHERE id = ? AND is_deleted = 0",
       [id]
     );
 
-    if (!row) return res.status(404).json({ success: false, message: "PG not found" });
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "PG not found"
+      });
+    }
 
-    const updatedPhotos = [...safeParsePhotos(row.photos), ...newPhotos];
+    const updatedPhotos = [
+      ...safeParsePhotos(row.photos),
+      ...newPhotos
+    ];
 
     await db.query(
       "UPDATE pgs SET photos = ? WHERE id = ?",
       [JSON.stringify(updatedPhotos), id]
     );
 
-    res.json({ success: true, photos: updatedPhotos });
+    res.json({
+      success: true,
+      photos: updatedPhotos
+    });
 
   } catch (err) {
     console.error("Upload photo error:", err);
-    res.status(500).json({ success: false, message: err.message });
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 };
 
