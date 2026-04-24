@@ -104,8 +104,36 @@ exports.createBooking = async (req, res) => {
     // 🔥 COLIVING CATEGORY (YOUR FIX)
     //////////////////////////////////////////////////////
     if (pg.pg_category === "coliving") {
-      if (normalized === "singleroom") rent = pg.co_living_single_room || 0;
-      else if (normalized === "doubleroom") rent = pg.co_living_double_room || 0;
+      if (
+        room_type === "Single Room" &&
+        pg.co_living_single_room > 0
+      ) {
+        rent = pg.co_living_single_room;
+      }
+      else if (
+        room_type === "Double Room" &&
+        pg.co_living_double_room > 0
+      ) {
+        rent = pg.co_living_double_room;
+      }
+      else if (
+        room_type === "Triple Sharing" &&
+        pg.coliving_three_sharing > 0
+      ) {
+        rent = pg.coliving_three_sharing;
+      }
+      else if (
+        room_type === "Four Sharing" &&
+        pg.coliving_four_sharing > 0
+      ) {
+        rent = pg.coliving_four_sharing;
+      }
+      else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid room not configured"
+        });
+      }
     }
 
     //////////////////////////////////////////////////////
