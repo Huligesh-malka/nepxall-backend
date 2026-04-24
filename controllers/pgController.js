@@ -356,7 +356,7 @@ exports.addPG = async (req, res) => {
     // PHOTOS
     const photos = (req.files || []).map(f => f.secure_url || f.path);
 
-    // RENT CALCULATION
+    // RENT CALCULATION with new coliving fields
     let rent_amount = 0;
     if (b.pg_category === "to_let") {
       rent_amount = Math.min(
@@ -368,7 +368,9 @@ exports.addPG = async (req, res) => {
     } else if (b.pg_category === "coliving") {
       rent_amount = Math.min(
         Number(b.co_living_single_room || 999999),
-        Number(b.co_living_double_room || 999999)
+        Number(b.co_living_double_room || 999999),
+        Number(b.coliving_three_sharing || 999999),
+        Number(b.coliving_four_sharing || 999999)
       );
     } else {
       rent_amount = Math.min(
@@ -438,6 +440,14 @@ exports.addPG = async (req, res) => {
       double_room: b.double_room ? Number(b.double_room) : null,
       co_living_single_room: b.co_living_single_room ? Number(b.co_living_single_room) : null,
       co_living_double_room: b.co_living_double_room ? Number(b.co_living_double_room) : null,
+      
+      // NEW FIELDS - Coliving sharing types
+      coliving_three_sharing: b.coliving_three_sharing ? Number(b.coliving_three_sharing) : null,
+      coliving_four_sharing: b.coliving_four_sharing ? Number(b.coliving_four_sharing) : null,
+      
+      // NEW FIELDS - Minimum stay
+      min_stay_available: b.min_stay_available === "true" ? 1 : 0,
+      min_stay_days: Number(b.min_stay_days || 0),
       
       // Facilities
       food_available: b.food_available === "true" ? 1 : 0,
@@ -700,6 +710,8 @@ exports.advancedSearchPG = async (req, res) => {
     });
   }
 };
+
+
 /* ================= UPDATE PG ================= */
 exports.updatePG = async (req, res) => {
   try {
@@ -723,7 +735,8 @@ exports.updatePG = async (req, res) => {
       b.single_sharing, b.double_sharing, b.triple_sharing,
       b.four_sharing, b.single_room, b.double_room,
       b.price_1bhk, b.price_2bhk, b.price_3bhk, b.price_4bhk,
-      b.co_living_single_room, b.co_living_double_room
+      b.co_living_single_room, b.co_living_double_room,
+      b.coliving_three_sharing, b.coliving_four_sharing  // NEW FIELDS
     ];
 
     const hasPriceUpdate = priceFields.some(v => v !== undefined && v !== "");
@@ -743,7 +756,8 @@ exports.updatePG = async (req, res) => {
 
       } else if (b.pg_category === "coliving") {
         const prices = cleanNums([
-          b.co_living_single_room, b.co_living_double_room
+          b.co_living_single_room, b.co_living_double_room,
+          b.coliving_three_sharing, b.coliving_four_sharing  // NEW FIELDS
         ]);
         rent_amount = prices.length ? Math.min(...prices) : undefined;
 
@@ -792,6 +806,15 @@ exports.updatePG = async (req, res) => {
       triple_room: b.triple_room ? Number(b.triple_room) : null,
       co_living_single_room: b.co_living_single_room ? Number(b.co_living_single_room) : null,
       co_living_double_room: b.co_living_double_room ? Number(b.co_living_double_room) : null,
+      
+      // NEW FIELDS - Coliving sharing types
+      coliving_three_sharing: b.coliving_three_sharing ? Number(b.coliving_three_sharing) : null,
+      coliving_four_sharing: b.coliving_four_sharing ? Number(b.coliving_four_sharing) : null,
+      
+      // NEW FIELDS - Minimum stay
+      min_stay_available: toBool(b.min_stay_available),
+      min_stay_days: Number(b.min_stay_days || 0),
+      
       food_available: toBool(b.food_available),
       food_type: b.food_type || 'veg',
       meals_per_day: b.meals_per_day || null,
