@@ -177,7 +177,7 @@ router.get("/search/advanced", controller.advancedSearchPG);
 
 
 router.post("/add-public", controller.addPGPublic);
-
+router.get("/:id", controller.getPGById);
 /* =================================================
    USER HELPERS
 ================================================= */

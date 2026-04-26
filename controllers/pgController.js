@@ -1622,3 +1622,66 @@ exports.addPGPublic = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+exports.getQuickViewPG = async (req, res) => {
+  try {
+
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        pg_name,
+        pg_type,
+        pg_category,
+        city,
+        area,
+        address,
+        rent_amount,
+        deposit_amount,
+        food_available,
+        wifi_available,
+        ac_available,
+        parking_available,
+        laundry_available,
+        single_sharing,
+        double_sharing,
+        triple_sharing,
+        four_sharing,
+        single_room,
+        double_room,
+        photos,
+        description
+      FROM pgs
+      WHERE id = ?
+      AND is_deleted = 0
+    `, [req.params.id]);
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "PG not found"
+      });
+    }
+
+    const pg = rows[0];
+
+    pg.photos = safeParsePhotos(pg.photos);
+
+    res.json({
+      success: true,
+      data: pg
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
