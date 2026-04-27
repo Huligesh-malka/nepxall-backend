@@ -816,8 +816,10 @@ exports.createCashfreeOrder = async (req, res) => {
     console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
     
     // ✅ CORRECT METHOD FOR YOUR SDK VERSION
-    const response = await Cashfree.PG.orders.create(request);
-    
+    const response = await Cashfree.PGCreateOrder(
+  "2023-08-01",
+  request
+);
     console.log("CASHFREE RESPONSE:", response.data);
     
     res.json({
@@ -860,7 +862,7 @@ exports.verifyCashfreePayment = async (req, res) => {
     res.json({
       success: true,
       isPaid: isPaid,
-      
+
       payments: payments
     });
     
