@@ -836,116 +836,199 @@ exports.createCashfreeOrder = async (req, res) => {
   }
 };
 
+
+
+
 //////////////////////////////////////////////////////
 // VERIFY CASHFREE PAYMENT (UPDATED WITH AUTO BOOKING)
 //////////////////////////////////////////////////////
 exports.verifyCashfreePayment = async (req, res) => {
+
   try {
+
     const { orderId } = req.params;
-    
-    // ✅ CORRECT METHOD FOR YOUR SDK VERSION
-    const response = await cashfree.PGOrderFetchPayments(orderId);
-    
-    const payments = response.data;
-    const isPaid = payments.some(payment => payment.payment_status === "SUCCESS");
-    
+
+    console.log("VERIFY ORDER:", orderId);
+
+    //////////////////////////////////////////////////////
+    // FETCH CASHFREE PAYMENT STATUS
+    //////////////////////////////////////////////////////
+    const response =
+      await cashfree.PGOrderFetchPayments(orderId);
+
+    //////////////////////////////////////////////////////
+    // SAFE RESPONSE PARSING
+    //////////////////////////////////////////////////////
+    const payments = response.data || [];
+
+    console.log(
+      "VERIFY RESPONSE:",
+      JSON.stringify(payments, null, 2)
+    );
+
+    let isPaid = false;
+
+    // ✅ ARRAY RESPONSE
+    if (Array.isArray(payments)) {
+
+      isPaid = payments.some(
+        payment =>
+          payment.payment_status === "SUCCESS"
+      );
+
+    }
+
+    // ✅ SINGLE OBJECT RESPONSE
+    else if (
+      payments.payment_status === "SUCCESS"
+    ) {
+
+      isPaid = true;
+
+    }
+
+    console.log("IS PAID:", isPaid);
+
+    //////////////////////////////////////////////////////
+    // IF PAYMENT SUCCESS
+    //////////////////////////////////////////////////////
     if (isPaid) {
+
       //////////////////////////////////////////////////////
       // UPDATE PAYMENT
       //////////////////////////////////////////////////////
       await db.query(
         `
-        UPDATE payments 
-        SET status='paid', 
-            verified_by_admin=1 
+        UPDATE payments
+        SET status='paid',
+            verified_by_admin=1
         WHERE order_id=?
         `,
         [orderId]
       );
-      
+
       //////////////////////////////////////////////////////
       // GET PAYMENT + BOOKING
       //////////////////////////////////////////////////////
       const [[payment]] = await db.query(
         `
-        SELECT 
-          p.booking_id, 
-          p.amount, 
-          b.pg_id, 
-          b.user_id, 
-          b.owner_id, 
-          b.room_id, 
-          b.check_in_date 
-        FROM payments p 
-        JOIN bookings b 
-          ON b.id = p.booking_id 
+        SELECT
+          p.booking_id,
+          p.amount,
+          b.pg_id,
+          b.user_id,
+          b.owner_id,
+          b.room_id,
+          b.check_in_date
+        FROM payments p
+        JOIN bookings b
+          ON b.id = p.booking_id
         WHERE p.order_id=?
         `,
         [orderId]
       );
-      
+
       //////////////////////////////////////////////////////
       // AUTO BOOKING CONFIRM
       //////////////////////////////////////////////////////
       if (payment) {
+
         await db.query(
           `
-          UPDATE bookings 
-          SET status='confirmed', 
-              payment_status='paid', 
-              owner_amount=?, 
-              owner_settlement='PENDING' 
+          UPDATE bookings
+          SET status='confirmed',
+              payment_status='paid',
+              owner_amount=?,
+              owner_settlement='PENDING'
           WHERE id=?
           `,
           [payment.amount, payment.booking_id]
         );
-        
+
+        //////////////////////////////////////////////////////
+        // PREVENT DUPLICATE PG USER
+        //////////////////////////////////////////////////////
+        const [[existingUser]] = await db.query(
+          `
+          SELECT id
+          FROM pg_users
+          WHERE booking_id=?
+          `,
+          [payment.booking_id]
+        );
+
         //////////////////////////////////////////////////////
         // ADD USER TO PG
         //////////////////////////////////////////////////////
-        await db.query(
-          `
-          INSERT INTO pg_users 
-          (owner_id, pg_id, room_id, user_id, join_date, status, booking_id) 
-          VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
-          `,
-          [
-            payment.owner_id,
-            payment.pg_id,
-            payment.room_id || null,
-            payment.user_id,
-            payment.check_in_date,
-            payment.booking_id
-          ]
-        );
-        
+        if (!existingUser) {
+
+          await db.query(
+            `
+            INSERT INTO pg_users
+            (
+              owner_id,
+              pg_id,
+              room_id,
+              user_id,
+              join_date,
+              status,
+              booking_id
+            )
+            VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+            `,
+            [
+              payment.owner_id,
+              payment.pg_id,
+              payment.room_id || null,
+              payment.user_id,
+              payment.check_in_date,
+              payment.booking_id
+            ]
+          );
+
+        }
+
         //////////////////////////////////////////////////////
         // UPDATE ROOM OCCUPANCY
         //////////////////////////////////////////////////////
         if (payment.room_id) {
+
           await db.query(
             `
-            UPDATE pg_rooms 
-            SET occupied_seats = occupied_seats + 1 
+            UPDATE pg_rooms
+            SET occupied_seats = occupied_seats + 1
             WHERE id=?
             `,
             [payment.room_id]
           );
+
         }
+
       }
+
     }
-    
-    res.json({
+
+    //////////////////////////////////////////////////////
+    // SUCCESS RESPONSE
+    //////////////////////////////////////////////////////
+    return res.json({
       success: true,
-      isPaid: isPaid,
-      payments: payments
+      isPaid,
+      payments
     });
-    
+
   } catch (err) {
-    console.error("Verify payment error:", err.response?.data || err.message);
-    res.status(500).json({
+
+    console.error(
+      "VERIFY PAYMENT ERROR:",
+      err.response?.data || err.message
+    );
+
+    return res.status(500).json({
       success: false,
-      message: "Failed to verify payment"
+      message: "Payment verification failed"
     });
+
   }
+
 };
