@@ -2,14 +2,37 @@ const QRCode = require("qrcode");
 const db = require("../db");
 const path = require("path");
 
-// Cashfree Payment Gateway Configuration (UPDATED)
+// Cashfree Payment Gateway Configuration - FIXED VERSION
 const Cashfree = require("cashfree-pg");
 
-Cashfree.CFConfig({
-  mode: "PRODUCTION",
+// Initialize Cashfree with the correct method for your version
+// Try different initialization methods based on your package version
+
+// Method 1: Direct assignment (works for older versions)
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = "PRODUCTION";
+
+// Note: If the above doesn't work, uncomment one of these alternatives:
+/*
+// Method 2: Using CFConfig (if available in newer version)
+if (typeof Cashfree.CFConfig === 'function') {
+  Cashfree.CFConfig({
+    mode: "PRODUCTION",
+    appId: process.env.CASHFREE_APP_ID,
+    secretKey: process.env.CASHFREE_SECRET_KEY,
+  });
+}
+*/
+
+// Method 3: Using initialize method (check your package docs)
+/*
+Cashfree.initialize({
   appId: process.env.CASHFREE_APP_ID,
   secretKey: process.env.CASHFREE_SECRET_KEY,
+  environment: "PRODUCTION"
 });
+*/
 
 //////////////////////////////////////////////////////
 // CREATE UPI PAYMENT
@@ -785,7 +808,7 @@ exports.getAgreementStatus = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// CREATE CASHFREE ORDER (UPDATED)
+// CREATE CASHFREE ORDER (UPDATED - FIXED VERSION)
 //////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
   try {
@@ -793,36 +816,56 @@ exports.createCashfreeOrder = async (req, res) => {
     
     const order_id = "order_" + Date.now();
     
-    const request = {
-      orderId: order_id,
-      orderAmount: Number(amount),
-      orderCurrency: "INR",
-      customerDetails: {
-        customerId: String(customerId),
-        customerPhone: String(customerPhone),
-        customerEmail: "support@nepxall.com"
-      },
-      orderMeta: {
-        returnUrl: "https://nepxall.com/payment-success?order_id={order_id}"
+    // Try different API endpoints based on your Cashfree version
+    
+    // Option 1: For newer Cashfree SDK (v2+)
+    try {
+      const request = {
+        order_id: order_id,
+        order_amount: Number(amount),
+        order_currency: "INR",
+        customer_details: {
+          customer_id: String(customerId),
+          customer_phone: String(customerPhone),
+          customer_email: "support@nepxall.com"
+        },
+        order_meta: {
+          return_url: "https://nepxall.com/payment-success?order_id={order_id}"
+        }
+      };
+      
+      console.log("CASHFREE REQUEST:", request);
+      
+      // Try different method names based on your SDK version
+      let response;
+      
+      if (typeof Cashfree.PGCreateOrder === 'function') {
+        // Older version
+        response = await Cashfree.PGCreateOrder("2023-08-01", request);
+      } else if (Cashfree.PG && typeof Cashfree.PG.orders?.createOrder === 'function') {
+        // Newer version with CFConfig
+        response = await Cashfree.PG.orders.createOrder(request);
+      } else {
+        throw new Error("No compatible Cashfree method found");
       }
-    };
-    
-    console.log("CASHFREE REQUEST:", request);
-    
-    const response = await Cashfree.PG.orders.createOrder(request);
-    
-    console.log("CASHFREE RESPONSE:", response.data);
-    
-    res.json({
-      success: true,
-      payment_session_id: response.data.payment_session_id
-    });
+      
+      console.log("CASHFREE RESPONSE:", response.data);
+      
+      return res.json({
+        success: true,
+        payment_session_id: response.data.payment_session_id
+      });
+      
+    } catch (apiError) {
+      console.error("Cashfree API Error:", apiError);
+      throw apiError;
+    }
     
   } catch (err) {
     console.error("Cashfree error:", err.response?.data || err.message);
     res.status(500).json({
       success: false,
-      message: "Cashfree order failed"
+      message: "Cashfree order failed: " + (err.response?.data?.message || err.message)
     });
   }
 };
