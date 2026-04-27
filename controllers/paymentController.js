@@ -837,7 +837,7 @@ exports.createCashfreeOrder = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// VERIFY CASHFREE PAYMENT
+// VERIFY CASHFREE PAYMENT (UPDATED WITH AUTO BOOKING)
 //////////////////////////////////////////////////////
 exports.verifyCashfreePayment = async (req, res) => {
   try {
@@ -850,17 +850,94 @@ exports.verifyCashfreePayment = async (req, res) => {
     const isPaid = payments.some(payment => payment.payment_status === "SUCCESS");
     
     if (isPaid) {
-      // Update your payment status in database
+      //////////////////////////////////////////////////////
+      // UPDATE PAYMENT
+      //////////////////////////////////////////////////////
       await db.query(
-        `UPDATE payments SET status='paid' WHERE order_id=?`,
+        `
+        UPDATE payments 
+        SET status='paid', 
+            verified_by_admin=1 
+        WHERE order_id=?
+        `,
         [orderId]
       );
+      
+      //////////////////////////////////////////////////////
+      // GET PAYMENT + BOOKING
+      //////////////////////////////////////////////////////
+      const [[payment]] = await db.query(
+        `
+        SELECT 
+          p.booking_id, 
+          p.amount, 
+          b.pg_id, 
+          b.user_id, 
+          b.owner_id, 
+          b.room_id, 
+          b.check_in_date 
+        FROM payments p 
+        JOIN bookings b 
+          ON b.id = p.booking_id 
+        WHERE p.order_id=?
+        `,
+        [orderId]
+      );
+      
+      //////////////////////////////////////////////////////
+      // AUTO BOOKING CONFIRM
+      //////////////////////////////////////////////////////
+      if (payment) {
+        await db.query(
+          `
+          UPDATE bookings 
+          SET status='confirmed', 
+              payment_status='paid', 
+              owner_amount=?, 
+              owner_settlement='PENDING' 
+          WHERE id=?
+          `,
+          [payment.amount, payment.booking_id]
+        );
+        
+        //////////////////////////////////////////////////////
+        // ADD USER TO PG
+        //////////////////////////////////////////////////////
+        await db.query(
+          `
+          INSERT INTO pg_users 
+          (owner_id, pg_id, room_id, user_id, join_date, status, booking_id) 
+          VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+          `,
+          [
+            payment.owner_id,
+            payment.pg_id,
+            payment.room_id || null,
+            payment.user_id,
+            payment.check_in_date,
+            payment.booking_id
+          ]
+        );
+        
+        //////////////////////////////////////////////////////
+        // UPDATE ROOM OCCUPANCY
+        //////////////////////////////////////////////////////
+        if (payment.room_id) {
+          await db.query(
+            `
+            UPDATE pg_rooms 
+            SET occupied_seats = occupied_seats + 1 
+            WHERE id=?
+            `,
+            [payment.room_id]
+          );
+        }
+      }
     }
     
     res.json({
       success: true,
       isPaid: isPaid,
-
       payments: payments
     });
     
