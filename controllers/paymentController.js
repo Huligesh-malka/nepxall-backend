@@ -2,37 +2,12 @@ const QRCode = require("qrcode");
 const db = require("../db");
 const path = require("path");
 
-// Cashfree Payment Gateway Configuration - FIXED VERSION
-const Cashfree = require("cashfree-pg");
+// Cashfree Payment Gateway Configuration - CORRECT VERSION
+const { Cashfree, CFEnvironment } = require("cashfree-pg");
 
-// Initialize Cashfree with the correct method for your version
-// Try different initialization methods based on your package version
-
-// Method 1: Direct assignment (works for older versions)
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = "PRODUCTION";
-
-// Note: If the above doesn't work, uncomment one of these alternatives:
-/*
-// Method 2: Using CFConfig (if available in newer version)
-if (typeof Cashfree.CFConfig === 'function') {
-  Cashfree.CFConfig({
-    mode: "PRODUCTION",
-    appId: process.env.CASHFREE_APP_ID,
-    secretKey: process.env.CASHFREE_SECRET_KEY,
-  });
-}
-*/
-
-// Method 3: Using initialize method (check your package docs)
-/*
-Cashfree.initialize({
-  appId: process.env.CASHFREE_APP_ID,
-  secretKey: process.env.CASHFREE_SECRET_KEY,
-  environment: "PRODUCTION"
-});
-*/
+Cashfree.XEnvironment = CFEnvironment.PRODUCTION;
 
 //////////////////////////////////////////////////////
 // CREATE UPI PAYMENT
@@ -808,64 +783,90 @@ exports.getAgreementStatus = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// CREATE CASHFREE ORDER (UPDATED - FIXED VERSION)
+// CREATE CASHFREE ORDER (FINAL WORKING VERSION)
 //////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
   try {
     const { amount, customerId, customerPhone } = req.body;
     
-    const order_id = "order_" + Date.now();
-    
-    // Try different API endpoints based on your Cashfree version
-    
-    // Option 1: For newer Cashfree SDK (v2+)
-    try {
-      const request = {
-        order_id: order_id,
-        order_amount: Number(amount),
-        order_currency: "INR",
-        customer_details: {
-          customer_id: String(customerId),
-          customer_phone: String(customerPhone),
-          customer_email: "support@nepxall.com"
-        },
-        order_meta: {
-          return_url: "https://nepxall.com/payment-success?order_id={order_id}"
-        }
-      };
-      
-      console.log("CASHFREE REQUEST:", request);
-      
-      // Try different method names based on your SDK version
-      let response;
-      
-      if (typeof Cashfree.PGCreateOrder === 'function') {
-        // Older version
-        response = await Cashfree.PGCreateOrder("2023-08-01", request);
-      } else if (Cashfree.PG && typeof Cashfree.PG.orders?.createOrder === 'function') {
-        // Newer version with CFConfig
-        response = await Cashfree.PG.orders.createOrder(request);
-      } else {
-        throw new Error("No compatible Cashfree method found");
-      }
-      
-      console.log("CASHFREE RESPONSE:", response.data);
-      
-      return res.json({
-        success: true,
-        payment_session_id: response.data.payment_session_id
+    // Validate required fields
+    if (!amount || !customerId || !customerPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount, customerId, and customerPhone are required"
       });
-      
-    } catch (apiError) {
-      console.error("Cashfree API Error:", apiError);
-      throw apiError;
     }
+    
+    const order_id = "order_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
+    
+    const request = {
+      order_id: order_id,
+      order_amount: Number(amount),
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(customerId),
+        customer_phone: String(customerPhone),
+        customer_email: "support@nepxall.com"
+      },
+      order_meta: {
+        return_url: `${process.env.FRONTEND_URL || "https://nepxall.com"}/payment-success?order_id={order_id}`
+      }
+    };
+    
+    console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
+    
+    // Correct API call for cashfree-pg v4.0.8
+    const response = await Cashfree.PGCreateOrder("2023-08-01", request);
+    
+    console.log("CASHFREE RESPONSE:", response.data);
+    
+    res.json({
+      success: true,
+      payment_session_id: response.data.payment_session_id,
+      order_id: order_id
+    });
     
   } catch (err) {
     console.error("Cashfree error:", err.response?.data || err.message);
     res.status(500).json({
       success: false,
-      message: "Cashfree order failed: " + (err.response?.data?.message || err.message)
+      message: "Cashfree order creation failed",
+      error: err.response?.data?.message || err.message
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// VERIFY CASHFREE PAYMENT
+//////////////////////////////////////////////////////
+exports.verifyCashfreePayment = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const response = await Cashfree.PGOrderFetchPayments("2023-08-01", orderId);
+    
+    const payments = response.data;
+    const isPaid = payments.some(payment => payment.payment_status === "SUCCESS");
+    
+    if (isPaid) {
+      // Update your payment status in database
+      await db.query(
+        `UPDATE payments SET status='paid' WHERE order_id=?`,
+        [orderId]
+      );
+    }
+    
+    res.json({
+      success: true,
+      isPaid: isPaid,
+      payments: payments
+    });
+    
+  } catch (err) {
+    console.error("Verify payment error:", err.response?.data || err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to verify payment"
     });
   }
 };
