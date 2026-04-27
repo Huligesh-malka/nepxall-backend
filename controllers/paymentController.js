@@ -782,62 +782,134 @@ exports.getAgreementStatus = async (req, res) => {
     });
   }
 };
-
 //////////////////////////////////////////////////////
-// CREATE CASHFREE ORDER (FINAL WORKING VERSION)
+// CREATE CASHFREE ORDER (AUTO PAYMENT VERSION)
 //////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
   try {
-    const { amount, customerId, customerPhone } = req.body;
-    
-    // Validate required fields
-    if (!amount || !customerId || !customerPhone) {
+
+    const {
+      bookingId,
+      amount,
+      customerId,
+      customerPhone
+    } = req.body;
+
+    //////////////////////////////////////////////////////
+    // VALIDATION
+    //////////////////////////////////////////////////////
+    if (
+      !bookingId ||
+      !amount ||
+      !customerId ||
+      !customerPhone
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Amount, customerId, and customerPhone are required"
+        message: "Missing required fields"
       });
     }
-    
-    const order_id = "order_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
-    
+
+    //////////////////////////////////////////////////////
+    // CREATE ORDER ID
+    //////////////////////////////////////////////////////
+    const order_id =
+      "order_" +
+      bookingId +
+      "_" +
+      Date.now();
+
+    //////////////////////////////////////////////////////
+    // SAVE PAYMENT FIRST
+    //////////////////////////////////////////////////////
+    await db.query(
+      `
+      INSERT INTO payments
+      (
+        booking_id,
+        user_id,
+        order_id,
+        amount,
+        status,
+        created_at,
+        verified_by_admin
+      )
+      VALUES (?, ?, ?, ?, 'pending', NOW(), 0)
+      `,
+      [
+        bookingId,
+        customerId,
+        order_id,
+        amount
+      ]
+    );
+
+    //////////////////////////////////////////////////////
+    // CASHFREE REQUEST
+    //////////////////////////////////////////////////////
     const request = {
-      order_id: order_id,
+      order_id,
       order_amount: Number(amount),
       order_currency: "INR",
+
       customer_details: {
         customer_id: String(customerId),
         customer_phone: String(customerPhone),
         customer_email: "support@nepxall.com"
       },
+
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL || "https://nepxall.com"}/payment-success?order_id={order_id}`
+        return_url:
+          `${process.env.FRONTEND_URL || "https://nepxall.com"}/payment-success?order_id={order_id}`
       }
     };
-    
-    console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
-    
-    // ✅ CORRECT METHOD FOR YOUR SDK VERSION
-   const response = await cashfree.PGCreateOrder(request);
-    console.log("CASHFREE RESPONSE:", response.data);
-    
-    res.json({
+
+    console.log(
+      "CASHFREE REQUEST:",
+      JSON.stringify(request, null, 2)
+    );
+
+    //////////////////////////////////////////////////////
+    // CREATE CASHFREE ORDER
+    //////////////////////////////////////////////////////
+    const response =
+      await cashfree.PGCreateOrder(request);
+
+    console.log(
+      "CASHFREE RESPONSE:",
+      response.data
+    );
+
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
+    return res.json({
       success: true,
-      payment_session_id: response.data.payment_session_id,
-      order_id: order_id
+      payment_session_id:
+        response.data.payment_session_id,
+      order_id
     });
-    
+
   } catch (err) {
-    console.error("Cashfree error:", err.response?.data || err.message);
-    res.status(500).json({
+
+    console.error(
+      "CASHFREE CREATE ERROR:",
+      err.response?.data || err.message
+    );
+
+    return res.status(500).json({
       success: false,
-      message: "Cashfree order creation failed",
-      error: err.response?.data?.message || err.message
+      message: "Cashfree order creation failed"
     });
+
   }
 };
 
+
+
+
 //////////////////////////////////////////////////////
-// VERIFY CASHFREE PAYMENT (FINAL SECURE VERSION)
+// VERIFY CASHFREE PAYMENT (AUTO PAYMENT VERSION)
 //////////////////////////////////////////////////////
 exports.verifyCashfreePayment = async (req, res) => {
 
@@ -964,7 +1036,6 @@ exports.verifyCashfreePayment = async (req, res) => {
       UPDATE payments
       SET
         status='paid',
-        verified_by_admin=1,
         submitted_at=NOW()
       WHERE order_id=?
       `,
@@ -1026,7 +1097,7 @@ exports.verifyCashfreePayment = async (req, res) => {
         );
 
       //////////////////////////////////////////////////////
-      // ADD PG USER
+      // ADD USER TO PG
       //////////////////////////////////////////////////////
       if (!existingUser) {
 
