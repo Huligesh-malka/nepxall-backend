@@ -2,12 +2,14 @@ const QRCode = require("qrcode");
 const db = require("../db");
 const path = require("path");
 
-// Cashfree Payment Gateway Configuration
-const { Cashfree, CFEnvironment } = require("cashfree-pg");
+// Cashfree Payment Gateway Configuration (UPDATED)
+const Cashfree = require("cashfree-pg");
 
-Cashfree.XClientId = process.env.CASHFREE_APP_ID;
-Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = CFEnvironment.PRODUCTION;
+Cashfree.CFConfig({
+  mode: "PRODUCTION",
+  appId: process.env.CASHFREE_APP_ID,
+  secretKey: process.env.CASHFREE_SECRET_KEY,
+});
 
 //////////////////////////////////////////////////////
 // CREATE UPI PAYMENT
@@ -783,35 +785,39 @@ exports.getAgreementStatus = async (req, res) => {
 };
 
 //////////////////////////////////////////////////////
-// CREATE CASHFREE ORDER (FIXED)
+// CREATE CASHFREE ORDER (UPDATED)
 //////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
   try {
     const { amount, customerId, customerPhone } = req.body;
-
+    
     const order_id = "order_" + Date.now();
-
+    
     const request = {
-      order_id: order_id,
-      order_amount: amount,
-      order_currency: "INR",
-      customer_details: {
-        customer_id: customerId,
-        customer_phone: customerPhone,
+      orderId: order_id,
+      orderAmount: Number(amount),
+      orderCurrency: "INR",
+      customerDetails: {
+        customerId: String(customerId),
+        customerPhone: String(customerPhone),
+        customerEmail: "support@nepxall.com"
       },
-      order_meta: {
-        return_url: "https://nepxall.com/payment-success?order_id={order_id}"
+      orderMeta: {
+        returnUrl: "https://nepxall.com/payment-success?order_id={order_id}"
       }
     };
-
-    const response = await Cashfree.PGCreateOrder("2023-08-01", request);
-
+    
+    console.log("CASHFREE REQUEST:", request);
+    
+    const response = await Cashfree.PG.orders.createOrder(request);
+    
+    console.log("CASHFREE RESPONSE:", response.data);
+    
     res.json({
       success: true,
-      payment_session_id: response.data.payment_session_id,
-      order_id: order_id
+      payment_session_id: response.data.payment_session_id
     });
-
+    
   } catch (err) {
     console.error("Cashfree error:", err.response?.data || err.message);
     res.status(500).json({
