@@ -838,26 +838,29 @@ exports.createCashfreeOrder = async (req, res) => {
 
 
 
-
 //////////////////////////////////////////////////////
-// VERIFY CASHFREE PAYMENT (UPDATED WITH AUTO BOOKING)
+// VERIFY CASHFREE PAYMENT (FINAL SECURE VERSION)
 //////////////////////////////////////////////////////
 exports.verifyCashfreePayment = async (req, res) => {
 
+  const connection = await db.getConnection();
+
   try {
+
+    await connection.beginTransaction();
 
     const { orderId } = req.params;
 
     console.log("VERIFY ORDER:", orderId);
 
     //////////////////////////////////////////////////////
-    // FETCH CASHFREE PAYMENT STATUS
+    // FETCH PAYMENT FROM CASHFREE
     //////////////////////////////////////////////////////
     const response =
       await cashfree.PGOrderFetchPayments(orderId);
 
     //////////////////////////////////////////////////////
-    // SAFE RESPONSE PARSING
+    // SAFE RESPONSE
     //////////////////////////////////////////////////////
     const payments = response.data || [];
 
@@ -868,7 +871,9 @@ exports.verifyCashfreePayment = async (req, res) => {
 
     let isPaid = false;
 
-    // ✅ ARRAY RESPONSE
+    //////////////////////////////////////////////////////
+    // ARRAY RESPONSE
+    //////////////////////////////////////////////////////
     if (Array.isArray(payments)) {
 
       isPaid = payments.some(
@@ -878,7 +883,9 @@ exports.verifyCashfreePayment = async (req, res) => {
 
     }
 
-    // ✅ SINGLE OBJECT RESPONSE
+    //////////////////////////////////////////////////////
+    // SINGLE OBJECT RESPONSE
+    //////////////////////////////////////////////////////
     else if (
       payments.payment_status === "SUCCESS"
     ) {
@@ -890,134 +897,208 @@ exports.verifyCashfreePayment = async (req, res) => {
     console.log("IS PAID:", isPaid);
 
     //////////////////////////////////////////////////////
-    // IF PAYMENT SUCCESS
+    // IF PAYMENT NOT SUCCESS
     //////////////////////////////////////////////////////
-    if (isPaid) {
+    if (!isPaid) {
 
-      //////////////////////////////////////////////////////
-      // UPDATE PAYMENT
-      //////////////////////////////////////////////////////
-      await db.query(
+      await connection.rollback();
+
+      return res.json({
+        success: true,
+        isPaid: false,
+        message: "Payment still pending"
+      });
+
+    }
+
+    //////////////////////////////////////////////////////
+    // LOCK PAYMENT ROW
+    //////////////////////////////////////////////////////
+    const [[existingPayment]] =
+      await connection.query(
         `
-        UPDATE payments
-        SET status='paid',
-            verified_by_admin=1
+        SELECT
+          id,
+          status,
+          booking_id,
+          amount
+        FROM payments
         WHERE order_id=?
+        FOR UPDATE
         `,
         [orderId]
       );
 
-      //////////////////////////////////////////////////////
-      // GET PAYMENT + BOOKING
-      //////////////////////////////////////////////////////
-      const [[payment]] = await db.query(
+    //////////////////////////////////////////////////////
+    // PAYMENT NOT FOUND
+    //////////////////////////////////////////////////////
+    if (!existingPayment) {
+
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+
+    }
+
+    //////////////////////////////////////////////////////
+    // ALREADY PAID
+    //////////////////////////////////////////////////////
+    if (existingPayment.status === "paid") {
+
+      await connection.commit();
+
+      return res.json({
+        success: true,
+        isPaid: true,
+        message: "Payment already verified"
+      });
+
+    }
+
+    //////////////////////////////////////////////////////
+    // UPDATE PAYMENT
+    //////////////////////////////////////////////////////
+    await connection.query(
+      `
+      UPDATE payments
+      SET
+        status='paid',
+        verified_by_admin=1,
+        submitted_at=NOW()
+      WHERE order_id=?
+      `,
+      [orderId]
+    );
+
+    //////////////////////////////////////////////////////
+    // GET BOOKING DETAILS
+    //////////////////////////////////////////////////////
+    const [[booking]] =
+      await connection.query(
         `
         SELECT
-          p.booking_id,
-          p.amount,
+          b.id,
           b.pg_id,
           b.user_id,
           b.owner_id,
           b.room_id,
           b.check_in_date
-        FROM payments p
-        JOIN bookings b
-          ON b.id = p.booking_id
-        WHERE p.order_id=?
+        FROM bookings b
+        WHERE b.id=?
+        FOR UPDATE
         `,
-        [orderId]
+        [existingPayment.booking_id]
+      );
+
+    //////////////////////////////////////////////////////
+    // UPDATE BOOKING
+    //////////////////////////////////////////////////////
+    if (booking) {
+
+      await connection.query(
+        `
+        UPDATE bookings
+        SET
+          status='confirmed',
+          payment_status='paid',
+          owner_amount=?,
+          owner_settlement='PENDING'
+        WHERE id=?
+        `,
+        [
+          existingPayment.amount,
+          booking.id
+        ]
       );
 
       //////////////////////////////////////////////////////
-      // AUTO BOOKING CONFIRM
+      // CHECK PG USER EXISTS
       //////////////////////////////////////////////////////
-      if (payment) {
-
-        await db.query(
-          `
-          UPDATE bookings
-          SET status='confirmed',
-              payment_status='paid',
-              owner_amount=?,
-              owner_settlement='PENDING'
-          WHERE id=?
-          `,
-          [payment.amount, payment.booking_id]
-        );
-
-        //////////////////////////////////////////////////////
-        // PREVENT DUPLICATE PG USER
-        //////////////////////////////////////////////////////
-        const [[existingUser]] = await db.query(
+      const [[existingUser]] =
+        await connection.query(
           `
           SELECT id
           FROM pg_users
           WHERE booking_id=?
           `,
-          [payment.booking_id]
+          [booking.id]
         );
 
-        //////////////////////////////////////////////////////
-        // ADD USER TO PG
-        //////////////////////////////////////////////////////
-        if (!existingUser) {
+      //////////////////////////////////////////////////////
+      // ADD PG USER
+      //////////////////////////////////////////////////////
+      if (!existingUser) {
 
-          await db.query(
-            `
-            INSERT INTO pg_users
-            (
-              owner_id,
-              pg_id,
-              room_id,
-              user_id,
-              join_date,
-              status,
-              booking_id
-            )
-            VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
-            `,
-            [
-              payment.owner_id,
-              payment.pg_id,
-              payment.room_id || null,
-              payment.user_id,
-              payment.check_in_date,
-              payment.booking_id
-            ]
-          );
+        await connection.query(
+          `
+          INSERT INTO pg_users
+          (
+            owner_id,
+            pg_id,
+            room_id,
+            user_id,
+            join_date,
+            status,
+            booking_id
+          )
+          VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+          `,
+          [
+            booking.owner_id,
+            booking.pg_id,
+            booking.room_id || null,
+            booking.user_id,
+            booking.check_in_date,
+            booking.id
+          ]
+        );
 
-        }
+      }
 
-        //////////////////////////////////////////////////////
-        // UPDATE ROOM OCCUPANCY
-        //////////////////////////////////////////////////////
-        if (payment.room_id) {
+      //////////////////////////////////////////////////////
+      // UPDATE ROOM OCCUPANCY
+      //////////////////////////////////////////////////////
+      if (booking.room_id) {
 
-          await db.query(
-            `
-            UPDATE pg_rooms
-            SET occupied_seats = occupied_seats + 1
-            WHERE id=?
-            `,
-            [payment.room_id]
-          );
-
-        }
+        await connection.query(
+          `
+          UPDATE pg_rooms
+          SET occupied_seats =
+              occupied_seats + 1
+          WHERE id=?
+          `,
+          [booking.room_id]
+        );
 
       }
 
     }
 
     //////////////////////////////////////////////////////
+    // COMMIT TRANSACTION
+    //////////////////////////////////////////////////////
+    await connection.commit();
+
+    console.log(
+      "✅ PAYMENT VERIFIED:",
+      orderId
+    );
+
+    //////////////////////////////////////////////////////
     // SUCCESS RESPONSE
     //////////////////////////////////////////////////////
     return res.json({
       success: true,
-      isPaid,
-      payments
+      isPaid: true,
+      message: "Payment verified successfully"
     });
 
   } catch (err) {
+
+    await connection.rollback();
 
     console.error(
       "VERIFY PAYMENT ERROR:",
@@ -1028,6 +1109,10 @@ exports.verifyCashfreePayment = async (req, res) => {
       success: false,
       message: "Payment verification failed"
     });
+
+  } finally {
+
+    connection.release();
 
   }
 
