@@ -5,10 +5,11 @@ const path = require("path");
 // Cashfree Payment Gateway Configuration - CORRECT VERSION
 const { Cashfree, CFEnvironment } = require("cashfree-pg");
 
-Cashfree.XClientId = process.env.CASHFREE_APP_ID;
-Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = CFEnvironment.PRODUCTION;
-
+const cashfree = new Cashfree(
+  CFEnvironment.PRODUCTION,
+  process.env.CASHFREE_APP_ID,
+  process.env.CASHFREE_SECRET_KEY
+);
 //////////////////////////////////////////////////////
 // CREATE UPI PAYMENT
 //////////////////////////////////////////////////////
@@ -816,10 +817,7 @@ exports.createCashfreeOrder = async (req, res) => {
     console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
     
     // ✅ CORRECT METHOD FOR YOUR SDK VERSION
-    const response = await Cashfree.PGCreateOrder(
-  "2023-08-01",
-  request
-);
+   const response = await cashfree.PGCreateOrder(request);
     console.log("CASHFREE RESPONSE:", response.data);
     
     res.json({
@@ -846,7 +844,7 @@ exports.verifyCashfreePayment = async (req, res) => {
     const { orderId } = req.params;
     
     // ✅ CORRECT METHOD FOR YOUR SDK VERSION
-    const response = await Cashfree.PG.orders.fetchPayments(orderId);
+    const response = await cashfree.PGOrderFetchPayments(orderId);
     
     const payments = response.data;
     const isPaid = payments.some(payment => payment.payment_status === "SUCCESS");
