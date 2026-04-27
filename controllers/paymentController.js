@@ -815,8 +815,8 @@ exports.createCashfreeOrder = async (req, res) => {
     
     console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
     
-    // Correct API call for cashfree-pg v4.0.8
-    const response = await Cashfree.PGCreateOrder("2023-08-01", request);
+    // ✅ CORRECT METHOD FOR YOUR SDK VERSION
+    const response = await Cashfree.PG.orders.create(request);
     
     console.log("CASHFREE RESPONSE:", response.data);
     
@@ -843,7 +843,8 @@ exports.verifyCashfreePayment = async (req, res) => {
   try {
     const { orderId } = req.params;
     
-    const response = await Cashfree.PGOrderFetchPayments("2023-08-01", orderId);
+    // ✅ CORRECT METHOD FOR YOUR SDK VERSION
+    const response = await Cashfree.PG.orders.fetchPayments(orderId);
     
     const payments = response.data;
     const isPaid = payments.some(payment => payment.payment_status === "SUCCESS");
@@ -859,6 +860,7 @@ exports.verifyCashfreePayment = async (req, res) => {
     res.json({
       success: true,
       isPaid: isPaid,
+      
       payments: payments
     });
     
