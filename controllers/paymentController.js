@@ -1,90 +1,96 @@
 const QRCode = require("qrcode");
 const db = require("../db");
+const path = require("path");
 
-  //////////////////////////////////////////////////////
-  // CREATE UPI PAYMENT
-  //////////////////////////////////////////////////////
-  exports.createPayment = async (req, res) => {
-    try {
-      // 🔥 ADD includeAgreement (NEW)
-      const { bookingId, includeAgreement } = req.body;
+// Cashfree Payment Gateway Configuration
+const { Cashfree, CFEnvironment } = require("cashfree-pg");
 
-      if (!bookingId) {
-        return res.status(400).json({ success: false, message: "bookingId required" });
-      }
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = CFEnvironment.PRODUCTION;
 
-      // ✅ 1. Get real booking data
-      const [[booking]] = await db.query(
-        `SELECT 
-          user_id, 
-          rent_amount, 
-          security_deposit, 
-          maintenance_amount, 
-          platform_fee 
-        FROM bookings 
-        WHERE id = ?`,
-        [bookingId]
-      );
+//////////////////////////////////////////////////////
+// CREATE UPI PAYMENT
+//////////////////////////////////////////////////////
+exports.createPayment = async (req, res) => {
+  try {
+    // 🔥 ADD includeAgreement (NEW)
+    const { bookingId, includeAgreement } = req.body;
 
-      if (!booking) {
-        return res.status(404).json({ success: false, message: "Booking not found" });
-      }
-
-      // Convert string → number
-      const rent = parseFloat(booking.rent_amount) || 0;
-      const deposit = parseFloat(booking.security_deposit) || 0;
-      const maintenance = parseFloat(booking.maintenance_amount) || 0;
-      const platformFee = parseFloat(booking.platform_fee) || 0;
-
-      // 🔥 ORIGINAL AMOUNT
-      let amount = rent + deposit + maintenance + platformFee;
-
-      // 🔥 ADD AGREEMENT (ONLY ADD THIS)
-      if (includeAgreement) {
-        amount += 500; // agreement charge
-      }
-
-      if (amount <= 0) {
-        return res.status(400).json({ success: false, message: "Invalid amount" });
-      }
-
-      // ✅ 3. Create Order
-      const orderId = `order_${bookingId}_${Date.now()}`;
-      const upiId = "huligeshmalka-1@oksbi";
-      const merchantName = "Nepxall";
-
-      // 🔥 NOW QR WILL HAVE CORRECT AMOUNT
-      const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
-      const qr = await QRCode.toDataURL(upiLink);
-
-      // ✅ 4. Save payment
-      await db.query(
-        `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
-        VALUES (?, ?, ?, ?, 'pending', NOW())`,
-        [bookingId, booking.user_id, orderId, amount]
-      );
-
-      res.json({
-        success: true,
-        orderId,
-        amount,
-        upiLink,
-        qr
-      });
-
-    } catch (err) {
-      console.error("CREATE PAYMENT ERROR:", err);
-      res.status(500).json({ success: false });
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: "bookingId required" });
     }
-  };
+
+    // ✅ 1. Get real booking data
+    const [[booking]] = await db.query(
+      `SELECT 
+        user_id, 
+        rent_amount, 
+        security_deposit, 
+        maintenance_amount, 
+        platform_fee 
+      FROM bookings 
+      WHERE id = ?`,
+      [bookingId]
+    );
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    // Convert string → number
+    const rent = parseFloat(booking.rent_amount) || 0;
+    const deposit = parseFloat(booking.security_deposit) || 0;
+    const maintenance = parseFloat(booking.maintenance_amount) || 0;
+    const platformFee = parseFloat(booking.platform_fee) || 0;
+
+    // 🔥 ORIGINAL AMOUNT
+    let amount = rent + deposit + maintenance + platformFee;
+
+    // 🔥 ADD AGREEMENT (ONLY ADD THIS)
+    if (includeAgreement) {
+      amount += 500; // agreement charge
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid amount" });
+    }
+
+    // ✅ 3. Create Order
+    const orderId = `order_${bookingId}_${Date.now()}`;
+    const upiId = "huligeshmalka-1@oksbi";
+    const merchantName = "Nepxall";
+
+    // 🔥 NOW QR WILL HAVE CORRECT AMOUNT
+    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+    const qr = await QRCode.toDataURL(upiLink);
+
+    // ✅ 4. Save payment
+    await db.query(
+      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
+      VALUES (?, ?, ?, ?, 'pending', NOW())`,
+      [bookingId, booking.user_id, orderId, amount]
+    );
+
+    res.json({
+      success: true,
+      orderId,
+      amount,
+      upiLink,
+      qr
+    });
+
+  } catch (err) {
+    console.error("CREATE PAYMENT ERROR:", err);
+    res.status(500).json({ success: false });
+  }
+};
 
 //////////////////////////////////////////////////////
 // USER CONFIRM PAYMENT
 //////////////////////////////////////////////////////
 exports.confirmPayment = async (req, res) => {
-
   try {
-
     const { orderId } = req.body;
 
     if (!orderId) {
@@ -117,17 +123,16 @@ exports.confirmPayment = async (req, res) => {
     });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).json({
       success: false
     });
-
   }
-
 };
 
+//////////////////////////////////////////////////////
+// VERIFY PAYMENT (ADMIN)
+//////////////////////////////////////////////////////
 exports.verifyPayment = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -159,9 +164,9 @@ exports.verifyPayment = async (req, res) => {
         b.owner_id, 
         b.room_id,
         b.check_in_date 
-       FROM payments p
-       JOIN bookings b ON b.id = p.booking_id
-       WHERE p.order_id = ? FOR UPDATE`,
+      FROM payments p
+      JOIN bookings b ON b.id = p.booking_id
+      WHERE p.order_id = ? FOR UPDATE`,
       [orderId]
     );
 
@@ -257,6 +262,7 @@ exports.verifyPayment = async (req, res) => {
     connection.release();
   }
 };
+
 //////////////////////////////////////////////////////
 // ADMIN REJECT PAYMENT
 //////////////////////////////////////////////////////
@@ -358,19 +364,17 @@ exports.rejectPayment = async (req, res) => {
   }
 };
 
-
 //////////////////////////////////////////////////////
 // AUTO MATCH BANK TRANSACTION
 //////////////////////////////////////////////////////
 exports.matchBankTransaction = async (req, res) => {
   try {
-
     const { remark } = req.body;
 
     if (!remark) {
       return res.status(400).json({
-        success:false,
-        message:"remark required"
+        success: false,
+        message: "remark required"
       });
     }
 
@@ -378,8 +382,8 @@ exports.matchBankTransaction = async (req, res) => {
 
     if (!match) {
       return res.json({
-        success:false,
-        message:"order id not found"
+        success: false,
+        message: "order id not found"
       });
     }
 
@@ -393,22 +397,17 @@ exports.matchBankTransaction = async (req, res) => {
     );
 
     res.json({
-      success:true,
-      message:"payment matched"
+      success: true,
+      message: "payment matched"
     });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).json({
-      success:false
+      success: false
     });
-
   }
 };
-
-
 
 //////////////////////////////////////////////////////
 // SUBMIT PAYMENT WITH SCREENSHOT (Matches your table)
@@ -572,6 +571,9 @@ exports.viewPaymentScreenshot = async (req, res) => {
   }
 };
 
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS
+//////////////////////////////////////////////////////
 exports.getAdminPayments = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -648,12 +650,9 @@ exports.getAdminPayments = async (req, res) => {
   }
 };
 
-
-
-
-
-
-// ================= GET ALL REFUNDS =================
+//////////////////////////////////////////////////////
+// GET ALL REFUNDS
+//////////////////////////////////////////////////////
 exports.getAllRefunds = async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -689,8 +688,9 @@ exports.getAllRefunds = async (req, res) => {
   }
 };
 
-
-// ================= UPDATE REFUND STATUS =================
+//////////////////////////////////////////////////////
+// UPDATE REFUND STATUS
+//////////////////////////////////////////////////////
 exports.updateRefundStatus = async (req, res) => {
   try {
     const { refundId } = req.params;
@@ -729,10 +729,9 @@ exports.updateRefundStatus = async (req, res) => {
   }
 };
 
-
-
-
-
+//////////////////////////////////////////////////////
+// GET AGREEMENT STATUS
+//////////////////////////////////////////////////////
 exports.getAgreementStatus = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -783,47 +782,41 @@ exports.getAgreementStatus = async (req, res) => {
   }
 };
 
-
-
-
+//////////////////////////////////////////////////////
+// CREATE CASHFREE ORDER (FIXED)
+//////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
   try {
-
     const { amount, customerId, customerPhone } = req.body;
 
     const order_id = "order_" + Date.now();
 
     const request = {
+      order_id: order_id,
       order_amount: amount,
       order_currency: "INR",
-
       customer_details: {
         customer_id: customerId,
         customer_phone: customerPhone,
       },
-
       order_meta: {
-        return_url:
-          "https://nepxall.com/payment-success?order_id={order_id}"
+        return_url: "https://nepxall.com/payment-success?order_id={order_id}"
       }
     };
 
-    const response = await cashfree.PGCreateOrder(request);
+    const response = await Cashfree.PGCreateOrder("2023-08-01", request);
 
     res.json({
       success: true,
       payment_session_id: response.data.payment_session_id,
-      order_id
+      order_id: order_id
     });
 
   } catch (err) {
-
-    console.log(err.response?.data || err.message);
-
+    console.error("Cashfree error:", err.response?.data || err.message);
     res.status(500).json({
       success: false,
       message: "Cashfree order failed"
     });
-
   }
 };
