@@ -66,6 +66,13 @@ router.post(
   paymentController.createPayment
 );
 
+router.post(
+  "/create-cashfree-order",
+  verifyFirebaseToken,
+  paymentController.createCashfreeOrder
+);
+
+
 // Confirm payment (without screenshot)
 router.post(
   "/confirm-payment",

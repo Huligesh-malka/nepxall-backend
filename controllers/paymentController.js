@@ -782,3 +782,48 @@ exports.getAgreementStatus = async (req, res) => {
     });
   }
 };
+
+
+
+
+exports.createCashfreeOrder = async (req, res) => {
+  try {
+
+    const { amount, customerId, customerPhone } = req.body;
+
+    const order_id = "order_" + Date.now();
+
+    const request = {
+      order_amount: amount,
+      order_currency: "INR",
+
+      customer_details: {
+        customer_id: customerId,
+        customer_phone: customerPhone,
+      },
+
+      order_meta: {
+        return_url:
+          "https://nepxall.com/payment-success?order_id={order_id}"
+      }
+    };
+
+    const response = await cashfree.PGCreateOrder(request);
+
+    res.json({
+      success: true,
+      payment_session_id: response.data.payment_session_id,
+      order_id
+    });
+
+  } catch (err) {
+
+    console.log(err.response?.data || err.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Cashfree order failed"
+    });
+
+  }
+};
