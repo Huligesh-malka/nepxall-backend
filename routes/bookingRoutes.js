@@ -16,7 +16,7 @@ router.get("/user/history", firebaseAuth, bookingController.getUserBookings);
 router.get("/user/active-stay", firebaseAuth, bookingController.getUserActiveStay);
 
 // ✅ PAYMENT DONE
-router.post("/pay/:bookingId", firebaseAuth, bookingController.markPaymentDone);
+
 
 // ================= OWNER =================
 

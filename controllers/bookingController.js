@@ -205,13 +205,18 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
 exports.getUserBookings = async (req, res) => {
+
   try {
-    const includeAgreement = req.query.agreement === "true";
 
     const [rows] = await db.query(
       `
-      SELECT 
+      SELECT
+
         b.id,
         b.pg_id,
         b.owner_id,
@@ -219,94 +224,100 @@ exports.getUserBookings = async (req, res) => {
         b.room_type,
         b.check_in_date,
         b.status,
+        b.payment_status,
+
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
-        b.agreement_signed,
-        b.created_at,
 
         p.pg_name,
         p.area,
         p.city,
         p.contact_phone,
 
+        pay.status AS latest_payment_status,
+        pay.order_id,
+
         pr.room_no
 
       FROM bookings b
-      JOIN pgs p ON p.id = b.pg_id
-      LEFT JOIN pg_rooms pr ON pr.id = b.room_id
+
+      JOIN pgs p
+      ON p.id = b.pg_id
+
+      LEFT JOIN pg_rooms pr
+      ON pr.id = b.room_id
+
+      LEFT JOIN payments pay
+      ON pay.booking_id = b.id
+      AND pay.id = (
+        SELECT MAX(id)
+        FROM payments
+        WHERE booking_id = b.id
+      )
+
       WHERE b.user_id=?
+
       ORDER BY b.created_at DESC
       `,
       [req.user.id]
     );
 
-    const updated = rows.map((item) => {
-      // 💰 TOTAL CALCULATION
-      let total =
+    const updated = rows.map(item => {
+
+      const total =
         Number(item.rent_amount || 0) +
         Number(item.security_deposit || 0) +
         Number(item.maintenance_amount || 0);
 
-      if (includeAgreement) {
-        total += 500;
-      }
-
-      // 📍 SHORT LOCATION (IMPORTANT FIX)
-      let shortLocation = null;
-
-      if (item.area && item.city) {
-        shortLocation = `${item.area}, ${item.city}`;
-      } else if (item.city) {
-        shortLocation = item.city;
-      } else if (item.area) {
-        shortLocation = item.area;
-      }
-
-      // 🔐 SHOW ONLY AFTER APPROVAL
-      const showDetails =
-        item.status === "approved" || item.status === "confirmed";
-
       return {
+
         id: item.id,
         pg_id: item.pg_id,
         pg_name: item.pg_name,
 
-        // ✅ SHORT LOCATION ONLY
-        location: showDetails ? shortLocation : null,
+        location:
+          item.area && item.city
+            ? `${item.area}, ${item.city}`
+            : item.city,
 
-        // ✅ PHONE ONLY AFTER APPROVED
-        phone: showDetails ? item.contact_phone : null,
+        phone:
+          item.status === "approved" ||
+          item.status === "confirmed"
+            ? item.contact_phone
+            : null,
 
-        // ✅ ROOM DETAILS
         room_no: item.room_no,
         room_type: item.room_type,
         check_in_date: item.check_in_date,
 
-        // ✅ STATUS
         status: item.status,
 
-        // ✅ PRICE
-        rent_amount: item.rent_amount,
-        security_deposit: item.security_deposit,
-        maintenance_amount: item.maintenance_amount,
-        total_amount: total,
+        payment_status:
+          item.latest_payment_status || "pending",
 
-        // ✅ AGREEMENT
-        agreement_signed: item.agreement_signed,
-        agreement_added: includeAgreement,
+        order_id:
+          item.order_id || null,
 
-        created_at: item.created_at,
+        total_amount: total
+
       };
+
     });
 
     res.json(updated);
-  } catch (err) {
-    console.error("GET BOOKINGS ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
 
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      message: err.message
+    });
+
+  }
+
+};
 //////////////////////////////////////////////////////
 // 👑 OWNER BOOKINGS
 //////////////////////////////////////////////////////
@@ -394,55 +405,8 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-//////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS
-//////////////////////////////////////////////////////
-//////////////////////////////////////////////////////
-// 💳 PAYMENT SUCCESS → UPDATED TO HANDLE ORDER_ID
-//////////////////////////////////////////////////////
-exports.markPaymentDone = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    const { room_id, order_id } = req.body;
-    const userId = req.user.id;
 
-    const [[booking]] = await db.query(
-      "SELECT * FROM bookings WHERE id=? AND user_id=?",
-      [bookingId, userId]
-    );
 
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // ✅ ONLY UPDATE BOOKING
-    await db.query(
-      `UPDATE bookings 
-       SET status='confirmed', 
-           room_id=?, 
-           order_id=? 
-       WHERE id=?`,
-      [room_id || null, order_id || booking.order_id, bookingId]
-    );
-
-    // ✅ ROOM UPDATE (OPTIONAL KEEP)
-    if (room_id) {
-      await db.query(
-        "UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?",
-        [room_id]
-      );
-    }
-
-    res.json({ 
-      success: true, 
-      message: "Payment submitted successfully"
-    });
-
-  } catch (err) {
-    console.error("PAYMENT DONE ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
 
 //////////////////////////////////////////////////////
 // 👑 ACTIVE TENANTS
