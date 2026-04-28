@@ -1,7 +1,6 @@
 const db = require("../db");
 const { encrypt } = require("../utils/encryption");
-const sendNotification =
-require("../utils/sendNotification");
+const sendNotification = require("../utils/sendNotification");
 
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
@@ -191,7 +190,7 @@ exports.createBooking = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
-    // 🔔 SEND OWNER NOTIFICATION
+    // 🔔 SEND OWNER NOTIFICATION - BOOKING CREATED
     //////////////////////////////////////////////////////
     const [[owner]] = await db.query(
       "SELECT fcm_token FROM users WHERE id=?",
@@ -202,12 +201,11 @@ exports.createBooking = async (req, res) => {
       try {
         await sendNotification(
           owner.fcm_token,
-          "New Booking",
-          "Tenant booked the PG"
+          "New Booking Created",
+          `New booking from ${user.name} for ${room_type}`
         );
       } catch (notifError) {
         console.error("❌ Notification error:", notifError);
-        // Don't fail the booking if notification fails
       }
     }
 
@@ -228,7 +226,6 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.getUserBookings = async (req, res) => {
   try {
@@ -447,10 +444,10 @@ exports.updateBookingStatus = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 GET CURRENT BOOKING
+    // 🔥 GET CURRENT BOOKING WITH USER DETAILS
     //////////////////////////////////////////////////////
     const [[booking]] = await db.query(
-      "SELECT status FROM bookings WHERE id=? AND owner_id=?",
+      "SELECT * FROM bookings WHERE id=? AND owner_id=?",
       [bookingId, req.user.id]
     );
 
@@ -464,8 +461,6 @@ exports.updateBookingStatus = async (req, res) => {
     let finalStatus = status;
 
     if (status === "rejected") {
-      // ❌ DON'T BLOCK USER
-      // 👉 keep booking alive for retry payment
       finalStatus = "approved"; 
     }
 
@@ -476,6 +471,31 @@ exports.updateBookingStatus = async (req, res) => {
       "UPDATE bookings SET status=? WHERE id=? AND owner_id=?",
       [finalStatus, bookingId, req.user.id]
     );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND USER NOTIFICATION
+    //////////////////////////////////////////////////////
+    const [[bookingUser]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [booking.user_id]
+    );
+
+    if (bookingUser?.fcm_token) {
+      if (status === "approved") {
+        await sendNotification(
+          bookingUser.fcm_token,
+          "Booking Approved ✅",
+          "Your booking has been approved by the owner"
+        );
+      }
+      if (status === "rejected") {
+        await sendNotification(
+          bookingUser.fcm_token,
+          "Booking Update 🔄",
+          "Please retry payment or contact owner"
+        );
+      }
+    }
 
     res.json({
       success: true,
@@ -489,7 +509,6 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 //////////////////////////////////////////////////////
 // 👑 ACTIVE TENANTS
@@ -516,7 +535,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.getUserActiveStay = async (req, res) => {
   try {
@@ -634,10 +652,6 @@ exports.getUserActiveStay = async (req, res) => {
   }
 };
 
-
-
-
-
 exports.getReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -682,7 +696,7 @@ exports.getReceiptDetails = async (req, res) => {
   }
 };
 
-  exports.requestRefund = async (req, res) => {
+exports.requestRefund = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
@@ -799,7 +813,6 @@ exports.getReceiptDetails = async (req, res) => {
 
   }
 };
-
 
 exports.requestVacate = async (req, res) => {
   try {
@@ -930,6 +943,22 @@ exports.requestVacate = async (req, res) => {
       );
     }
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND OWNER NOTIFICATION - VACATE REQUEST
+    //////////////////////////////////////////////////////
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [booking.owner_id]
+    );
+
+    if (owner?.fcm_token) {
+      await sendNotification(
+        owner.fcm_token,
+        "Vacate Request 📝",
+        `Tenant has requested vacate for ${booking.room_type}`
+      );
+    }
+
     res.json({
       success: true,
       message: "Vacate request submitted successfully"
@@ -940,11 +969,6 @@ exports.requestVacate = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
-
-
-
 
 exports.acceptRefund = async (req, res) => {
   try {
@@ -976,6 +1000,22 @@ exports.acceptRefund = async (req, res) => {
       [refund.id]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND USER NOTIFICATION - REFUND ACCEPTED
+    //////////////////////////////////////////////////////
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [userId]
+    );
+
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Refund Accepted 💰",
+        `Your refund of ₹${refund.amount} has been accepted`
+      );
+    }
+
     res.json({
       success: true,
       message: "Refund accepted"
@@ -986,6 +1026,7 @@ exports.acceptRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 exports.rejectRefund = async (req, res) => {
   try {
     const { bookingId } = req.body;
@@ -1025,6 +1066,3 @@ exports.rejectRefund = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
-
