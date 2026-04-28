@@ -71,6 +71,12 @@ router.post(
   paymentController.createCashfreeOrder
 );
 
+router.get(
+  "/verify/:orderId",
+  verifyFirebaseToken,
+  paymentController.verifyCashfreePayment
+);
+
 // Get payment status for a booking
 router.get(
   "/status/:bookingId",
