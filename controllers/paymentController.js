@@ -1,6 +1,7 @@
 const QRCode = require("qrcode");
 const db = require("../db");
 const path = require("path");
+const sendNotification = require("../utils/sendNotification");
 
 // Cashfree Payment Gateway Configuration - CORRECT VERSION
 const { Cashfree, CFEnvironment } = require("cashfree-pg");
@@ -101,10 +102,8 @@ exports.createCashfreeOrder = async (req, res) => {
 
     // ✅ STEP 1 — ADD PLATFORM FEE
     const bookingAmount = 1;
-
-const platformFee = 0;
-
-const totalAmount = 1;
+    const platformFee = 0;
+    const totalAmount = 1;
 
     const order_id = "order_" + bookingId + "_" + Date.now();
 
@@ -154,8 +153,6 @@ const totalAmount = 1;
     });
   }
 };
-
-
 
 //////////////////////////////////////////////////////
 // VERIFY CASHFREE PAYMENT (AUTO PAYMENT VERSION)
@@ -292,7 +289,8 @@ exports.verifyCashfreePayment = async (req, res) => {
         b.user_id,
         b.owner_id,
         b.room_id,
-        b.check_in_date
+        b.check_in_date,
+        b.room_type
       FROM bookings b
       WHERE b.id=?
       FOR UPDATE
@@ -389,6 +387,28 @@ exports.verifyCashfreePayment = async (req, res) => {
       "✅ PAYMENT VERIFIED:",
       orderId
     );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND PAYMENT SUCCESS NOTIFICATION TO USER
+    //////////////////////////////////////////////////////
+    if (booking && booking.user_id) {
+      const [[paymentUser]] = await connection.query(
+        "SELECT fcm_token FROM users WHERE id=?",
+        [booking.user_id]
+      );
+
+      if (paymentUser?.fcm_token) {
+        try {
+          await sendNotification(
+            paymentUser.fcm_token,
+            "Payment Successful 💳",
+            `Payment of ₹${existingPayment.amount} completed successfully for ${booking.room_type}`
+          );
+        } catch (notifError) {
+          console.error("❌ Notification error:", notifError);
+        }
+      }
+    }
 
     return res.json({
       success: true,
@@ -653,10 +673,41 @@ exports.updateRefundStatus = async (req, res) => {
       return res.status(404).json({ message: "Refund not found" });
     }
 
+    // Get user details for notification
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [refund.user_id]
+    );
+
     await db.query(
       "UPDATE refunds SET status=? WHERE id=?",
       [status, refundId]
     );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND REFUND STATUS NOTIFICATION
+    //////////////////////////////////////////////////////
+    if (user?.fcm_token) {
+      if (status === "approved") {
+        await sendNotification(
+          user.fcm_token,
+          "Refund Approved ✅",
+          `Your refund of ₹${refund.amount} has been approved`
+        );
+      } else if (status === "paid") {
+        await sendNotification(
+          user.fcm_token,
+          "Refund Processed 💰",
+          `Your refund of ₹${refund.amount} has been processed`
+        );
+      } else if (status === "rejected") {
+        await sendNotification(
+          user.fcm_token,
+          "Refund Update ❌",
+          "Your refund request requires attention. Please contact support."
+        );
+      }
+    }
 
     res.json({
       success: true,
@@ -681,11 +732,35 @@ exports.requestRefund = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // Get booking details for notification
+    const [[booking]] = await db.query(
+      "SELECT owner_id, room_type FROM bookings WHERE id=?",
+      [bookingId]
+    );
+
     await db.query(
       `INSERT INTO refunds (booking_id, user_id, reason, status, created_at)
       VALUES (?, ?, ?, 'pending', NOW())`,
       [bookingId, userId, reason]
     );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND REFUND REQUEST NOTIFICATION TO OWNER
+    //////////////////////////////////////////////////////
+    if (booking && booking.owner_id) {
+      const [[owner]] = await db.query(
+        "SELECT fcm_token FROM users WHERE id=?",
+        [booking.owner_id]
+      );
+
+      if (owner?.fcm_token) {
+        await sendNotification(
+          owner.fcm_token,
+          "Refund Request 📋",
+          `Refund requested for ${booking.room_type} booking`
+        );
+      }
+    }
 
     res.json({
       success: true,
