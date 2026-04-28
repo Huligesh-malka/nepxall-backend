@@ -717,21 +717,34 @@ exports.getReceiptDetails = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // ✅ CALCULATE FULL REFUND AMOUNT
+    // ✅ FIXED REFUND AMOUNT ONLY ₹1000
     //////////////////////////////////////////////////////
-    const amount =
-      (Number(booking.rent_amount) || 0) +
-      (Number(booking.security_deposit) || 0) +
-      (Number(booking.maintenance_amount) || 0);
+    const amount = 1000;
 
     //////////////////////////////////////////////////////
-    // ✅ INSERT FULL REFUND → PENDING
+    // ✅ INSERT REFUND REQUEST
     //////////////////////////////////////////////////////
     await connection.query(
       `INSERT INTO refunds 
-      (booking_id, user_id, amount, reason, upi_id, refund_type, status, user_approval)
-      VALUES (?,?,?,?,?,'FULL','pending','accepted')`,
-      [bookingId, userId, amount, reason, upi_id]
+      (
+        booking_id,
+        user_id,
+        amount,
+        reason,
+        upi_id,
+        refund_type,
+        status,
+        user_approval
+      )
+      VALUES
+      (?,?,?,?,?,'PARTIAL','pending','accepted')`,
+      [
+        bookingId,
+        userId,
+        amount,
+        reason,
+        upi_id
+      ]
     );
 
     //////////////////////////////////////////////////////
@@ -741,23 +754,26 @@ exports.getReceiptDetails = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Refund request submitted successfully",
+      refund_amount: 1000,
+      message: "₹1000 refund request submitted successfully",
       status: "pending"
     });
 
   } catch (err) {
+
     await connection.rollback();
+
     console.error("❌ REFUND ERROR:", err);
 
-    //////////////////////////////////////////////////////
-    // 🔥 ONLY CHANGE HERE (IMPORTANT)
-    //////////////////////////////////////////////////////
     res.status(400).json({
+      success: false,
       message: err.message
     });
 
   } finally {
+
     connection.release();
+
   }
 };
 
