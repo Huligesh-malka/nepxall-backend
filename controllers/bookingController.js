@@ -737,7 +737,7 @@ exports.getReceiptDetails = async (req, res) => {
         user_approval
       )
       VALUES
-      (?,?,?,?,?,'PARTIAL','pending','accepted')`,
+      (?,?,?,?,?,'FULL','pending','accepted')`,
       [
         bookingId,
         userId,
