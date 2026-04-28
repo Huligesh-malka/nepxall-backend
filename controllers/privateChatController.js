@@ -1,5 +1,6 @@
 const db = require("../db");
 const crypto = require("crypto");
+const sendNotification = require("../utils/sendNotification"); // ✅ ADDED
 
 /* =========================================================
    GET OR CREATE MYSQL USER FROM FIREBASE
@@ -14,7 +15,7 @@ async function getMe(firebaseUser) {
   if (!uid) throw new Error("Firebase UID missing");
 
   let [rows] = await db.query(
-    "SELECT id,name,email,role FROM users WHERE firebase_uid=? LIMIT 1",
+    "SELECT id,name,email,role, fcm_token FROM users WHERE firebase_uid=? LIMIT 1",
     [uid]
   );
 
@@ -23,7 +24,7 @@ async function getMe(firebaseUser) {
   if (phone) {
 
     [rows] = await db.query(
-      "SELECT id,name,email,role FROM users WHERE phone=? LIMIT 1",
+      "SELECT id,name,email,role, fcm_token FROM users WHERE phone=? LIMIT 1",
       [phone]
     );
 
@@ -94,6 +95,7 @@ COALESCE(b.name,u.name,u.phone) AS name,
 pm.pg_id,
 p.pg_name,
 u.firebase_uid,
+u.fcm_token,
 pm.message AS last_message,
 pm.created_at AS last_time,
 
@@ -157,8 +159,6 @@ ORDER BY last_time DESC
 
 };
 
-
-
 /* =========================================================
    GET USER (OWNER) BY PG
    ✅ FIXED: Always return PG OWNER (not same user)
@@ -179,7 +179,8 @@ exports.getUserById = async (req, res) => {
         u.id,
         COALESCE(u.name, u.phone) AS name,
         p.pg_name,
-        u.firebase_uid
+        u.firebase_uid,
+        u.fcm_token
       FROM pgs p
       JOIN users u ON u.id = p.owner_id   -- ✅ OWNER JOIN
       LEFT JOIN bookings b
@@ -264,7 +265,7 @@ exports.sendPrivateMessage = async (req,res)=>{
   try{
 
     const me = req.me;
-    const {receiver_id,message,pg_id} = req.body;
+    const {receiver_id, message, pg_id} = req.body;
 
     if(!receiver_id || !message?.trim() || !pg_id){
 
@@ -288,7 +289,7 @@ INSERT INTO private_messages
 (pg_id,sender_id,receiver_id,message,is_read,message_hash)
 VALUES (?,?,?,?,0,?)
 `,
-      [pg_id,me.id,receiver_id,text,message_hash]
+      [pg_id, me.id, receiver_id, text, message_hash]
     );
 
     /* UPDATE CHAT ROOM */
@@ -301,30 +302,72 @@ last_message=VALUES(last_message),
 last_message_time=VALUES(last_message_time)
 `,
       [
-        Math.min(me.id,receiver_id),
-        Math.max(me.id,receiver_id),
+        Math.min(me.id, receiver_id),
+        Math.max(me.id, receiver_id),
         pg_id,
         text
       ]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔔 GET RECEIVER DETAILS FOR NOTIFICATION
+    //////////////////////////////////////////////////////
+    const [[receiver]] = await db.query(
+      `SELECT u.id, u.name, u.fcm_token, p.pg_name
+       FROM users u
+       LEFT JOIN pgs p ON p.id = ?
+       WHERE u.id = ?`,
+      [pg_id, receiver_id]
+    );
+
+    // Get PG name for notification
+    const [[pgInfo]] = await db.query(
+      "SELECT pg_name FROM pgs WHERE id = ?",
+      [pg_id]
+    );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND PUSH NOTIFICATION TO RECEIVER
+    //////////////////////////////////////////////////////
+    if (receiver?.fcm_token) {
+      await sendNotification(
+        receiver.fcm_token,
+        "New Message 💬",
+        `${me.name || "Someone"} sent you a message regarding ${pgInfo?.pg_name || "PG"}`
+      );
+    }
+
+    // Insert in-app notification for receiver
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        receiver_id,
+        "New Message 💬",
+        `${me.name || "Someone"} sent you a message regarding ${pgInfo?.pg_name || "PG"}`,
+        "new_message"
+      ]
+    );
+
     res.json({
-      id:result.insertId,
-      sender_id:me.id,
+      id: result.insertId,
+      sender_id: me.id,
+      sender_name: me.name,
       receiver_id,
       pg_id,
-      message:text,
-      created_at:new Date(),
+      message: text,
+      created_at: new Date(),
       message_hash,
-      status:"sent"
+      status: "sent",
+      notification_sent: !!receiver?.fcm_token
     });
 
   }catch(err){
 
-    console.error("send message error:",err);
+    console.error("send message error:", err);
 
     res.status(500).json({
-      message:"Server error"
+      message: "Server error"
     });
 
   }
@@ -342,10 +385,10 @@ exports.updatePrivateMessage = async (req,res)=>{
 
     await db.query(
       "UPDATE private_messages SET message=? WHERE id=? AND sender_id=?",
-      [req.body.message,req.params.id,me.id]
+      [req.body.message, req.params.id, me.id]
     );
 
-    res.json({success:true});
+    res.json({success: true});
 
   }catch(err){
 
@@ -406,4 +449,106 @@ WHERE id=?
 
   }
 
+};
+
+/* =========================================================
+   MARK MESSAGES AS READ
+========================================================= */
+exports.markMessagesAsRead = async (req, res) => {
+  try {
+    const me = req.me;
+    const { sender_id, pg_id } = req.body;
+
+    if (!sender_id || !pg_id) {
+      return res.status(400).json({
+        message: "sender_id and pg_id required"
+      });
+    }
+
+    const [result] = await db.query(`
+      UPDATE private_messages
+      SET is_read = 1
+      WHERE sender_id = ?
+        AND receiver_id = ?
+        AND pg_id = ?
+        AND is_read = 0
+    `, [sender_id, me.id, pg_id]);
+
+    res.json({
+      success: true,
+      updated_count: result.affectedRows
+    });
+
+  } catch (err) {
+    console.error("Mark messages as read error:", err);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+};
+
+/* =========================================================
+   GET UNREAD MESSAGE COUNT
+========================================================= */
+exports.getUnreadCount = async (req, res) => {
+  try {
+    const me = req.me;
+
+    const [rows] = await db.query(`
+      SELECT 
+        COUNT(*) as total_unread,
+        pg_id,
+        sender_id
+      FROM private_messages
+      WHERE receiver_id = ? AND is_read = 0
+      GROUP BY pg_id, sender_id
+    `, [me.id]);
+
+    res.json({
+      success: true,
+      unread: rows
+    });
+
+  } catch (err) {
+    console.error("Get unread count error:", err);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+};
+
+/* =========================================================
+   GET CHAT DETAILS WITH PG INFO
+========================================================= */
+exports.getChatDetails = async (req, res) => {
+  try {
+    const me = req.me;
+    const { pg_id, other_user_id } = req.params;
+
+    const [rows] = await db.query(`
+      SELECT 
+        p.id as pg_id,
+        p.pg_name,
+        u.id as user_id,
+        COALESCE(u.name, u.phone) as user_name,
+        u.fcm_token
+      FROM pgs p
+      JOIN users u ON u.id = ?
+      WHERE p.id = ?
+    `, [other_user_id, pg_id]);
+
+    if (!rows.length) {
+      return res.status(404).json({
+        message: "Chat details not found"
+      });
+    }
+
+    res.json(rows[0]);
+
+  } catch (err) {
+    console.error("Get chat details error:", err);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
 };
