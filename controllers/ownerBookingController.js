@@ -683,3 +683,60 @@ exports.getOwnerActiveTenants = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+
+
+//////////////////////////////////////////////////////
+// MARK FULL PAYMENT RECEIVED
+//////////////////////////////////////////////////////
+exports.markFullPayment = async (
+  req,
+  res
+) => {
+
+  try {
+
+    const {
+      booking_id,
+      payment_mode
+    } = req.body;
+
+    await db.query(
+      `
+      UPDATE bookings
+      SET
+        full_payment_completed = 1,
+        remaining_payment_received = 1,
+        remaining_paid_date = NOW(),
+        remaining_payment_mode = ?
+      WHERE id = ?
+      `,
+      [
+        payment_mode || "CASH",
+        booking_id
+      ]
+    );
+
+    res.json({
+      success: true,
+      message:
+        "Full payment updated"
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FULL PAYMENT ERROR:",
+      err
+    );
+
+    res.status(500).json({
+      success: false,
+      message:
+        "Failed to update payment"
+    });
+
+  }
+
+};
