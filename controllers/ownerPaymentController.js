@@ -156,33 +156,49 @@ exports.signOwnerAgreement = async (req, res) => {
 };
 
 exports.getOwnerPayments = async (req, res) => {
+
   try {
-    const [rows] = await db.query(`
+
+    const [rows] = await db.query(
+      `
       SELECT 
+
         b.id AS booking_id,
+
         b.name AS tenant_name,
 
-        /* ✅ OWNER AMOUNT (INCLUDING MAINTENANCE) */
-        (
-          COALESCE(b.rent_amount, 0) + 
-          COALESCE(b.security_deposit, 0) + 
-          COALESCE(b.maintenance_amount, 0)
-        ) AS owner_amount,
+        /* ✅ FIXED TOKEN AMOUNT FOR OWNER */
+        1000 AS owner_amount,
 
-        /* 🔥 TOTAL PAID (FOR DEBUG / REFERENCE) */
+        /* ✅ PLATFORM FEE */
+        99 AS platform_fee,
+
+        /* ✅ TOTAL ONLINE PAYMENT */
         p.amount AS total_paid_amount,
 
         b.owner_settlement,
+
         b.admin_settlement,
+
         b.settlement_date,
+
         b.room_type,
 
         /* 🔥 FIX: REMOVE "0" VALUE */
-        COALESCE(NULLIF(af.final_pdf, '0'), NULL) AS final_pdf,
-        COALESCE(NULLIF(af.signed_pdf, '0'), NULL) AS signed_pdf,
+        COALESCE(
+          NULLIF(af.final_pdf, '0'),
+          NULL
+        ) AS final_pdf,
+
+        COALESCE(
+          NULLIF(af.signed_pdf, '0'),
+          NULL
+        ) AS signed_pdf,
+
         af.viewed_by_owner,
 
         p.order_id,
+
         pg.pg_name,
 
         CASE 
@@ -190,8 +206,11 @@ exports.getOwnerPayments = async (req, res) => {
             SELECT 1 
             FROM pg_checkins pc 
             WHERE pc.booking_id = b.id
-          ) THEN 'JOINED'
+          )
+          THEN 'JOINED'
+
           ELSE 'NOT_JOINED'
+
         END AS join_status
 
       FROM bookings b
@@ -209,7 +228,9 @@ exports.getOwnerPayments = async (req, res) => {
       AND p.status = 'paid'
 
       ORDER BY p.created_at DESC
-    `, [req.user.id]);
+      `,
+      [req.user.id]
+    );
 
     res.json({
       success: true,
@@ -217,13 +238,19 @@ exports.getOwnerPayments = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Owner payments error:", err);
+
+    console.error(
+      "Owner payments error:",
+      err
+    );
 
     res.status(500).json({
       success: false,
       message: "Failed to load owner payments"
     });
+
   }
+
 };
 
 
