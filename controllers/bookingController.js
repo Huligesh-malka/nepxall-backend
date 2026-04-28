@@ -213,9 +213,7 @@ exports.getUserBookings = async (req, res) => {
     const includeAgreement =
       req.query.agreement === "true";
 
-    //////////////////////////////////////////////////////
-    // GET BOOKINGS + LATEST PAYMENT
-    //////////////////////////////////////////////////////
+    
     const [rows] = await db.query(
       `
       SELECT
@@ -240,9 +238,7 @@ exports.getUserBookings = async (req, res) => {
 
         pr.room_no,
 
-        //////////////////////////////////////////////////////
-        // PAYMENT INFO
-        //////////////////////////////////////////////////////
+    
         COALESCE(pay.status, 'pending')
         AS payment_status,
 
@@ -256,9 +252,7 @@ exports.getUserBookings = async (req, res) => {
       LEFT JOIN pg_rooms pr
       ON pr.id = b.room_id
 
-      //////////////////////////////////////////////////////
-      // LATEST PAYMENT
-      //////////////////////////////////////////////////////
+     
       LEFT JOIN payments pay
       ON pay.booking_id = b.id
       AND pay.id = (
@@ -274,14 +268,10 @@ exports.getUserBookings = async (req, res) => {
       [req.user.id]
     );
 
-    //////////////////////////////////////////////////////
-    // FORMAT RESPONSE
-    //////////////////////////////////////////////////////
+   
     const updated = rows.map((item) => {
 
-      //////////////////////////////////////////////////////
-      // TOTAL CALCULATION
-      //////////////////////////////////////////////////////
+      
       let total =
         Number(item.rent_amount || 0) +
         Number(item.security_deposit || 0) +
@@ -291,9 +281,7 @@ exports.getUserBookings = async (req, res) => {
         total += 500;
       }
 
-      //////////////////////////////////////////////////////
-      // SHORT LOCATION
-      //////////////////////////////////////////////////////
+      
       let shortLocation = null;
 
       if (item.area && item.city) {
@@ -311,16 +299,11 @@ exports.getUserBookings = async (req, res) => {
 
       }
 
-      //////////////////////////////////////////////////////
-      // SHOW DETAILS ONLY AFTER APPROVAL
-      //////////////////////////////////////////////////////
+     
       const showDetails =
         item.status === "approved" ||
         item.status === "confirmed";
 
-      //////////////////////////////////////////////////////
-      // RETURN
-      //////////////////////////////////////////////////////
       return {
 
         id: item.id,
@@ -329,9 +312,6 @@ exports.getUserBookings = async (req, res) => {
 
         pg_name: item.pg_name,
 
-        //////////////////////////////////////////////////////
-        // LOCATION + PHONE
-        //////////////////////////////////////////////////////
         location:
           showDetails
             ? shortLocation
@@ -342,32 +322,22 @@ exports.getUserBookings = async (req, res) => {
             ? item.contact_phone
             : null,
 
-        //////////////////////////////////////////////////////
-        // ROOM
-        //////////////////////////////////////////////////////
         room_no: item.room_no,
 
         room_type: item.room_type,
 
         check_in_date: item.check_in_date,
 
-        //////////////////////////////////////////////////////
-        // STATUS
-        //////////////////////////////////////////////////////
         status: item.status,
 
-        //////////////////////////////////////////////////////
-        // PAYMENT STATUS
-        //////////////////////////////////////////////////////
+        
         payment_status:
           item.payment_status || "pending",
 
         order_id:
           item.order_id || null,
 
-        //////////////////////////////////////////////////////
-        // PRICE
-        //////////////////////////////////////////////////////
+       
         rent_amount: item.rent_amount,
 
         security_deposit:
@@ -378,27 +348,21 @@ exports.getUserBookings = async (req, res) => {
 
         total_amount: total,
 
-        //////////////////////////////////////////////////////
-        // AGREEMENT
-        //////////////////////////////////////////////////////
+     
         agreement_signed:
           item.agreement_signed,
 
         agreement_added:
           includeAgreement,
 
-        //////////////////////////////////////////////////////
-        // CREATED
-        //////////////////////////////////////////////////////
+       
         created_at: item.created_at,
 
       };
 
     });
 
-    //////////////////////////////////////////////////////
-    // RESPONSE
-    //////////////////////////////////////////////////////
+    
     return res.json(updated);
 
   } catch (err) {
