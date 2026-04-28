@@ -100,9 +100,11 @@ exports.createCashfreeOrder = async (req, res) => {
     }
 
     // ✅ STEP 1 — ADD PLATFORM FEE
-    const bookingAmount = Number(amount);
-    const platformFee = 99;
-    const totalAmount = bookingAmount + platformFee;
+    const bookingAmount = 1000;
+
+const platformFee = 99;
+
+const totalAmount = 1099;
 
     const order_id = "order_" + bookingId + "_" + Date.now();
 
@@ -152,6 +154,9 @@ exports.createCashfreeOrder = async (req, res) => {
     });
   }
 };
+
+
+
 
 //////////////////////////////////////////////////////
 // VERIFY CASHFREE PAYMENT (AUTO PAYMENT VERSION)
@@ -298,7 +303,6 @@ exports.verifyCashfreePayment = async (req, res) => {
 
     //////////////////////////////////////////////////////
     // UPDATE BOOKING
-    // ✅ STEP 4 — OWNER GETS AMOUNT MINUS PLATFORM FEE (₹99)
     //////////////////////////////////////////////////////
     if (booking) {
 
@@ -311,7 +315,7 @@ exports.verifyCashfreePayment = async (req, res) => {
         WHERE id=?
         `,
         [
-          existingPayment.amount - 99,  // ← Changed: owner gets amount minus ₹99
+          1000,
           booking.id
         ]
       );
