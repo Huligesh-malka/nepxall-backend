@@ -2,7 +2,8 @@ const db = require("../db");
 const path = require("path");
 const fs = require("fs").promises;
 const plans = require("../config/plans");
-const cloudinary = require("cloudinary").v2; // ✅ ADD CLOUDINARY
+const cloudinary = require("cloudinary").v2;
+const sendNotification = require("../utils/sendNotification"); // ✅ ADDED
 
 /* ================= HELPERS ================= */
 const toBool = (v) => (v === true || v === "true" || v === 1 ? 1 : 0);
@@ -174,6 +175,12 @@ exports.updatePGStatus = async (req, res) => {
       });
     }
 
+    // Get PG owner before update for notification
+    const [[pgInfo]] = await db.query(
+      "SELECT owner_id, pg_name FROM pgs WHERE id = ?",
+      [id]
+    );
+
     const [updateResult] = await db.query(
       "UPDATE pgs SET status = ? WHERE id = ?",
       [status, id]
@@ -184,7 +191,7 @@ exports.updatePGStatus = async (req, res) => {
     }
 
     const [ownerRows] = await db.query(
-      `SELECT u.id, u.firebase_uid
+      `SELECT u.id, u.fcm_token
        FROM pgs p
        JOIN users u ON u.id = p.owner_id
        WHERE p.id = ?`,
@@ -196,7 +203,7 @@ exports.updatePGStatus = async (req, res) => {
     }
 
     const ownerId = ownerRows[0].id;
-    const firebase_uid = ownerRows[0].firebase_uid;
+    const ownerFcmToken = ownerRows[0].fcm_token;
 
     let title = "";
     let message = "";
@@ -204,12 +211,30 @@ exports.updatePGStatus = async (req, res) => {
 
     if (status === "active") {
       title = "PG Approved 🎉";
-      message = "Your PG has been approved and is now live.";
+      message = `Your PG "${pgInfo?.pg_name}" has been approved and is now live.`;
       type = "pg_approved";
+      
+      // 🔔 SEND PUSH NOTIFICATION
+      if (ownerFcmToken) {
+        await sendNotification(
+          ownerFcmToken,
+          title,
+          message
+        );
+      }
     } else if (status === "rejected") {
       title = "PG Rejected ⚠️";
-      message = "Your PG was rejected. Please review admin feedback.";
+      message = `Your PG "${pgInfo?.pg_name}" was rejected. Please review admin feedback.`;
       type = "pg_rejected";
+      
+      // 🔔 SEND PUSH NOTIFICATION
+      if (ownerFcmToken) {
+        await sendNotification(
+          ownerFcmToken,
+          title,
+          message
+        );
+      }
     } else {
       return res.json({ success: true, status });
     }
@@ -221,7 +246,7 @@ exports.updatePGStatus = async (req, res) => {
       [ownerId, title, message, type]
     );
     
-    console.log(`✅ Notification sent to owner: ${firebase_uid || ownerId}`);
+    console.log(`✅ Notification sent to owner: ${ownerId}`);
     res.json({ success: true, status });
 
   } catch (err) {
@@ -293,9 +318,6 @@ exports.uploadPhotosOnly = async (req, res) => {
     });
   }
 };
-
-
-
 
 exports.addPG = async (req, res) => {
   try {
@@ -539,16 +561,34 @@ exports.addPG = async (req, res) => {
     // INSERT
     const [result] = await db.query("INSERT INTO pgs SET ?", pgData);
 
-    // NOTIFICATION
+    // Get owner's FCM token for push notification
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id = ?",
+      [numericOwnerId]
+    );
+
+    const notificationTitle = req.user.role === "admin" ? "PG Added by Admin 🏢" : "PG Submitted 📝";
+    const notificationMessage = req.user.role === "admin"
+      ? `Admin added "${b.pg_name}" on your behalf. You can now manage it.`
+      : `Your PG "${b.pg_name}" has been submitted and is under review.`;
+
+    // 🔔 SEND PUSH NOTIFICATION
+    if (owner?.fcm_token) {
+      await sendNotification(
+        owner.fcm_token,
+        notificationTitle,
+        notificationMessage
+      );
+    }
+
+    // INSERT INTO NOTIFICATIONS TABLE
     await db.query(
       `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
        VALUES (?, ?, ?, ?, 0, NOW())`,
       [
         numericOwnerId,
-        "PG Added",
-        req.user.role === "admin"
-          ? "Admin added your PG. You can now manage it."
-          : "Your PG has been submitted and is under review.",
+        notificationTitle,
+        notificationMessage,
         "pg_added"
       ]
     );
@@ -628,6 +668,7 @@ exports.getPGById = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 /* ================= SEARCH PG ================= */
 exports.advancedSearchPG = async (req, res) => {
   try {
@@ -710,7 +751,6 @@ exports.advancedSearchPG = async (req, res) => {
     });
   }
 };
-
 
 /* ================= UPDATE PG ================= */
 exports.updatePG = async (req, res) => {
@@ -1549,6 +1589,32 @@ exports.upgradeUserPlan = async (req, res) => {
       });
     }
 
+    // Get user's FCM token for notification
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id = ?",
+      [userId]
+    );
+
+    // 🔔 SEND NOTIFICATION FOR PLAN UPGRADE
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Plan Upgraded 🚀",
+        `Your plan has been upgraded to ${plans[plan].name}. Expires on ${plan_expiry.toLocaleDateString()}`
+      );
+    }
+
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        userId,
+        "Plan Upgraded 🚀",
+        `Your plan has been upgraded to ${plans[plan].name}. Expires on ${plan_expiry.toLocaleDateString()}`,
+        "plan_upgrade"
+      ]
+    );
+
     res.json({
       success: true,
       message: `User plan upgraded to ${plans[plan].name}`,
@@ -1560,8 +1626,6 @@ exports.upgradeUserPlan = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
 
 exports.addPGPublic = async (req, res) => {
   try {
@@ -1606,6 +1670,31 @@ exports.addPGPublic = async (req, res) => {
         b.city,
         b.address || "",
         phone
+      ]
+    );
+
+    // 🔔 SEND NOTIFICATION TO OWNER
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id = ?",
+      [ownerId]
+    );
+
+    if (owner?.fcm_token) {
+      await sendNotification(
+        owner.fcm_token,
+        "PG Submission Received 📝",
+        `Your PG "${b.pg_name}" has been submitted and is under review.`
+      );
+    }
+
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        ownerId,
+        "PG Submission Received 📝",
+        `Your PG "${b.pg_name}" has been submitted and is under review.`,
+        "pg_added"
       ]
     );
 
