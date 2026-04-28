@@ -203,7 +203,7 @@ exports.createBooking = async (req, res) => {
         await sendNotification(
           owner.fcm_token,
           "New Booking",
-          `${user.name} booked your PG: ${pg.name || pg.title || "PG"}`
+          "Tenant booked the PG"
         );
       } catch (notifError) {
         console.error("❌ Notification error:", notifError);
