@@ -9,7 +9,7 @@ const webhookController = require("../controllers/paymentWebhookController");
 const verifyFirebaseToken = require("../middlewares/authMiddleware");
 
 //////////////////////////////////////////////////////
-// CLOUDINARY CONFIGURATION (using your existing setup)
+// CLOUDINARY CONFIGURATION
 //////////////////////////////////////////////////////
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -43,10 +43,9 @@ const screenshotStorage = new CloudinaryStorage({
   },
 });
 
-// Configure multer with Cloudinary storage
 const uploadScreenshot = multer({
   storage: screenshotStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Only image files are allowed"), false);
@@ -72,22 +71,6 @@ router.post(
   paymentController.createCashfreeOrder
 );
 
-
-// Confirm payment (without screenshot)
-router.post(
-  "/confirm-payment",
-  verifyFirebaseToken,
-  paymentController.confirmPayment
-);
-
-// Submit payment with screenshot (using Cloudinary)
-router.post(
-  "/submit-screenshot",
-  verifyFirebaseToken,
-  uploadScreenshot.single("screenshot"),
-  paymentController.submitPaymentWithScreenshot
-);
-
 // Get payment status for a booking
 router.get(
   "/status/:bookingId",
@@ -95,19 +78,11 @@ router.get(
   paymentController.getUserPaymentStatus
 );
 
-
-// ✅ ADD HERE 👇
+// Agreement status
 router.get(
   "/agreement-status/:bookingId",
   verifyFirebaseToken,
   paymentController.getAgreementStatus
-);
-
-// Match bank transaction (for auto-verification)
-router.post(
-  "/match-bank-transaction",
-  verifyFirebaseToken,
-  paymentController.matchBankTransaction
 );
 
 // Webhook for payment gateways
@@ -117,71 +92,41 @@ router.post(
 );
 
 //////////////////////////////////////////////////////
-// ADMIN PAYMENT PANEL ROUTES
+// ADMIN PAYMENT PANEL ROUTES (READ ONLY)
 //////////////////////////////////////////////////////
 
-// Get all payments for admin
+// Get all payments for admin (read only)
 router.get(
   "/admin/payments",
   verifyFirebaseToken,
   paymentController.getAdminPayments
 );
 
-// Verify payment (admin action)
-router.put(
-  "/admin/payments/:orderId/verify",
-  verifyFirebaseToken,
-  paymentController.verifyPayment
-);
-
-// Reject payment (admin action)
-router.put(
-  "/admin/payments/:orderId/reject",
-  verifyFirebaseToken,
-  paymentController.rejectPayment
-);
-
-
-
+// REMOVED: verifyPayment, rejectPayment, submitPaymentWithScreenshot, matchBankTransaction, confirmPayment
 
 //////////////////////////////////////////////////////
-// REFUND ROUTES (SAFE ADD - NO BREAK)
+// REFUND ROUTES
 //////////////////////////////////////////////////////
 
-// ✅ USER REQUEST REFUND
+// User request refund
 router.post(
   "/refunds/request",
   verifyFirebaseToken,
-  (req, res, next) => {
-    if (!paymentController.requestRefund) {
-      return res.status(500).json({ message: "requestRefund not defined" });
-    }
-    return paymentController.requestRefund(req, res, next);
-  }
+  paymentController.requestRefund
 );
 
-// ✅ ADMIN GET ALL REFUNDS
+// Admin get all refunds
 router.get(
   "/admin/refunds",
   verifyFirebaseToken,
-  (req, res, next) => {
-    if (!paymentController.getAllRefunds) {
-      return res.status(500).json({ message: "getAllRefunds not defined" });
-    }
-    return paymentController.getAllRefunds(req, res, next);
-  }
+  paymentController.getAllRefunds
 );
 
-// ✅ ADMIN UPDATE REFUND STATUS
+// Admin update refund status
 router.put(
   "/admin/refunds/:refundId",
   verifyFirebaseToken,
-  (req, res, next) => {
-    if (!paymentController.updateRefundStatus) {
-      return res.status(500).json({ message: "updateRefundStatus not defined" });
-    }
-    return paymentController.updateRefundStatus(req, res, next);
-  }
+  paymentController.updateRefundStatus
 );
 
 module.exports = router;

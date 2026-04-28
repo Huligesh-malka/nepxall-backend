@@ -1,797 +1,90 @@
-  const QRCode = require("qrcode");
-  const db = require("../db");
-  const path = require("path");
-
-  // Cashfree Payment Gateway Configuration - CORRECT VERSION
-  const { Cashfree, CFEnvironment } = require("cashfree-pg");
-
-  const cashfree = new Cashfree(
-    CFEnvironment.PRODUCTION,
-    process.env.CASHFREE_APP_ID,
-    process.env.CASHFREE_SECRET_KEY
-  );
-  //////////////////////////////////////////////////////
-  // CREATE UPI PAYMENT
-  //////////////////////////////////////////////////////
-  exports.createPayment = async (req, res) => {
-    try {
-      // 🔥 ADD includeAgreement (NEW)
-      const { bookingId, includeAgreement } = req.body;
-
-      if (!bookingId) {
-        return res.status(400).json({ success: false, message: "bookingId required" });
-      }
-
-      // ✅ 1. Get real booking data
-      const [[booking]] = await db.query(
-        `SELECT 
-          user_id, 
-          rent_amount, 
-          security_deposit, 
-          maintenance_amount, 
-          platform_fee 
-        FROM bookings 
-        WHERE id = ?`,
-        [bookingId]
-      );
-
-      if (!booking) {
-        return res.status(404).json({ success: false, message: "Booking not found" });
-      }
-
-      // Convert string → number
-      const rent = parseFloat(booking.rent_amount) || 0;
-      const deposit = parseFloat(booking.security_deposit) || 0;
-      const maintenance = parseFloat(booking.maintenance_amount) || 0;
-      const platformFee = parseFloat(booking.platform_fee) || 0;
-
-      // 🔥 ORIGINAL AMOUNT
-      let amount = rent + deposit + maintenance + platformFee;
-
-      // 🔥 ADD AGREEMENT (ONLY ADD THIS)
-      if (includeAgreement) {
-        amount += 500; // agreement charge
-      }
-
-      if (amount <= 0) {
-        return res.status(400).json({ success: false, message: "Invalid amount" });
-      }
-
-      // ✅ 3. Create Order
-      const orderId = `order_${bookingId}_${Date.now()}`;
-      const upiId = "huligeshmalka-1@oksbi";
-      const merchantName = "Nepxall";
-
-      // 🔥 NOW QR WILL HAVE CORRECT AMOUNT
-      const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
-      const qr = await QRCode.toDataURL(upiLink);
-
-      // ✅ 4. Save payment
-      await db.query(
-        `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
-        VALUES (?, ?, ?, ?, 'pending', NOW())`,
-        [bookingId, booking.user_id, orderId, amount]
-      );
-
-      res.json({
-        success: true,
-        orderId,
-        amount,
-        upiLink,
-        qr
-      });
-
-    } catch (err) {
-      console.error("CREATE PAYMENT ERROR:", err);
-      res.status(500).json({ success: false });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // USER CONFIRM PAYMENT
-  //////////////////////////////////////////////////////
-  exports.confirmPayment = async (req, res) => {
-    try {
-      const { orderId } = req.body;
-
-      if (!orderId) {
-        return res.status(400).json({
-          success: false,
-          message: "orderId required"
-        });
-      }
-
-      const [rows] = await db.query(
-        "SELECT * FROM payments WHERE order_id=?",
-        [orderId]
-      );
-
-      if (rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Payment not found"
-        });
-      }
-
-      await db.query(
-        `UPDATE payments SET status='submitted' WHERE order_id=?`,
-        [orderId]
-      );
-
-      res.json({
-        success: true,
-        message: "Payment submitted"
-      });
-
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({
-        success: false
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // VERIFY PAYMENT (ADMIN)
-  //////////////////////////////////////////////////////
-  exports.verifyPayment = async (req, res) => {
-    const connection = await db.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      //////////////////////////////////////////////////////
-      // 1. ADMIN CHECK
-      //////////////////////////////////////////////////////
-      if (req.user.role !== "admin") {
-        return res.status(403).json({
-          success: false,
-          message: "Unauthorized"
-        });
-      }
-
-      const { orderId } = req.params;
-
-      //////////////////////////////////////////////////////
-      // 2. GET PAYMENT + BOOKING DATA
-      //////////////////////////////////////////////////////
-      const [[paymentData]] = await connection.query(
-        `SELECT 
-          p.booking_id, 
-          p.amount,
-          p.status AS payment_status,
-          b.pg_id, 
-          b.user_id, 
-          b.owner_id, 
-          b.room_id,
-          b.check_in_date 
-        FROM payments p
-        JOIN bookings b ON b.id = p.booking_id
-        WHERE p.order_id = ? FOR UPDATE`,
-        [orderId]
-      );
-
-      if (!paymentData) {
-        return res.status(404).json({
-          success: false,
-          message: "Payment record not found"
-        });
-      }
-
-      //////////////////////////////////////////////////////
-      // 🔒 PREVENT DOUBLE APPROVE
-      //////////////////////////////////////////////////////
-      if (paymentData.payment_status === "paid") {
-        return res.status(400).json({
-          success: false,
-          message: "Payment already verified"
-        });
-      }
-
-      //////////////////////////////////////////////////////
-      // 3. UPDATE PAYMENT → PAID
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `UPDATE payments 
-        SET status='paid', verified_by_admin=TRUE 
-        WHERE order_id=?`,
-        [orderId]
-      );
-
-      //////////////////////////////////////////////////////
-      // 4. UPDATE BOOKING → CONFIRMED
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `UPDATE bookings 
-        SET status='confirmed', 
-            owner_amount=?, 
-            owner_settlement='PENDING' 
-        WHERE id=?`,
-        [paymentData.amount, paymentData.booking_id]
-      );
-
-      //////////////////////////////////////////////////////
-      // 🔥 5. ALWAYS INSERT NEW PG_USERS (FINAL LOGIC)
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `INSERT INTO pg_users 
-        (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
-        VALUES (?,?,?,?,?, 'ACTIVE', ?)`,
-        [
-          paymentData.owner_id,
-          paymentData.pg_id,
-          paymentData.room_id || null,
-          paymentData.user_id,
-          paymentData.check_in_date,
-          paymentData.booking_id
-        ]
-      );
-
-      //////////////////////////////////////////////////////
-      // 6. UPDATE ROOM OCCUPANCY
-      //////////////////////////////////////////////////////
-      if (paymentData.room_id) {
-        await connection.query(
-          `UPDATE pg_rooms 
-          SET occupied_seats = occupied_seats + 1 
-          WHERE id=?`,
-          [paymentData.room_id]
-        );
-      }
-
-      //////////////////////////////////////////////////////
-      // ✅ COMMIT
-      //////////////////////////////////////////////////////
-      await connection.commit();
-
-      res.json({
-        success: true,
-        message: "Payment verified. User is now ACTIVE in PG."
-      });
-
-    } catch (err) {
-      await connection.rollback();
-      console.error("❌ VERIFY PAYMENT ERROR:", err);
-
-      res.status(500).json({
-        success: false,
-        message: "Internal Server Error",
-        error: err.sqlMessage || err.message
-      });
-
-    } finally {
-      connection.release();
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // ADMIN REJECT PAYMENT
-  //////////////////////////////////////////////////////
-  exports.rejectPayment = async (req, res) => {
-    const connection = await db.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      //////////////////////////////////////////////////////
-      // ✅ ADMIN CHECK
-      //////////////////////////////////////////////////////
-      if (req.user.role !== "admin") {
-        return res.status(403).json({ success: false });
-      }
-
-      const { orderId } = req.params;
-
-      //////////////////////////////////////////////////////
-      // ✅ GET PAYMENT + BOOKING
-      //////////////////////////////////////////////////////
-      const [[data]] = await connection.query(
-        `SELECT p.booking_id, b.user_id, b.pg_id, b.room_id
-        FROM payments p
-        JOIN bookings b ON b.id = p.booking_id
-        WHERE p.order_id=? FOR UPDATE`,
-        [orderId]
-      );
-
-      if (!data) {
-        throw new Error("Payment not found");
-      }
-
-      const { booking_id, room_id } = data;
-
-      //////////////////////////////////////////////////////
-      // ❌ UPDATE PAYMENT → REJECTED
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `UPDATE payments 
-        SET status='rejected', verified_by_admin=FALSE 
-        WHERE order_id=?`,
-        [orderId]
-      );
-
-      //////////////////////////////////////////////////////
-      // 🔥 FIXED: KEEP BOOKING APPROVED (IMPORTANT)
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `UPDATE bookings 
-        SET status='approved',
-            owner_settlement=NULL,
-            settlement_date=NULL
-        WHERE id=?`,
-        [booking_id]
-      );
-
-      //////////////////////////////////////////////////////
-      // ❌ REMOVE USER FROM PG
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `DELETE FROM pg_users 
-        WHERE booking_id=?`,
-        [booking_id]
-      );
-
-      //////////////////////////////////////////////////////
-      // ❌ DECREASE ROOM OCCUPANCY
-      //////////////////////////////////////////////////////
-      if (room_id) {
-        await connection.query(
-          `UPDATE pg_rooms 
-          SET occupied_seats = GREATEST(occupied_seats - 1, 0)
-          WHERE id=?`,
-          [room_id]
-        );
-      }
-
-      //////////////////////////////////////////////////////
-      // ✅ COMMIT
-      //////////////////////////////////////////////////////
-      await connection.commit();
-
-      res.json({
-        success: true,
-        message: "Payment rejected. User can pay again."
-      });
-
-    } catch (err) {
-      await connection.rollback();
-      console.error("❌ REJECT ERROR:", err);
-
-      res.status(500).json({
-        success: false,
-        message: err.message
-      });
-    } finally {
-      connection.release();
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // AUTO MATCH BANK TRANSACTION
-  //////////////////////////////////////////////////////
-  exports.matchBankTransaction = async (req, res) => {
-    try {
-      const { remark } = req.body;
-
-      if (!remark) {
-        return res.status(400).json({
-          success: false,
-          message: "remark required"
-        });
-      }
-
-      const match = remark.match(/order_[0-9]+_[0-9]+/);
-
-      if (!match) {
-        return res.json({
-          success: false,
-          message: "order id not found"
-        });
-      }
-
-      const orderId = match[0];
-
-      await db.query(
-        `UPDATE payments
-        SET status='paid'
-        WHERE order_id=?`,
-        [orderId]
-      );
-
-      res.json({
-        success: true,
-        message: "payment matched"
-      });
-
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({
-        success: false
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // SUBMIT PAYMENT WITH SCREENSHOT (Matches your table)
-  //////////////////////////////////////////////////////
-  exports.submitPaymentWithScreenshot = async (req, res) => {
-    try {
-      const { orderId, utr } = req.body;
-      const file = req.file;
-
-      console.log("📸 Submitting payment with screenshot:", { 
-        orderId, 
-        utr, 
-        fileExists: !!file,
-        fileUrl: file?.path
-      });
-
-      if (!orderId) {
-        return res.status(400).json({
-          success: false,
-          message: "orderId required"
-        });
-      }
-
-      if (!file) {
-        return res.status(400).json({
-          success: false,
-          message: "Screenshot is required"
-        });
-      }
-
-      // Check if payment exists
-      const [rows] = await db.query(
-        "SELECT * FROM payments WHERE order_id=?",
-        [orderId]
-      );
-
-      if (rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Payment not found"
-        });
-      }
-
-      // Get the Cloudinary URL
-      const screenshotUrl = file.path;
-
-      // Update payment - ALL columns exist in your table now!
-      await db.query(
-        `UPDATE payments 
-        SET status='submitted', 
-            utr=?, 
-            screenshot=?,
-            submitted_at=NOW() 
-        WHERE order_id=?`,
-        [utr || null, screenshotUrl, orderId]
-      );
-
-      console.log("✅ Payment submitted successfully. Screenshot URL:", screenshotUrl);
-
-      res.json({
-        success: true,
-        message: "Payment submitted successfully. Waiting for admin verification.",
-        screenshotUrl
-      });
-
-    } catch (err) {
-      console.error("❌ SUBMIT PAYMENT ERROR:", err);
-      res.status(500).json({
-        success: false,
-        message: "Failed to submit payment",
-        error: err.message
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // GET USER PAYMENT STATUS (NEW)
-  //////////////////////////////////////////////////////
-  exports.getUserPaymentStatus = async (req, res) => {
-    try {
-      const { bookingId } = req.params;
-
-      const [rows] = await db.query(
-        `
-        SELECT 
-          status, 
-          order_id, 
-          utr, 
-          created_at, 
-          submitted_at 
-        FROM payments 
-        WHERE booking_id = ?
-        ORDER BY 
-          CASE 
-            WHEN status = 'paid' THEN 1
-            WHEN status = 'submitted' THEN 2
-            WHEN status = 'pending' THEN 3
-            WHEN status = 'rejected' THEN 4
-            ELSE 5
-          END,
-          created_at DESC
-        LIMIT 1
-        `,
-        [bookingId]
-      );
-
-      if (rows.length === 0) {
-        return res.json({
-          success: true,
-          data: null,
-          message: "No payment found"
-        });
-      }
-
-      return res.json({
-        success: true,
-        data: rows[0]
-      });
-
-    } catch (err) {
-      console.error("❌ PAYMENT STATUS ERROR:", err);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch payment status"
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // VIEW PAYMENT SCREENSHOT (ADMIN ONLY - NEW)
-  //////////////////////////////////////////////////////
-  exports.viewPaymentScreenshot = async (req, res) => {
-    try {
-      if (req.user.role !== "admin") {
-        return res.status(403).json({ success: false, message: "Unauthorized" });
-      }
-
-      const { orderId } = req.params;
-
-      const [rows] = await db.query(
-        "SELECT screenshot FROM payments WHERE order_id=?",
-        [orderId]
-      );
-
-      if (rows.length === 0 || !rows[0].screenshot) {
-        return res.status(404).json({
-          success: false,
-          message: "Screenshot not found"
-        });
-      }
-
-      // Send the image file
-      res.sendFile(path.resolve(rows[0].screenshot));
-
-    } catch (err) {
-      console.error("❌ VIEW SCREENSHOT ERROR:", err);
-      res.status(500).json({
-        success: false,
-        message: "Failed to view screenshot"
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // GET ADMIN PAYMENTS
-  //////////////////////////////////////////////////////
-  exports.getAdminPayments = async (req, res) => {
-    try {
-      const [rows] = await db.query(`
-        SELECT 
-          p.order_id,
-          p.amount,
-          p.status,
-          p.created_at,
-          p.submitted_at,
-          p.booking_id,
-          p.utr,
-          p.screenshot,
-          p.verified_by_admin,
-
-          /* USER */
-          COALESCE(u.name, b.name, 'Guest User') AS reg_name,
-          COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
-
-          /* BOOKING */
-          b.room_type AS sharing,
-          b.check_in_date,
-
-          /* BASE AMOUNT */
-          b.rent_amount,
-          b.security_deposit,
-          b.maintenance_amount,
-
-          /* 🔥 TOTAL WITHOUT AGREEMENT */
-          (b.rent_amount + b.security_deposit + b.maintenance_amount) AS base_amount,
-
-          /* 🔥 DETECT AGREEMENT PAID */
-          CASE 
-            WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
-            THEN 1
-            ELSE 0
-          END AS agreement_paid,
-
-          /* 🔥 AGREEMENT FEE */
-          CASE 
-            WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
-            THEN 500
-            ELSE 0
-          END AS agreement_fee,
-
-          /* 🔥 FINAL TOTAL (WITH AGREEMENT IF PAID) */
-          CASE 
-            WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
-            THEN (b.rent_amount + b.security_deposit + b.maintenance_amount + 500)
-            ELSE (b.rent_amount + b.security_deposit + b.maintenance_amount)
-          END AS total_amount,
-
-          /* PG */
-          pg.pg_name
-
-        FROM payments p
-        LEFT JOIN bookings b ON b.id = p.booking_id
-        LEFT JOIN users u ON u.id = b.user_id
-        LEFT JOIN pgs pg ON pg.id = b.pg_id
-
-        ORDER BY p.created_at DESC
-      `);
-
-      res.json({
-        success: true,
-        data: rows
-      });
-
-    } catch (err) {
-      console.error("❌ ADMIN PAYMENTS ERROR:", err);
-      res.status(500).json({
-        success: false,
-        message: "Failed to load payments"
-      });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // GET ALL REFUNDS
-  //////////////////////////////////////////////////////
-  exports.getAllRefunds = async (req, res) => {
-    try {
-      const [rows] = await db.query(`
-        SELECT 
-          r.*,
-          u.name,
-          u.phone,
-          p.pg_name,
-          b.id AS booking_id,
-          pay.order_id
-
-        FROM refunds r
-        JOIN users u ON u.id = r.user_id
-        JOIN bookings b ON b.id = r.booking_id
-        JOIN pgs p ON p.id = b.pg_id
-
-        LEFT JOIN payments pay 
-        ON pay.booking_id = b.id
-        AND pay.created_at = (
-          SELECT MAX(created_at) 
-          FROM payments 
-          WHERE booking_id = b.id
-        )
-
-        ORDER BY r.created_at DESC
-      `);
-
-      res.json(rows);
-
-    } catch (err) {
-      console.error("❌ GET REFUNDS ERROR:", err);
-      res.status(500).json({ message: err.message });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // UPDATE REFUND STATUS
-  //////////////////////////////////////////////////////
-  exports.updateRefundStatus = async (req, res) => {
-    try {
-      const { refundId } = req.params;
-      const { status } = req.body;
-
-      // 🔥 VALID STATUS CHECK
-      const validStatuses = ["pending", "approved", "paid", "rejected"];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ message: "Invalid status" });
-      }
-
-      // 🔥 CHECK REFUND EXISTS
-      const [[refund]] = await db.query(
-        "SELECT * FROM refunds WHERE id=?",
-        [refundId]
-      );
-
-      if (!refund) {
-        return res.status(404).json({ message: "Refund not found" });
-      }
-
-      // 🔥 UPDATE STATUS
-      await db.query(
-        "UPDATE refunds SET status=? WHERE id=?",
-        [status, refundId]
-      );
-
-      res.json({
-        success: true,
-        message: `Refund ${status} successfully`
-      });
-
-    } catch (err) {
-      console.error("❌ UPDATE REFUND ERROR:", err);
-      res.status(500).json({ message: err.message });
-    }
-  };
-
-  //////////////////////////////////////////////////////
-  // GET AGREEMENT STATUS
-  //////////////////////////////////////////////////////
-  exports.getAgreementStatus = async (req, res) => {
-    try {
-      const { bookingId } = req.params;
-
-      // ✅ Get booking + payment
-      const [[row]] = await db.query(`
-        SELECT 
-          b.id,
-          b.rent_amount,
-          b.security_deposit,
-          b.maintenance_amount,
-          b.platform_fee,
-          p.amount
-        FROM bookings b
-        LEFT JOIN payments p 
-          ON p.booking_id = b.id 
-          AND p.status = 'paid'
-        WHERE b.id = ?
-      `, [bookingId]);
-
-      if (!row) {
-        return res.status(404).json({
-          success: false,
-          message: "Booking not found"
-        });
-      }
-
-      const baseAmount =
-        Number(row.rent_amount || 0) +
-        Number(row.security_deposit || 0) +
-        Number(row.maintenance_amount || 0) +
-        Number(row.platform_fee || 0);
-
-      // ✅ Check if agreement included
-      const hasAgreement = Number(row.amount) > baseAmount;
-
-      res.json({
-        success: true,
-        hasAgreement
-      });
-
-    } catch (err) {
-      console.error("Agreement status error:", err);
-      res.status(500).json({
-        success: false,
-        message: "Failed to get agreement status"
-      });
-    }
-  };
-
-
+const QRCode = require("qrcode");
+const db = require("../db");
+const path = require("path");
+
+// Cashfree Payment Gateway Configuration - CORRECT VERSION
+const { Cashfree, CFEnvironment } = require("cashfree-pg");
+
+const cashfree = new Cashfree(
+  CFEnvironment.PRODUCTION,
+  process.env.CASHFREE_APP_ID,
+  process.env.CASHFREE_SECRET_KEY
+);
 
 //////////////////////////////////////////////////////
-// CREATE CASHFREE ORDER (FINAL FIXED VERSION)
+// CREATE UPI PAYMENT
+//////////////////////////////////////////////////////
+exports.createPayment = async (req, res) => {
+  try {
+    const { bookingId, includeAgreement } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: "bookingId required" });
+    }
+
+    const [[booking]] = await db.query(
+      `SELECT 
+        user_id, 
+        rent_amount, 
+        security_deposit, 
+        maintenance_amount, 
+        platform_fee 
+      FROM bookings 
+      WHERE id = ?`,
+      [bookingId]
+    );
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    const rent = parseFloat(booking.rent_amount) || 0;
+    const deposit = parseFloat(booking.security_deposit) || 0;
+    const maintenance = parseFloat(booking.maintenance_amount) || 0;
+    const platformFee = parseFloat(booking.platform_fee) || 0;
+
+    let amount = rent + deposit + maintenance + platformFee;
+
+    if (includeAgreement) {
+      amount += 500;
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid amount" });
+    }
+
+    const orderId = `order_${bookingId}_${Date.now()}`;
+    const upiId = "huligeshmalka-1@oksbi";
+    const merchantName = "Nepxall";
+
+    const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&tr=${orderId}&tn=${orderId}&am=${amount}&cu=INR`;
+    const qr = await QRCode.toDataURL(upiLink);
+
+    await db.query(
+      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
+      VALUES (?, ?, ?, ?, 'pending', NOW())`,
+      [bookingId, booking.user_id, orderId, amount]
+    );
+
+    res.json({
+      success: true,
+      orderId,
+      amount,
+      upiLink,
+      qr
+    });
+
+  } catch (err) {
+    console.error("CREATE PAYMENT ERROR:", err);
+    res.status(500).json({ success: false });
+  }
+};
+
+//////////////////////////////////////////////////////
+// CREATE CASHFREE ORDER
 //////////////////////////////////////////////////////
 exports.createCashfreeOrder = async (req, res) => {
-
   try {
-
     const {
       bookingId,
       amount,
@@ -799,410 +92,467 @@ exports.createCashfreeOrder = async (req, res) => {
       customerPhone
     } = req.body;
 
-    //////////////////////////////////////////////////////
-    // VALIDATION
-    //////////////////////////////////////////////////////
-    if (
-      !bookingId ||
-      !amount ||
-      !customerPhone
-    ) {
-
+    if (!bookingId || !amount || !customerPhone) {
       return res.status(400).json({
         success: false,
         message: "Missing required fields"
       });
-
     }
 
-    //////////////////////////////////////////////////////
-    // CREATE ORDER ID
-    //////////////////////////////////////////////////////
-    const order_id =
-      "order_" +
-      bookingId +
-      "_" +
-      Date.now();
+    const order_id = "order_" + bookingId + "_" + Date.now();
 
-    //////////////////////////////////////////////////////
-    // SAVE PAYMENT FIRST
-    //////////////////////////////////////////////////////
     await db.query(
-      `
-      INSERT INTO payments
-      (
-        booking_id,
-        user_id,
-        order_id,
-        amount,
-        status,
-        created_at,
-        verified_by_admin
-      )
-      VALUES (?, ?, ?, ?, 'pending', NOW(), 0)
-      `,
-      [
-        bookingId,
-        req.user.id,
-        order_id,
-        amount
-      ]
+      `INSERT INTO payments (booking_id, user_id, order_id, amount, status, created_at)
+      VALUES (?, ?, ?, ?, 'pending', NOW())`,
+      [bookingId, req.user.id, order_id, amount]
     );
 
-    //////////////////////////////////////////////////////
-    // CASHFREE REQUEST
-    //////////////////////////////////////////////////////
     const request = {
-
       order_id,
-
       order_amount: Number(amount),
-
       order_currency: "INR",
-
       customer_details: {
-
-        customer_id:
-          String(customerId || req.user.id),
-
-        customer_phone:
-          String(customerPhone),
-
-        customer_email:
-          "support@nepxall.com"
-
+        customer_id: String(customerId || req.user.id),
+        customer_phone: String(customerPhone),
+        customer_email: "support@nepxall.com"
       },
-
       order_meta: {
-
-        return_url:
-          `${process.env.FRONTEND_URL || "https://nepxall.com"}/payment-success?order_id={order_id}`
-
+        return_url: `${process.env.FRONTEND_URL || "https://nepxall.com"}/payment-success?order_id={order_id}`
       }
-
     };
 
-    console.log(
-      "CASHFREE REQUEST:",
-      JSON.stringify(request, null, 2)
-    );
+    console.log("CASHFREE REQUEST:", JSON.stringify(request, null, 2));
 
-    //////////////////////////////////////////////////////
-    // CREATE CASHFREE ORDER
-    //////////////////////////////////////////////////////
-    const response =
-      await cashfree.PGCreateOrder(request);
+    const response = await cashfree.PGCreateOrder(request);
 
-    console.log(
-      "CASHFREE RESPONSE:",
-      response.data
-    );
+    console.log("CASHFREE RESPONSE:", response.data);
 
-    //////////////////////////////////////////////////////
-    // SUCCESS RESPONSE
-    //////////////////////////////////////////////////////
     return res.json({
-
       success: true,
-
-      payment_session_id:
-        response.data.payment_session_id,
-
+      payment_session_id: response.data.payment_session_id,
       order_id
-
     });
 
   } catch (err) {
-
-    console.error(
-      "CASHFREE CREATE ERROR:",
-      err.response?.data || err.message
-    );
-
+    console.error("CASHFREE CREATE ERROR:", err.response?.data || err.message);
     return res.status(500).json({
       success: false,
       message: "Cashfree order creation failed"
     });
-
   }
-
 };
 
-  //////////////////////////////////////////////////////
-  // VERIFY CASHFREE PAYMENT (AUTO PAYMENT VERSION)
-  //////////////////////////////////////////////////////
-  exports.verifyCashfreePayment = async (req, res) => {
+//////////////////////////////////////////////////////
+// VERIFY CASHFREE PAYMENT (AUTO PAYMENT VERSION)
+//////////////////////////////////////////////////////
+exports.verifyCashfreePayment = async (req, res) => {
+  const connection = await db.getConnection();
 
-    const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
 
-    try {
+    const { orderId } = req.params;
 
-      await connection.beginTransaction();
+    console.log("VERIFY ORDER:", orderId);
 
-      const { orderId } = req.params;
+    const response = await cashfree.PGOrderFetchPayments(orderId);
 
-      console.log("VERIFY ORDER:", orderId);
+    const payments = response.data || [];
 
-      //////////////////////////////////////////////////////
-      // FETCH PAYMENT FROM CASHFREE
-      //////////////////////////////////////////////////////
-      const response =
-        await cashfree.PGOrderFetchPayments(orderId);
+    console.log("VERIFY RESPONSE:", JSON.stringify(payments, null, 2));
 
-      //////////////////////////////////////////////////////
-      // SAFE RESPONSE
-      //////////////////////////////////////////////////////
-      const payments = response.data || [];
+    let isPaid = false;
 
-      console.log(
-        "VERIFY RESPONSE:",
-        JSON.stringify(payments, null, 2)
+    // UPDATED: Check for both SUCCESS and PAID status
+    if (Array.isArray(payments)) {
+      isPaid = payments.some(
+        payment => ["SUCCESS", "PAID"].includes(payment.payment_status)
       );
+    } 
+    // UPDATED: Check for both SUCCESS and PAID status
+    else if (["SUCCESS", "PAID"].includes(payments.payment_status)) {
+      isPaid = true;
+    }
 
-      let isPaid = false;
+    console.log("IS PAID:", isPaid);
 
-      //////////////////////////////////////////////////////
-      // ARRAY RESPONSE
-      //////////////////////////////////////////////////////
-      if (Array.isArray(payments)) {
+    if (!isPaid) {
+      await connection.rollback();
+      return res.json({
+        success: true,
+        isPaid: false,
+        message: "Payment still pending"
+      });
+    }
 
-        isPaid = payments.some(
-          payment =>
-            payment.payment_status === "SUCCESS"
-        );
+    const [[existingPayment]] = await connection.query(
+      `SELECT id, status, booking_id, amount
+      FROM payments
+      WHERE order_id=?
+      FOR UPDATE`,
+      [orderId]
+    );
 
-      }
+    if (!existingPayment) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+    }
 
-      //////////////////////////////////////////////////////
-      // SINGLE OBJECT RESPONSE
-      //////////////////////////////////////////////////////
-      else if (
-        payments.payment_status === "SUCCESS"
-      ) {
-
-        isPaid = true;
-
-      }
-
-      console.log("IS PAID:", isPaid);
-
-      //////////////////////////////////////////////////////
-      // IF PAYMENT NOT SUCCESS
-      //////////////////////////////////////////////////////
-      if (!isPaid) {
-
-        await connection.rollback();
-
-        return res.json({
-          success: true,
-          isPaid: false,
-          message: "Payment still pending"
-        });
-
-      }
-
-      //////////////////////////////////////////////////////
-      // LOCK PAYMENT ROW
-      //////////////////////////////////////////////////////
-      const [[existingPayment]] =
-        await connection.query(
-          `
-          SELECT
-            id,
-            status,
-            booking_id,
-            amount
-          FROM payments
-          WHERE order_id=?
-          FOR UPDATE
-          `,
-          [orderId]
-        );
-
-      //////////////////////////////////////////////////////
-      // PAYMENT NOT FOUND
-      //////////////////////////////////////////////////////
-      if (!existingPayment) {
-
-        await connection.rollback();
-
-        return res.status(404).json({
-          success: false,
-          message: "Payment not found"
-        });
-
-      }
-
-      //////////////////////////////////////////////////////
-      // ALREADY PAID
-      //////////////////////////////////////////////////////
-      if (existingPayment.status === "paid") {
-
-        await connection.commit();
-
-        return res.json({
-          success: true,
-          isPaid: true,
-          message: "Payment already verified"
-        });
-
-      }
-
-      //////////////////////////////////////////////////////
-      // UPDATE PAYMENT
-      //////////////////////////////////////////////////////
-      await connection.query(
-        `
-        UPDATE payments
-        SET
-          status='paid',
-          submitted_at=NOW()
-        WHERE order_id=?
-        `,
-        [orderId]
-      );
-
-      //////////////////////////////////////////////////////
-      // GET BOOKING DETAILS
-      //////////////////////////////////////////////////////
-      const [[booking]] =
-        await connection.query(
-          `
-          SELECT
-            b.id,
-            b.pg_id,
-            b.user_id,
-            b.owner_id,
-            b.room_id,
-            b.check_in_date
-          FROM bookings b
-          WHERE b.id=?
-          FOR UPDATE
-          `,
-          [existingPayment.booking_id]
-        );
-
-      //////////////////////////////////////////////////////
-      // UPDATE BOOKING
-      //////////////////////////////////////////////////////
-      if (booking) {
-
-        await connection.query(
-          `
-          UPDATE bookings
-          SET
-            status='confirmed',
-            payment_status='paid',
-            owner_amount=?,
-            owner_settlement='PENDING'
-          WHERE id=?
-          `,
-          [
-            existingPayment.amount,
-            booking.id
-          ]
-        );
-
-        //////////////////////////////////////////////////////
-        // CHECK PG USER EXISTS
-        //////////////////////////////////////////////////////
-        const [[existingUser]] =
-          await connection.query(
-            `
-            SELECT id
-            FROM pg_users
-            WHERE booking_id=?
-            `,
-            [booking.id]
-          );
-
-        //////////////////////////////////////////////////////
-        // ADD USER TO PG
-        //////////////////////////////////////////////////////
-        if (!existingUser) {
-
-          await connection.query(
-            `
-            INSERT INTO pg_users
-            (
-              owner_id,
-              pg_id,
-              room_id,
-              user_id,
-              join_date,
-              status,
-              booking_id
-            )
-            VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
-            `,
-            [
-              booking.owner_id,
-              booking.pg_id,
-              booking.room_id || null,
-              booking.user_id,
-              booking.check_in_date,
-              booking.id
-            ]
-          );
-
-        }
-
-        //////////////////////////////////////////////////////
-        // UPDATE ROOM OCCUPANCY
-        //////////////////////////////////////////////////////
-        if (booking.room_id) {
-
-          await connection.query(
-            `
-            UPDATE pg_rooms
-            SET occupied_seats =
-                occupied_seats + 1
-            WHERE id=?
-            `,
-            [booking.room_id]
-          );
-
-        }
-
-      }
-
-      //////////////////////////////////////////////////////
-      // COMMIT TRANSACTION
-      //////////////////////////////////////////////////////
+    if (existingPayment.status === "paid") {
       await connection.commit();
-
-      console.log(
-        "✅ PAYMENT VERIFIED:",
-        orderId
-      );
-
-      //////////////////////////////////////////////////////
-      // SUCCESS RESPONSE
-      //////////////////////////////////////////////////////
       return res.json({
         success: true,
         isPaid: true,
-        message: "Payment verified successfully"
+        message: "Payment already verified"
       });
-
-    } catch (err) {
-
-      await connection.rollback();
-
-      console.error(
-        "VERIFY PAYMENT ERROR:",
-        err.response?.data || err.message
-      );
-
-      return res.status(500).json({
-        success: false,
-        message: "Payment verification failed"
-      });
-
-    } finally {
-
-      connection.release();
-
     }
 
-  };
+    // REMOVED: verified_by_admin column update
+    await connection.query(
+      `UPDATE payments
+      SET status='paid', submitted_at=NOW()
+      WHERE order_id=?`,
+      [orderId]
+    );
+
+    const [[booking]] = await connection.query(
+      `SELECT b.id, b.pg_id, b.user_id, b.owner_id, b.room_id, b.check_in_date
+      FROM bookings b
+      WHERE b.id=?
+      FOR UPDATE`,
+      [existingPayment.booking_id]
+    );
+
+    if (booking) {
+      await connection.query(
+        `UPDATE bookings
+        SET status='confirmed', payment_status='paid', owner_amount=?, owner_settlement='PENDING'
+        WHERE id=?`,
+        [existingPayment.amount, booking.id]
+      );
+
+      const [[existingUser]] = await connection.query(
+        `SELECT id FROM pg_users WHERE booking_id=?`,
+        [booking.id]
+      );
+
+      if (!existingUser) {
+        await connection.query(
+          `INSERT INTO pg_users (owner_id, pg_id, room_id, user_id, join_date, status, booking_id)
+          VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)`,
+          [booking.owner_id, booking.pg_id, booking.room_id || null, booking.user_id, booking.check_in_date, booking.id]
+        );
+      }
+
+      if (booking.room_id) {
+        await connection.query(
+          `UPDATE pg_rooms SET occupied_seats = occupied_seats + 1 WHERE id=?`,
+          [booking.room_id]
+        );
+      }
+    }
+
+    await connection.commit();
+
+    console.log("✅ PAYMENT VERIFIED:", orderId);
+
+    return res.json({
+      success: true,
+      isPaid: true,
+      message: "Payment verified successfully"
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("VERIFY PAYMENT ERROR:", err.response?.data || err.message);
+    return res.status(500).json({
+      success: false,
+      message: "Payment verification failed"
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET USER PAYMENT STATUS
+//////////////////////////////////////////////////////
+exports.getUserPaymentStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const [rows] = await db.query(
+      `
+      SELECT 
+        status, 
+        order_id, 
+        utr, 
+        created_at, 
+        submitted_at 
+      FROM payments 
+      WHERE booking_id = ?
+      ORDER BY 
+        CASE 
+          WHEN status = 'paid' THEN 1
+          WHEN status = 'submitted' THEN 2
+          WHEN status = 'pending' THEN 3
+          WHEN status = 'rejected' THEN 4
+          ELSE 5
+        END,
+        created_at DESC
+      LIMIT 1
+      `,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        success: true,
+        data: null,
+        message: "No payment found"
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: rows[0]
+    });
+
+  } catch (err) {
+    console.error("❌ PAYMENT STATUS ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payment status"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET AGREEMENT STATUS
+//////////////////////////////////////////////////////
+exports.getAgreementStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const [[row]] = await db.query(`
+      SELECT 
+        b.id,
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+        b.platform_fee,
+        p.amount
+      FROM bookings b
+      LEFT JOIN payments p 
+        ON p.booking_id = b.id 
+        AND p.status = 'paid'
+      WHERE b.id = ?
+    `, [bookingId]);
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    const baseAmount =
+      Number(row.rent_amount || 0) +
+      Number(row.security_deposit || 0) +
+      Number(row.maintenance_amount || 0) +
+      Number(row.platform_fee || 0);
+
+    const hasAgreement = Number(row.amount) > baseAmount;
+
+    res.json({
+      success: true,
+      hasAgreement
+    });
+
+  } catch (err) {
+    console.error("Agreement status error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get agreement status"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET ADMIN PAYMENTS (READ ONLY - NO VERIFICATION)
+//////////////////////////////////////////////////////
+exports.getAdminPayments = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        p.order_id,
+        p.amount,
+        p.status,
+        p.created_at,
+        p.submitted_at,
+        p.booking_id,
+        p.utr,
+        p.screenshot,
+
+        /* USER */
+        COALESCE(u.name, b.name, 'Guest User') AS reg_name,
+        COALESCE(u.phone, b.phone, 'N/A') AS reg_phone,
+
+        /* BOOKING */
+        b.room_type AS sharing,
+        b.check_in_date,
+
+        /* BASE AMOUNT */
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        /* DETECT AGREEMENT PAID */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN 1
+          ELSE 0
+        END AS agreement_paid,
+
+        /* AGREEMENT FEE */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN 500
+          ELSE 0
+        END AS agreement_fee,
+
+        /* FINAL TOTAL */
+        CASE 
+          WHEN p.amount > (b.rent_amount + b.security_deposit + b.maintenance_amount + b.platform_fee)
+          THEN (b.rent_amount + b.security_deposit + b.maintenance_amount + 500)
+          ELSE (b.rent_amount + b.security_deposit + b.maintenance_amount)
+        END AS total_amount,
+
+        /* PG */
+        pg.pg_name
+
+      FROM payments p
+      LEFT JOIN bookings b ON b.id = p.booking_id
+      LEFT JOIN users u ON u.id = b.user_id
+      LEFT JOIN pgs pg ON pg.id = b.pg_id
+      ORDER BY p.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: rows
+    });
+
+  } catch (err) {
+    console.error("❌ ADMIN PAYMENTS ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load payments"
+    });
+  }
+};
+
+//////////////////////////////////////////////////////
+// GET ALL REFUNDS
+//////////////////////////////////////////////////////
+exports.getAllRefunds = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        r.*,
+        u.name,
+        u.phone,
+        p.pg_name,
+        b.id AS booking_id,
+        pay.order_id
+      FROM refunds r
+      JOIN users u ON u.id = r.user_id
+      JOIN bookings b ON b.id = r.booking_id
+      JOIN pgs p ON p.id = b.pg_id
+      LEFT JOIN payments pay 
+        ON pay.booking_id = b.id
+        AND pay.created_at = (
+          SELECT MAX(created_at) 
+          FROM payments 
+          WHERE booking_id = b.id
+        )
+      ORDER BY r.created_at DESC
+    `);
+
+    res.json(rows);
+
+  } catch (err) {
+    console.error("❌ GET REFUNDS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//////////////////////////////////////////////////////
+// UPDATE REFUND STATUS
+//////////////////////////////////////////////////////
+exports.updateRefundStatus = async (req, res) => {
+  try {
+    const { refundId } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ["pending", "approved", "paid", "rejected"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    const [[refund]] = await db.query(
+      "SELECT * FROM refunds WHERE id=?",
+      [refundId]
+    );
+
+    if (!refund) {
+      return res.status(404).json({ message: "Refund not found" });
+    }
+
+    await db.query(
+      "UPDATE refunds SET status=? WHERE id=?",
+      [status, refundId]
+    );
+
+    res.json({
+      success: true,
+      message: `Refund ${status} successfully`
+    });
+
+  } catch (err) {
+    console.error("❌ UPDATE REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//////////////////////////////////////////////////////
+// REQUEST REFUND
+//////////////////////////////////////////////////////
+exports.requestRefund = async (req, res) => {
+  try {
+    const { bookingId, reason } = req.body;
+    const userId = req.user.id;
+
+    if (!bookingId || !reason) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    await db.query(
+      `INSERT INTO refunds (booking_id, user_id, reason, status, created_at)
+      VALUES (?, ?, ?, 'pending', NOW())`,
+      [bookingId, userId, reason]
+    );
+
+    res.json({
+      success: true,
+      message: "Refund request submitted"
+    });
+
+  } catch (err) {
+    console.error("❌ REQUEST REFUND ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
