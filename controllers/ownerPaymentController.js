@@ -3,8 +3,7 @@ const cloudinary = require("cloudinary").v2;
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const axios = require("axios");
 const { decrypt } = require("../utils/encryption");
-
-
+const sendNotification = require("../utils/sendNotification"); // ✅ ADDED
 
 /* ================= CLOUDINARY CONFIG ================= */
 cloudinary.config({
@@ -18,7 +17,8 @@ exports.verifyOwnerForBooking = async (req, res) => {
   const { booking_id, mobile } = req.body;
   try {
     const [rows] = await db.query(`
-      SELECT u.phone FROM bookings b
+      SELECT u.phone, u.fcm_token, u.id as owner_id, b.user_id
+      FROM bookings b
       JOIN users u ON b.owner_id = u.id
       WHERE b.id = ?
     `, [booking_id]);
@@ -38,14 +38,22 @@ exports.verifyOwnerForBooking = async (req, res) => {
   }
 };
 
-
-
 exports.signOwnerAgreement = async (req, res) => {
   const { booking_id, owner_mobile, owner_signature, accepted_terms, owner_device_info, owner_location } = req.body;
 
   try {
     if (!accepted_terms || !owner_signature || !booking_id || !owner_mobile) {
       return res.status(400).json({ success: false, message: "All fields are required" });
+    }
+
+    // Get booking details for notification
+    const [[booking]] = await db.query(
+      "SELECT user_id, owner_id, pg_id FROM bookings WHERE id = ?",
+      [booking_id]
+    );
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
     // 1. Get PDF from DB
@@ -143,6 +151,34 @@ exports.signOwnerAgreement = async (req, res) => {
       WHERE booking_id = ?
     `, [owner_signature, upload.secure_url, owner_device_info, booking_id]);
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND NOTIFICATION TO USER (Tenant)
+    //////////////////////////////////////////////////////
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id = ?",
+      [booking.user_id]
+    );
+
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Agreement Signed by Owner 📄",
+        "The owner has signed the agreement. You can now download the final document."
+      );
+    }
+
+    // Insert in-app notification for tenant
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        booking.user_id,
+        "Agreement Signed by Owner 📄",
+        "The owner has signed the agreement. You can now download the final document.",
+        "agreement_signed"
+      ]
+    );
+
     res.json({
       success: true,
       message: "PDF signed successfully",
@@ -154,10 +190,9 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
+
 exports.getOwnerPayments = async (req, res) => {
-
   try {
-
     const [rows] = await db.query(
       `
       SELECT 
@@ -246,28 +281,62 @@ exports.getOwnerPayments = async (req, res) => {
     });
 
   } catch (err) {
-
-    console.error(
-      "Owner payments error:",
-      err
-    );
-
+    console.error("Owner payments error:", err);
     res.status(500).json({
       success: false,
       message: "Failed to load owner payments"
     });
-
   }
-
 };
-
 
 /* ================= MARK AGREEMENT AS VIEWED ================= */
 exports.markAgreementViewed = async (req, res) => {
   try {
-    await db.query(`UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`, [req.body.booking_id]);
+    const { booking_id } = req.body;
+    
+    // Get booking details for notification
+    const [[booking]] = await db.query(
+      "SELECT user_id FROM bookings WHERE id = ?",
+      [booking_id]
+    );
+
+    await db.query(
+      `UPDATE agreements_form SET viewed_by_owner = 1 WHERE booking_id = ?`,
+      [booking_id]
+    );
+
+    //////////////////////////////////////////////////////
+    // 🔔 Send notification to tenant that owner viewed agreement
+    //////////////////////////////////////////////////////
+    if (booking && booking.user_id) {
+      const [[user]] = await db.query(
+        "SELECT fcm_token FROM users WHERE id = ?",
+        [booking.user_id]
+      );
+
+      if (user?.fcm_token) {
+        await sendNotification(
+          user.fcm_token,
+          "Agreement Viewed 👁️",
+          "The owner has viewed the rental agreement."
+        );
+      }
+
+      await db.query(
+        `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+         VALUES (?, ?, ?, ?, 0, NOW())`,
+        [
+          booking.user_id,
+          "Agreement Viewed 👁️",
+          "The owner has viewed the rental agreement.",
+          "agreement_viewed"
+        ]
+      );
+    }
+
     res.json({ success: true });
   } catch (err) { 
+    console.error("MARK AGREEMENT VIEWED ERROR:", err);
     res.status(500).json({ success: false }); 
   }
 };
@@ -285,11 +354,7 @@ exports.getOwnerSettlementSummary = async (req, res) => {
   }
 };
 
-
-
 /* ================= GET OWNER RECEIPT DETAILS ================= */
-
-
 exports.getOwnerReceiptDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -385,13 +450,19 @@ exports.getOwnerReceiptDetails = async (req, res) => {
   }
 };
 
-
-
-
 /* ================= MARK AS PAID ================= */
 exports.markAsPaid = async (req, res) => {
   try {
     const { booking_id } = req.body;
+
+    // Get booking details for notification
+    const [[booking]] = await db.query(
+      `SELECT b.user_id, b.room_type, b.owner_amount, p.pg_name
+       FROM bookings b
+       LEFT JOIN pgs p ON p.id = b.pg_id
+       WHERE b.id = ?`,
+      [booking_id]
+    );
 
     await db.query(`
       UPDATE bookings 
@@ -406,10 +477,65 @@ exports.markAsPaid = async (req, res) => {
       WHERE booking_id = ?
     `, [booking_id]);
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND NOTIFICATION TO OWNER
+    //////////////////////////////////////////////////////
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id = ?",
+      [req.user.id]
+    );
+
+    if (owner?.fcm_token) {
+      await sendNotification(
+        owner.fcm_token,
+        "Payment Released 💰",
+        `Your payment of ₹${booking?.owner_amount || 0} for ${booking?.room_type || "booking"} has been released.`
+      );
+    }
+
+    // Insert in-app notification for owner
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        req.user.id,
+        "Payment Released 💰",
+        `Your payment of ₹${booking?.owner_amount || 0} for ${booking?.room_type || "booking"} has been released.`,
+        "payment_released"
+      ]
+    );
+
+    // Also notify tenant that owner has been paid
+    if (booking && booking.user_id) {
+      const [[user]] = await db.query(
+        "SELECT fcm_token FROM users WHERE id = ?",
+        [booking.user_id]
+      );
+
+      if (user?.fcm_token) {
+        await sendNotification(
+          user.fcm_token,
+          "Payment Processed ✅",
+          `Payment of ₹${booking?.owner_amount || 0} has been processed to the owner for ${booking?.room_type}`
+        );
+      }
+
+      await db.query(
+        `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+         VALUES (?, ?, ?, ?, 0, NOW())`,
+        [
+          booking.user_id,
+          "Payment Processed ✅",
+          `Payment of ₹${booking?.owner_amount || 0} has been processed to the owner for ${booking?.room_type}`,
+          "owner_paid"
+        ]
+      );
+    }
+
     res.json({ success: true });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    console.error("MARK AS PAID ERROR:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };

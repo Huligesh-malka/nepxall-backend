@@ -1,13 +1,13 @@
 const db = require("../db");
+const { decrypt } = require("../utils/encryption");
+const sendNotification = require("../utils/sendNotification"); // ✅ ADDED
 
-
-const { decrypt } = require("../utils/encryption"); // ✅ ADD THIS AT TOP
 /* ======================================================
    🧠 GET OWNER FROM FIREBASE UID
 ====================================================== */
 const getOwner = async (firebase_uid) => {
   const [rows] = await db.query(
-    `SELECT id, name, owner_verification_status
+    `SELECT id, name, owner_verification_status, fcm_token
      FROM users 
      WHERE firebase_uid = ? AND role = 'owner'
      LIMIT 1`,
@@ -16,6 +16,7 @@ const getOwner = async (firebase_uid) => {
 
   return rows[0] || null;
 };
+
 /* ======================================================
    📥 OWNER → GET ALL BOOKINGS (PERMANENT DATA)
 ====================================================== */
@@ -87,6 +88,7 @@ exports.getOwnerBookings = async (req, res) => {
     });
   }
 };
+
 /* ======================================================
    ✅ OWNER → APPROVE / REJECT BOOKING (FINAL VERSION)
 ====================================================== */
@@ -112,10 +114,13 @@ exports.updateBookingStatus = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔒 GET BOOKING
+    // 🔒 GET BOOKING WITH USER DETAILS
     //////////////////////////////////////////////////////
     const [[booking]] = await connection.query(
-      `SELECT * FROM bookings WHERE id = ? AND owner_id = ?`,
+      `SELECT b.*, u.fcm_token as user_fcm_token, u.name as user_name
+       FROM bookings b
+       JOIN users u ON u.id = b.user_id
+       WHERE b.id = ? AND b.owner_id = ?`,
       [bookingId, owner.id]
     );
 
@@ -170,6 +175,37 @@ exports.updateBookingStatus = async (req, res) => {
 
     await connection.commit();
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND NOTIFICATION TO USER
+    //////////////////////////////////////////////////////
+    if (booking.user_fcm_token) {
+      if (status === "approved") {
+        await sendNotification(
+          booking.user_fcm_token,
+          "Booking Approved ✅",
+          `Your booking for ${booking.room_type} has been approved by the owner`
+        );
+      } else if (status === "rejected") {
+        await sendNotification(
+          booking.user_fcm_token,
+          "Booking Update 🔄",
+          `Your booking for ${booking.room_type} was not approved. ${reject_reason || "Please contact owner for details"}`
+        );
+      }
+    }
+
+    // Insert in-app notification
+    const notificationTitle = status === "approved" ? "Booking Approved ✅" : "Booking Update 🔄";
+    const notificationMessage = status === "approved"
+      ? `Your booking for ${booking.room_type} has been approved by the owner`
+      : `Your booking for ${booking.room_type} was not approved. ${reject_reason || "Please contact owner for details"}`;
+
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [booking.user_id, notificationTitle, notificationMessage, "booking_update"]
+    );
+
     res.json({
       success: true,
       message: `Booking ${status} successfully`
@@ -220,9 +256,6 @@ exports.getActiveTenantsByOwner = async (req, res) => {
   }
 };
 
-
-
-
 exports.approveVacateRequest = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -232,11 +265,9 @@ exports.approveVacateRequest = async (req, res) => {
     const { bookingId } = req.params;
     const { damage_amount = 0, pending_dues = 0 } = req.body;
 
-   
     const owner = await getOwner(req.user.firebase_uid);
     if (!owner) throw new Error("Not an owner");
 
-    
     const [[booking]] = await connection.query(
       "SELECT * FROM bookings WHERE id=? AND owner_id=?",
       [bookingId, owner.id]
@@ -244,7 +275,6 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!booking) throw new Error("Booking not found");
 
-    
     const [[refund]] = await connection.query(
       "SELECT * FROM refunds WHERE booking_id=? AND refund_type='DEPOSIT'",
       [bookingId]
@@ -252,19 +282,17 @@ exports.approveVacateRequest = async (req, res) => {
 
     if (!refund) throw new Error("Vacate request not found");
 
-    
     const deposit = Number(booking.security_deposit) || 0;
     let refundAmount = deposit - damage_amount - pending_dues;
     if (refundAmount < 0) refundAmount = 0;
 
-   
     let newStatus = "approved";
     let newUserApproval = "pending";
 
     // ✅ If user rejected earlier → allow re-approval
     if (refund.user_approval === "rejected") {
       newStatus = "approved";
-      newUserApproval = "pending"; // reset again
+      newUserApproval = "pending";
     }
 
     // ✅ If already accepted → don't allow re-approve
@@ -295,18 +323,36 @@ exports.approveVacateRequest = async (req, res) => {
       ]
     );
 
-    //////////////////////////////////////////////////////
-    // ❗ DO NOT MARK LEFT HERE (IMPORTANT FIX)
-    //////////////////////////////////////////////////////
-    // ❌ REMOVE THIS BLOCK (was causing issue)
-    /*
-    UPDATE pg_users SET status='LEFT'
-    */
+    await connection.commit();
 
     //////////////////////////////////////////////////////
-    // ✅ COMMIT
+    // 🔔 GET USER FCM TOKEN FOR NOTIFICATION
     //////////////////////////////////////////////////////
-    await connection.commit();
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [booking.user_id]
+    );
+
+    // 🔔 SEND PUSH NOTIFICATION TO USER
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Vacate Request Approved ✅",
+        `Your vacate request has been approved. Refund amount: ₹${refundAmount}`
+      );
+    }
+
+    // Insert in-app notification
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        booking.user_id,
+        "Vacate Request Approved ✅",
+        `Your vacate request has been approved. Refund amount: ₹${refundAmount}`,
+        "vacate_approved"
+      ]
+    );
 
     res.json({
       success: true,
@@ -322,9 +368,6 @@ exports.approveVacateRequest = async (req, res) => {
     connection.release();
   }
 };
-
-
-
 
 // ✅ MASK FUNCTIONS (ADD ABOVE OR BELOW)
 function maskAccount(acc) {
@@ -344,8 +387,6 @@ function maskUPI(upi) {
   return parts[0].slice(0, 2) + "***@" + parts[1];
 }
 
-
-
 exports.getVacateRequests = async (req, res) => {
   try {
     const owner = await getOwner(req.user.firebase_uid);
@@ -361,6 +402,8 @@ exports.getVacateRequests = async (req, res) => {
         r.id AS id, 
         p.pg_name,
         u.name AS user_name,
+        u.fcm_token AS user_fcm_token,
+        u.id AS user_id,
 
         pu.move_out_date,
 
@@ -412,11 +455,7 @@ exports.getVacateRequests = async (req, res) => {
         upi = r.upi_id;
       }
 
-      //////////////////////////////////////////////////////
-      // 🎯 FINAL LOGIC (FIXED)
-      //////////////////////////////////////////////////////
-
-      // ✅ SHOW FULL ONLY when BOTH conditions true
+      // ✅ SHOW FULL only when BOTH conditions true
       if (
         r.refund_status === "approved" &&
         r.user_approval === "accepted"
@@ -425,14 +464,12 @@ exports.getVacateRequests = async (req, res) => {
         r.ifsc_code = ifsc;
         r.upi_id = upi;
       }
-
       // 🔒 AFTER PAYMENT → ALWAYS MASK
       else if (r.refund_status === "completed") {
         r.account_number = maskAccount(acc);
         r.ifsc_code = maskIFSC(ifsc);
         r.upi_id = maskUPI(upi);
       }
-
       // 🔒 DEFAULT → MASK
       else {
         r.account_number = maskAccount(acc);
@@ -449,7 +486,6 @@ exports.getVacateRequests = async (req, res) => {
   }
 };
 
-
 exports.rejectVacateRequest = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -458,7 +494,7 @@ exports.rejectVacateRequest = async (req, res) => {
     if (!owner) return res.status(403).json({ message: "Not owner" });
 
     const [[refund]] = await db.query(
-      `SELECT r.*, b.owner_id 
+      `SELECT r.*, b.owner_id, b.user_id 
        FROM refunds r
        JOIN bookings b ON b.id = r.booking_id
        WHERE r.booking_id=?`,
@@ -478,6 +514,34 @@ exports.rejectVacateRequest = async (req, res) => {
        SET status='rejected'
        WHERE booking_id=?`,
       [bookingId]
+    );
+
+    //////////////////////////////////////////////////////
+    // 🔔 SEND NOTIFICATION TO USER
+    //////////////////////////////////////////////////////
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [refund.user_id]
+    );
+
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Vacate Request Rejected ❌",
+        "Your vacate request has been rejected. Please contact the owner for more details."
+      );
+    }
+
+    // Insert in-app notification
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        refund.user_id,
+        "Vacate Request Rejected ❌",
+        "Your vacate request has been rejected. Please contact the owner for more details.",
+        "vacate_rejected"
+      ]
     );
 
     res.json({ success: true, message: "Refund rejected by owner" });
@@ -582,10 +646,36 @@ exports.markRefundPaid = async (req, res) => {
       [bookingId]
     );
 
-    //////////////////////////////////////////////////////
-    // ✅ COMMIT
-    //////////////////////////////////////////////////////
     await connection.commit();
+
+    //////////////////////////////////////////////////////
+    // 🔔 GET USER FCM TOKEN
+    //////////////////////////////////////////////////////
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [refund.user_id]
+    );
+
+    // 🔔 SEND PUSH NOTIFICATION TO USER
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Refund Processed 💰",
+        `Your refund of ₹${refund.amount} has been sent to your account.`
+      );
+    }
+
+    // Insert in-app notification
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        refund.user_id,
+        "Refund Processed 💰",
+        `Your refund of ₹${refund.amount} has been sent to your account.`,
+        "refund_paid"
+      ]
+    );
 
     //////////////////////////////////////////////////////
     // 🔥 RESPONSE (IMPORTANT FOR FRONTEND)
@@ -684,23 +774,30 @@ exports.getOwnerActiveTenants = async (req, res) => {
   }
 };
 
-
-
-
 //////////////////////////////////////////////////////
 // MARK FULL PAYMENT RECEIVED
 //////////////////////////////////////////////////////
-exports.markFullPayment = async (
-  req,
-  res
-) => {
-
+exports.markFullPayment = async (req, res) => {
   try {
-
     const {
       booking_id,
       payment_mode
     } = req.body;
+
+    // Get booking details for notification
+    const [[booking]] = await db.query(
+      `SELECT b.user_id, b.room_type, b.rent_amount
+       FROM bookings b
+       WHERE b.id = ?`,
+      [booking_id]
+    );
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
 
     await db.query(
       `
@@ -718,25 +815,44 @@ exports.markFullPayment = async (
       ]
     );
 
+    //////////////////////////////////////////////////////
+    // 🔔 SEND NOTIFICATION TO USER
+    //////////////////////////////////////////////////////
+    const [[user]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [booking.user_id]
+    );
+
+    if (user?.fcm_token) {
+      await sendNotification(
+        user.fcm_token,
+        "Payment Received 💳",
+        `Full payment for ${booking.room_type} has been received.`
+      );
+    }
+
+    // Insert in-app notification
+    await db.query(
+      `INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+       VALUES (?, ?, ?, ?, 0, NOW())`,
+      [
+        booking.user_id,
+        "Payment Received 💳",
+        `Full payment for ${booking.room_type} has been received.`,
+        "payment_received"
+      ]
+    );
+
     res.json({
       success: true,
-      message:
-        "Full payment updated"
+      message: "Full payment updated"
     });
 
   } catch (err) {
-
-    console.error(
-      "FULL PAYMENT ERROR:",
-      err
-    );
-
+    console.error("FULL PAYMENT ERROR:", err);
     res.status(500).json({
       success: false,
-      message:
-        "Failed to update payment"
+      message: "Failed to update payment"
     });
-
   }
-
 };
