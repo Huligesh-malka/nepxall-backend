@@ -154,7 +154,6 @@ exports.signOwnerAgreement = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal failure" });
   }
 };
-
 exports.getOwnerPayments = async (req, res) => {
 
   try {
@@ -183,6 +182,15 @@ exports.getOwnerPayments = async (req, res) => {
         b.settlement_date,
 
         b.room_type,
+
+        /* ✅ FULL PAYMENT STATUS */
+        b.full_payment_completed,
+
+        b.remaining_payment_received,
+
+        b.remaining_paid_date,
+
+        b.remaining_payment_mode,
 
         /* 🔥 FIX: REMOVE "0" VALUE */
         COALESCE(
@@ -252,7 +260,6 @@ exports.getOwnerPayments = async (req, res) => {
   }
 
 };
-
 
 
 /* ================= MARK AGREEMENT AS VIEWED ================= */
