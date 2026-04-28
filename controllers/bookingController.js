@@ -1,5 +1,7 @@
 const db = require("../db");
 const { encrypt } = require("../utils/encryption");
+const sendNotification =
+require("../utils/sendNotification");
 
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
@@ -189,9 +191,30 @@ exports.createBooking = async (req, res) => {
     );
 
     //////////////////////////////////////////////////////
+    // 🔔 SEND OWNER NOTIFICATION
+    //////////////////////////////////////////////////////
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [pg.owner_id]
+    );
+
+    if (owner?.fcm_token) {
+      try {
+        await sendNotification(
+          owner.fcm_token,
+          "New Booking",
+          `${user.name} booked your PG: ${pg.name || pg.title || "PG"}`
+        );
+      } catch (notifError) {
+        console.error("❌ Notification error:", notifError);
+        // Don't fail the booking if notification fails
+      }
+    }
+
+    //////////////////////////////////////////////////////
     // ✅ SUCCESS
     //////////////////////////////////////////////////////
-    res.json({
+    res.status(201).json({
       success: true,
       bookingId: result.insertId,
       rent,
