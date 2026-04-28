@@ -207,12 +207,15 @@ exports.createBooking = async (req, res) => {
 };
 
 
-
-
 exports.getUserBookings = async (req, res) => {
-
   try {
 
+    const includeAgreement =
+      req.query.agreement === "true";
+
+    //////////////////////////////////////////////////////
+    // GET BOOKINGS + LATEST PAYMENT
+    //////////////////////////////////////////////////////
     const [rows] = await db.query(
       `
       SELECT
@@ -224,21 +227,26 @@ exports.getUserBookings = async (req, res) => {
         b.room_type,
         b.check_in_date,
         b.status,
-        b.payment_status,
-
         b.rent_amount,
         b.security_deposit,
         b.maintenance_amount,
+        b.agreement_signed,
+        b.created_at,
 
         p.pg_name,
         p.area,
         p.city,
         p.contact_phone,
 
-        pay.status AS latest_payment_status,
-        pay.order_id,
+        pr.room_no,
 
-        pr.room_no
+        //////////////////////////////////////////////////////
+        // PAYMENT INFO
+        //////////////////////////////////////////////////////
+        COALESCE(pay.status, 'pending')
+        AS payment_status,
+
+        pay.order_id
 
       FROM bookings b
 
@@ -248,6 +256,9 @@ exports.getUserBookings = async (req, res) => {
       LEFT JOIN pg_rooms pr
       ON pr.id = b.room_id
 
+      //////////////////////////////////////////////////////
+      // LATEST PAYMENT
+      //////////////////////////////////////////////////////
       LEFT JOIN payments pay
       ON pay.booking_id = b.id
       AND pay.id = (
@@ -263,61 +274,147 @@ exports.getUserBookings = async (req, res) => {
       [req.user.id]
     );
 
-    const updated = rows.map(item => {
+    //////////////////////////////////////////////////////
+    // FORMAT RESPONSE
+    //////////////////////////////////////////////////////
+    const updated = rows.map((item) => {
 
-      const total =
+      //////////////////////////////////////////////////////
+      // TOTAL CALCULATION
+      //////////////////////////////////////////////////////
+      let total =
         Number(item.rent_amount || 0) +
         Number(item.security_deposit || 0) +
         Number(item.maintenance_amount || 0);
 
+      if (includeAgreement) {
+        total += 500;
+      }
+
+      //////////////////////////////////////////////////////
+      // SHORT LOCATION
+      //////////////////////////////////////////////////////
+      let shortLocation = null;
+
+      if (item.area && item.city) {
+
+        shortLocation =
+          `${item.area}, ${item.city}`;
+
+      } else if (item.city) {
+
+        shortLocation = item.city;
+
+      } else if (item.area) {
+
+        shortLocation = item.area;
+
+      }
+
+      //////////////////////////////////////////////////////
+      // SHOW DETAILS ONLY AFTER APPROVAL
+      //////////////////////////////////////////////////////
+      const showDetails =
+        item.status === "approved" ||
+        item.status === "confirmed";
+
+      //////////////////////////////////////////////////////
+      // RETURN
+      //////////////////////////////////////////////////////
       return {
 
         id: item.id,
+
         pg_id: item.pg_id,
+
         pg_name: item.pg_name,
 
+        //////////////////////////////////////////////////////
+        // LOCATION + PHONE
+        //////////////////////////////////////////////////////
         location:
-          item.area && item.city
-            ? `${item.area}, ${item.city}`
-            : item.city,
+          showDetails
+            ? shortLocation
+            : null,
 
         phone:
-          item.status === "approved" ||
-          item.status === "confirmed"
+          showDetails
             ? item.contact_phone
             : null,
 
+        //////////////////////////////////////////////////////
+        // ROOM
+        //////////////////////////////////////////////////////
         room_no: item.room_no,
+
         room_type: item.room_type,
+
         check_in_date: item.check_in_date,
 
+        //////////////////////////////////////////////////////
+        // STATUS
+        //////////////////////////////////////////////////////
         status: item.status,
 
+        //////////////////////////////////////////////////////
+        // PAYMENT STATUS
+        //////////////////////////////////////////////////////
         payment_status:
-          item.latest_payment_status || "pending",
+          item.payment_status || "pending",
 
         order_id:
           item.order_id || null,
 
-        total_amount: total
+        //////////////////////////////////////////////////////
+        // PRICE
+        //////////////////////////////////////////////////////
+        rent_amount: item.rent_amount,
+
+        security_deposit:
+          item.security_deposit,
+
+        maintenance_amount:
+          item.maintenance_amount,
+
+        total_amount: total,
+
+        //////////////////////////////////////////////////////
+        // AGREEMENT
+        //////////////////////////////////////////////////////
+        agreement_signed:
+          item.agreement_signed,
+
+        agreement_added:
+          includeAgreement,
+
+        //////////////////////////////////////////////////////
+        // CREATED
+        //////////////////////////////////////////////////////
+        created_at: item.created_at,
 
       };
 
     });
 
-    res.json(updated);
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
+    return res.json(updated);
 
   } catch (err) {
 
-    console.error(err);
+    console.error(
+      "GET BOOKINGS ERROR:",
+      err
+    );
 
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message
     });
 
   }
-
 };
+
 //////////////////////////////////////////////////////
 // 👑 OWNER BOOKINGS
 //////////////////////////////////////////////////////
@@ -405,7 +502,6 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 
 //////////////////////////////////////////////////////
