@@ -2,29 +2,40 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../middlewares/authMiddleware");
-const isAdmin = require("../middlewares/isAdminMiddleware"); // You'll need to create this if not exists
 
 const {
-  createCashfreePlanOrder,      // ✅ NEW Cashfree order creation
-  verifyCashfreePlanPayment,    // ✅ NEW Cashfree auto verification
-  getPlanPayments               // ✅ Keep for admin
+  createCashfreePlanOrder,
+  verifyCashfreePlanPayment,
+  getPlanPayments
 } = require("../controllers/planPaymentController");
 
 /* =========================================================
-   💰 PLAN PAYMENT - CASHFREE AUTOMATIC
+   💳 CASHFREE PLAN PAYMENT
 ========================================================= */
 
-// Create Cashfree order
-router.post("/create-cashfree-order", auth, createCashfreePlanOrder);
+// Create Cashfree Order
+router.post(
+  "/create-cashfree-order",
+  auth,
+  createCashfreePlanOrder
+);
 
-// Verify payment status (called from success page)
-router.get("/verify/:orderId", auth, verifyCashfreePlanPayment);
+// Verify Payment Automatically
+router.get(
+  "/verify/:orderId",
+  auth,
+  verifyCashfreePlanPayment
+);
 
 /* =========================================================
-   👨‍💼 ADMIN - VIEW PAYMENTS
+   👨‍💼 ADMIN
 ========================================================= */
 
-// Get all payments (admin only)
-router.get("/admin", auth, isAdmin, getPlanPayments);
+// View Payments
+router.get(
+  "/admin",
+  auth,
+  getPlanPayments
+);
 
 module.exports = router;
