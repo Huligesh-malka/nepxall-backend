@@ -12,8 +12,8 @@ const cashfree = new Cashfree(
 );
 
 const planPrices = {
-  basic: 199,
-  pro: 599
+  basic: 1,
+  pro: 1
 };
 
 const PLAN_DURATION_DAYS = 30;
