@@ -80,4 +80,13 @@ router.delete(
   adminController.deleteSinglePhoto
 );
 
+
+
+router.get(
+  "/all-bookings",
+  auth,
+  adminOnly,
+  adminController.getAllBookingsForAdmin
+);
+
 module.exports = router;

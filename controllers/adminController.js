@@ -394,3 +394,84 @@ exports.updatePGField = async (req, res) => {
     });
   }
 };
+
+
+
+
+exports.getAllBookingsForAdmin = async (req, res) => {
+  try {
+
+    const [rows] = await db.query(`
+      SELECT
+
+        b.id,
+        b.status,
+        b.room_type,
+        b.check_in_date,
+        b.created_at,
+
+        b.rent_amount,
+        b.security_deposit,
+        b.maintenance_amount,
+
+        /* USER */
+        u.id AS user_id,
+        u.name AS user_name,
+        u.phone AS user_phone,
+        u.email AS user_email,
+
+        /* OWNER */
+        o.id AS owner_id,
+        o.name AS owner_name,
+        o.phone AS owner_phone,
+        o.email AS owner_email,
+
+        /* PG */
+        p.id AS pg_id,
+        p.pg_name,
+        p.city,
+        p.area,
+        p.contact_phone,
+
+        /* PAYMENT */
+        pay.status AS payment_status,
+        pay.order_id,
+        pay.amount AS paid_amount
+
+      FROM bookings b
+
+      JOIN users u
+      ON u.id = b.user_id
+
+      JOIN users o
+      ON o.id = b.owner_id
+
+      JOIN pgs p
+      ON p.id = b.pg_id
+
+      LEFT JOIN payments pay
+      ON pay.booking_id = b.id
+
+      ORDER BY b.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      count: rows.length,
+      data: rows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "ADMIN BOOKINGS ERROR:",
+      err
+    );
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  }
+};
