@@ -70,7 +70,7 @@ exports.createCashfreePlanOrder = async (req, res) => {
         customer_email: "support@nepxall.com"
       },
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL}/owner/premium-plans?order_id={order_id}`
+        return_url: `${process.env.FRONTEND_URL}/owner/premium?order_id={order_id}`
       }
     };
 
