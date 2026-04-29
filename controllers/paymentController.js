@@ -101,9 +101,9 @@ exports.createCashfreeOrder = async (req, res) => {
     }
 
     // ✅ STEP 1 — ADD PLATFORM FEE
-    const bookingAmount = 1;
-    const platformFee = 0;
-    const totalAmount = 1;
+    const bookingAmount = 1000;
+    const platformFee = 99;
+    const totalAmount = 1099;
 
     const order_id = "order_" + bookingId + "_" + Date.now();
 
@@ -312,7 +312,7 @@ exports.verifyCashfreePayment = async (req, res) => {
         WHERE id=?
         `,
         [
-          1,
+          1000,
           booking.id
         ]
       );
