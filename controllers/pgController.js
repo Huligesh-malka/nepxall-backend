@@ -675,7 +675,7 @@ exports.advancedSearchPG = async (req, res) => {
 
     // ✅ Pagination
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 1000;
 
     const offset = (page - 1) * limit;
 
@@ -1301,7 +1301,7 @@ exports.getNearbyPGs = async (req, res) => {
       queryParams.push(parseInt(exclude));
     }
 
-    query += ' HAVING distance < ? ORDER BY distance ASC LIMIT 10';
+    query += ' HAVING distance < ? ORDER BY distance ASC';
     queryParams.push(radiusKm);
 
     console.log("Query params:", queryParams);
