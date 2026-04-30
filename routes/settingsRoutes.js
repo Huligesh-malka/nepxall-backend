@@ -10,18 +10,8 @@ router.get("/", firebaseAuth, async (req, res) => {
 
     const [rows] = await db.query(
       `SELECT 
-        id,
         name,
-        email,
-        phone,
-        role,
-        area,
-        road,
-        pg_address,
-        plan,
-        plan_expiry,
-        owner_verification_status,
-        created_at
+        phone
       FROM users
       WHERE firebase_uid = ?`,
       [uid]
@@ -41,7 +31,6 @@ router.get("/", firebaseAuth, async (req, res) => {
 
   } catch (error) {
     console.error("Settings Fetch Error:", error);
-
     res.status(500).json({
       success: false,
       message: "Server error"
@@ -49,35 +38,19 @@ router.get("/", firebaseAuth, async (req, res) => {
   }
 });
 
-// UPDATE SETTINGS
+// UPDATE SETTINGS - Only name and phone
 router.put("/", firebaseAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
+    const { name, phone } = req.body;
 
-    const {
-      name,
-      phone,
-      area,
-      road,
-      pg_address
-    } = req.body;
-
+    // Update only name and phone fields
     await db.query(
       `UPDATE users SET
         name = ?,
-        phone = ?,
-        area = ?,
-        road = ?,
-        pg_address = ?
+        phone = ?
       WHERE firebase_uid = ?`,
-      [
-        name,
-        phone,
-        area,
-        road,
-        pg_address,
-        uid
-      ]
+      [name, phone, uid]
     );
 
     res.json({
@@ -87,7 +60,6 @@ router.put("/", firebaseAuth, async (req, res) => {
 
   } catch (error) {
     console.error("Settings Update Error:", error);
-
     res.status(500).json({
       success: false,
       message: "Server error"
