@@ -289,7 +289,6 @@ exports.getAllPGsAdmin = async (req, res) => {
   }
 };
 
-
 exports.updatePGField = async (req, res) => {
   try {
     const { id } = req.params;
@@ -297,54 +296,138 @@ exports.updatePGField = async (req, res) => {
 
     console.log("Updating field:", field, "Value:", value);
 
-    // 🔒 Allow ALL important fields (match your DB)
+    // 🔒 ALLOW ALL FIELDS - COMPLETE LIST
     const allowedFields = [
-      // Basic
+      // Basic Info
       "pg_name", "pg_category", "pg_type",
-      "city", "area", "address", "landmark", "pincode",
-
-      // Pricing
+      "city", "area", "address", "landmark", "pincode", "state", "country",
+      "latitude", "longitude", "road",
+      
+      // Contact Info
+      "contact_person", "contact_phone", "contact_email",
+      
+      // Pricing Fields
       "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
-      "single_room", "double_room", "triple_room",
-
-      // BHK
-      "price_1bhk", "price_2bhk", "price_3bhk",
-
-      // Co-living
+      "single_room", "double_room",
       "co_living_single_room", "co_living_double_room",
-
-      // Fees
-      "deposit_amount", "maintenance_amount",
-
-      // Others
-      "description", "contact_person", "contact_phone", "contact_email"
+      "coliving_three_sharing", "coliving_four_sharing",
+      "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
+      
+      // Financial
+      "deposit_amount", "maintenance_amount", "rent_amount",
+      
+      // BHK Details
+      "bhk_type", "furnishing_type",
+      "bedrooms_1bhk", "bathrooms_1bhk",
+      "bedrooms_2bhk", "bathrooms_2bhk",
+      "bedrooms_3bhk", "bathrooms_3bhk",
+      "bedrooms_4bhk", "bathrooms_4bhk",
+      
+      // Minimum Stay
+      "min_stay_available", "min_stay_days", "min_stay_months",
+      "lock_in_period", "notice_period",
+      
+      // Facilities & Amenities
+      "food_available", "food_type", "meals_per_day",
+      "ac_available", "wifi_available", "tv",
+      "parking_available", "bike_parking", 
+      "laundry_available", "washing_machine", "refrigerator", 
+      "microwave", "geyser", "power_backup", "lift_elevator",
+      "cctv", "security_guard", "gym", "housekeeping", 
+      "water_purifier", "fire_safety", "study_room", 
+      "common_tv_lounge", "balcony_open_space", "water_24x7", "water_type",
+      
+      // Room Furnishings
+      "cupboard_available", "table_chair_available", "dining_table_available",
+      "attached_bathroom", "balcony_available", "wall_mounted_clothes_hook",
+      "bed_with_mattress", "fan_light", "kitchen_room",
+      
+      // Co-living Inclusions
+      "co_living_fully_furnished", "co_living_food_included",
+      "co_living_wifi_included", "co_living_housekeeping",
+      "co_living_power_backup", "co_living_maintenance",
+      
+      // Rules & Restrictions
+      "visitor_allowed", "visitor_time_restricted", "visitors_allowed_till",
+      "couple_allowed", "family_allowed", "smoking_allowed",
+      "drinking_allowed", "pets_allowed", "late_night_entry_allowed",
+      "entry_curfew_time", "outside_food_allowed", "parties_allowed",
+      "loud_music_restricted", "agreement_mandatory", "id_proof_mandatory",
+      "office_going_only", "students_only", "boys_only", "girls_only",
+      "co_living_allowed", "subletting_allowed",
+      
+      // Room Counts
+      "total_rooms", "available_rooms",
+      
+      // Description & Status
+      "description", "status"
     ];
 
     if (!allowedFields.includes(field)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid field"
+        message: `Field '${field}' is not allowed for update`
       });
     }
 
-    // 🔥 VALUE CLEANING
+    // 🔥 VALUE CLEANING BASED ON FIELD TYPE
     let finalValue = value;
 
-    if (value === "" || value === "—") {
+    // Handle empty values
+    if (value === "" || value === "—" || value === null) {
       finalValue = null;
     }
 
-    // Convert numbers properly
+    // Convert boolean fields (true/false strings to 0/1)
+    const booleanFields = [
+      "min_stay_available", "food_available", "ac_available", "wifi_available",
+      "tv", "parking_available", "bike_parking", "laundry_available",
+      "washing_machine", "refrigerator", "microwave", "geyser", "power_backup",
+      "lift_elevator", "cctv", "security_guard", "gym", "housekeeping",
+      "water_purifier", "fire_safety", "study_room", "common_tv_lounge",
+      "balcony_open_space", "water_24x7", "cupboard_available",
+      "table_chair_available", "dining_table_available", "attached_bathroom",
+      "balcony_available", "wall_mounted_clothes_hook", "bed_with_mattress",
+      "fan_light", "kitchen_room", "co_living_fully_furnished",
+      "co_living_food_included", "co_living_wifi_included", "co_living_housekeeping",
+      "co_living_power_backup", "co_living_maintenance", "visitor_allowed",
+      "visitor_time_restricted", "couple_allowed", "family_allowed",
+      "smoking_allowed", "drinking_allowed", "pets_allowed", "late_night_entry_allowed",
+      "outside_food_allowed", "parties_allowed", "loud_music_restricted",
+      "agreement_mandatory", "id_proof_mandatory", "office_going_only",
+      "students_only", "boys_only", "girls_only", "co_living_allowed", "subletting_allowed"
+    ];
+
+    if (booleanFields.includes(field)) {
+      if (finalValue === "true" || finalValue === true || finalValue === "1" || finalValue === 1) {
+        finalValue = 1;
+      } else if (finalValue === "false" || finalValue === false || finalValue === "0" || finalValue === 0) {
+        finalValue = 0;
+      } else {
+        finalValue = finalValue ? 1 : 0;
+      }
+    }
+
+    // Convert numeric fields
     const numberFields = [
       "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
-      "single_room", "double_room", "triple_room",
-      "price_1bhk", "price_2bhk", "price_3bhk",
+      "single_room", "double_room", "coliving_three_sharing", "coliving_four_sharing",
+      "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
       "co_living_single_room", "co_living_double_room",
-      "deposit_amount", "maintenance_amount"
+      "deposit_amount", "maintenance_amount", "rent_amount",
+      "bedrooms_1bhk", "bathrooms_1bhk", "bedrooms_2bhk", "bathrooms_2bhk",
+      "bedrooms_3bhk", "bathrooms_3bhk", "bedrooms_4bhk", "bathrooms_4bhk",
+      "min_stay_days", "min_stay_months", "lock_in_period", "notice_period",
+      "total_rooms", "available_rooms", "meals_per_day"
     ];
 
     if (numberFields.includes(field)) {
-      finalValue = finalValue ? Number(finalValue) : null;
+      if (finalValue !== null && finalValue !== "") {
+        finalValue = Number(finalValue);
+        if (isNaN(finalValue)) finalValue = null;
+      } else {
+        finalValue = null;
+      }
     }
 
     // 🔥 UPDATE FIELD
@@ -353,38 +436,51 @@ exports.updatePGField = async (req, res) => {
       [finalValue, id]
     );
 
-    // 🔥 AUTO UPDATE RENT_AMOUNT (IMPORTANT)
-    const [rows] = await db.query(
-      "SELECT * FROM pgs WHERE id = ?",
-      [id]
-    );
+    // 🔥 AUTO UPDATE RENT_AMOUNT if pricing fields changed
+    const pricingFields = [
+      "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
+      "single_room", "double_room", "coliving_three_sharing", "coliving_four_sharing",
+      "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
+      "co_living_single_room", "co_living_double_room"
+    ];
 
-    if (rows.length > 0) {
-      const pg = rows[0];
-
-      const prices = [
-        pg.single_sharing,
-        pg.double_sharing,
-        pg.triple_sharing,
-        pg.four_sharing,
-        pg.single_room,
-        pg.double_room,
-        pg.price_1bhk,
-        pg.price_2bhk,
-        pg.price_3bhk,
-        pg.co_living_single_room,
-        pg.co_living_double_room
-      ].filter(v => v && v > 0);
-
-      const rent_amount = prices.length ? Math.min(...prices) : 0;
-
-      await db.query(
-        "UPDATE pgs SET rent_amount = ? WHERE id = ?",
-        [rent_amount, id]
+    if (pricingFields.includes(field)) {
+      const [rows] = await db.query(
+        "SELECT * FROM pgs WHERE id = ?",
+        [id]
       );
+
+      if (rows.length > 0) {
+        const pg = rows[0];
+        
+        const prices = [];
+        const allPriceFields = [
+          pg.single_sharing, pg.double_sharing, pg.triple_sharing, pg.four_sharing,
+          pg.single_room, pg.double_room, pg.coliving_three_sharing, pg.coliving_four_sharing,
+          pg.price_1bhk, pg.price_2bhk, pg.price_3bhk, pg.price_4bhk,
+          pg.co_living_single_room, pg.co_living_double_room
+        ];
+        
+        for (let price of allPriceFields) {
+          if (price && price > 0) {
+            prices.push(price);
+          }
+        }
+        
+        const rent_amount = prices.length ? Math.min(...prices) : 0;
+        
+        await db.query(
+          "UPDATE pgs SET rent_amount = ? WHERE id = ?",
+          [rent_amount, id]
+        );
+      }
     }
 
-    res.json({ success: true });
+    res.json({ 
+      success: true, 
+      message: `${field} updated successfully`,
+      updatedValue: finalValue 
+    });
 
   } catch (err) {
     console.error("updatePGField error:", err);
@@ -394,6 +490,7 @@ exports.updatePGField = async (req, res) => {
     });
   }
 };
+
 
 
 
