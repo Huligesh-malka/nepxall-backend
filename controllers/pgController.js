@@ -532,7 +532,9 @@ exports.addPG = async (req, res) => {
       outside_food_allowed: b.outside_food_allowed === "true" ? 1 : 0,
       parties_allowed: b.parties_allowed === "true" ? 1 : 0,
       loud_music_restricted: b.loud_music_restricted === "true" ? 1 : 0,
-      lock_in_period: Number(b.lock_in_period || 0),
+      lock_in_period: isNaN(Number(b.lock_in_period))
+  ? 0
+  : Number(b.lock_in_period),
       min_stay_months: Number(b.min_stay_months || 0),
       notice_period: Number(b.notice_period || 0),
       agreement_mandatory: b.agreement_mandatory === "true" ? 1 : 0,
