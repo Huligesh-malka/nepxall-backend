@@ -192,10 +192,10 @@ exports.createBooking = async (req, res) => {
     //////////////////////////////////////////////////////
     // 🔔 SEND OWNER NOTIFICATION - BOOKING CREATED
     //////////////////////////////////////////////////////
-const [[owner]] = await db.query(
-  "SELECT fcm_token, phone FROM users WHERE id=?",
-  [pg.owner_id]
-);
+    const [[owner]] = await db.query(
+      "SELECT fcm_token FROM users WHERE id=?",
+      [pg.owner_id]
+    );
 
     if (owner?.fcm_token) {
       try {
@@ -208,19 +208,6 @@ const [[owner]] = await db.query(
         console.error("❌ Notification error:", notifError);
       }
     }
-
-
-
-
-    // 📩 SEND SMS TO OWNER
-if (owner?.phone) {
-  await sendSMS(
-    owner.phone,
-    pg.pg_name,
-    user.name,
-    user.phone
-  );
-}
 
     //////////////////////////////////////////////////////
     // ✅ SUCCESS
