@@ -1,10 +1,6 @@
 const db = require("../db");
 const { encrypt } = require("../utils/encryption");
 const sendNotification = require("../utils/sendNotification");
-const sendBookingSMS = require("../utils/sendSMS");
-
-
-
 
 //////////////////////////////////////////////////////
 // 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
@@ -192,29 +188,6 @@ exports.createBooking = async (req, res) => {
         maintenance,
       ]
     );
-
-    //////////////////////////////////////////////////////
-    // 📩 SEND OWNER SMS
-    //////////////////////////////////////////////////////
-    try {
-      const [[ownerData]] = await db.query(
-        "SELECT phone FROM users WHERE id=?",
-        [pg.owner_id]
-      );
-
-      if (ownerData?.phone) {
-        await sendBookingSMS(
-          ownerData.phone,
-          pg.pg_name,
-          user.name,
-          user.phone
-        );
-
-        console.log("✅ Owner SMS sent");
-      }
-    } catch (smsErr) {
-      console.error("❌ SMS SEND ERROR:", smsErr.message);
-    }
 
     //////////////////////////////////////////////////////
     // 🔔 SEND OWNER NOTIFICATION - BOOKING CREATED
