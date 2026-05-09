@@ -6,12 +6,7 @@ require("dotenv").config();
 
 const app = express();
 
-if (process.env.NODE_ENV === "production") {
-  console.log = () => {};
-  console.warn = () => {};
-  console.info = () => {};
-  console.debug = () => {};
-}
+
 
 /* ================= TRUST PROXY ================= */
 app.set("trust proxy", 1);
