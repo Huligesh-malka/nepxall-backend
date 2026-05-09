@@ -57,7 +57,7 @@ router.post("/call-owner", async (req, res) => {
     // ==============================
 
     const response = await axios.post(
-      "https://control.msg91.com/api/v5/voice/call",
+      "https://voice.msg91.com/api/v1/call/",
       {
         flow_id: "YOUR_FLOW_ID",
         sender: "NEPXAL",
