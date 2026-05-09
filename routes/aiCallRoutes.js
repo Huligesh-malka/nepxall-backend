@@ -10,6 +10,7 @@ const router = express.Router();
 */
 
 router.post("/call-owner", async (req, res) => {
+
   try {
 
     const { phoneNumber, ownerName } = req.body;
@@ -26,55 +27,24 @@ router.post("/call-owner", async (req, res) => {
     }
 
     // ==============================
-    // MSG91 CONFIG
+    // MSG91 / PHONE91 CONFIG
     // ==============================
 
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 
     console.log("📞 Calling Owner:", phoneNumber);
     console.log("👤 Owner Name:", ownerName);
-    console.log("🔑 MSG91 KEY:", AUTH_KEY ? "FOUND" : "MISSING");
+    console.log("🔑 AUTH KEY:", AUTH_KEY ? "FOUND" : "MISSING");
 
     // ==============================
-    // AI MESSAGE
-    // ==============================
-
-    const voiceMessage = `
-Hello ${ownerName || "Owner"}.
-
-This call is from Nepxall.
-
-We want to add your PG or coliving property on Nepxall platform.
-
-Please share your PG details.
-
-What is your PG name?
-
-What is single sharing price?
-
-What is double sharing price?
-
-Is food available?
-
-Which area is your PG located?
-
-Thank you.
-`;
-
-    console.log("🗣️ Voice Message Ready");
-
-    // ==============================
-    // MSG91 API CALL
+    // PHONE91 API CALL
     // ==============================
 
     const response = await axios.post(
-      "https://control.msg91.com/api/v5/voice/call",
+      "https://voice.phone91.com/api/v1/create-call",
       {
         flow_id: "2589",
-        sender: "NEPXAL",
-        mobiles: `91${phoneNumber}`,
-        voice: "female",
-        message: voiceMessage,
+        mobile: `91${phoneNumber}`,
       },
       {
         headers: {
@@ -88,7 +58,7 @@ Thank you.
     // SUCCESS
     // ==============================
 
-    console.log("✅ MSG91 RESPONSE:");
+    console.log("✅ CALL RESPONSE:");
     console.log(response.data);
 
     return res.status(200).json({
@@ -99,7 +69,7 @@ Thank you.
 
   } catch (error) {
 
-    console.log("❌ MSG91 ERROR");
+    console.log("❌ CALL ERROR");
 
     if (error.response) {
 
@@ -108,7 +78,7 @@ Thank you.
 
       return res.status(500).json({
         success: false,
-        message: "MSG91 API Error",
+        message: "Phone91 API Error",
         error: error.response.data,
       });
     }
