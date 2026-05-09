@@ -41,7 +41,7 @@ router.post("/call-owner", async (req, res) => {
     // ==============================
 
     const response = await axios.post(
-      "https://voice.phone91.com/api/v1/create-call",
+      "https://voice.phone91.com/api/v1/call",
       {
         flow_id: "2589",
         mobile: `91${phoneNumber}`,
