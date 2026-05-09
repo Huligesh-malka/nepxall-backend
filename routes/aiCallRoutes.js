@@ -27,25 +27,37 @@ router.post("/call-owner", async (req, res) => {
     }
 
     // ==============================
-    // MSG91 / PHONE91 CONFIG
+    // MSG91 CONFIG
     // ==============================
 
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 
-    console.log("📞 Calling Owner:", phoneNumber);
-    console.log("👤 Owner Name:", ownerName);
+    console.log("=================================");
+    console.log("📞 STARTING AI OWNER CALL");
+    console.log("📱 Phone:", phoneNumber);
+    console.log("👤 Owner:", ownerName || "N/A");
     console.log("🔑 AUTH KEY:", AUTH_KEY ? "FOUND" : "MISSING");
+    console.log("=================================");
 
     // ==============================
-    // PHONE91 API CALL
+    // API REQUEST
+    // ==============================
+
+    const requestBody = {
+      flow_id: "2589",
+      recipient: [`91${phoneNumber}`],
+    };
+
+    console.log("📤 REQUEST BODY:");
+    console.log(requestBody);
+
+    // ==============================
+    // MSG91 CALL FLOW API
     // ==============================
 
     const response = await axios.post(
-      "https://voice.phone91.com/api/v1/call",
-      {
-        flow_id: "2589",
-        mobile: `91${phoneNumber}`,
-      },
+      "https://control.msg91.com/api/v5/call/flow",
+      requestBody,
       {
         headers: {
           authkey: AUTH_KEY,
@@ -58,8 +70,11 @@ router.post("/call-owner", async (req, res) => {
     // SUCCESS
     // ==============================
 
-    console.log("✅ CALL RESPONSE:");
+    console.log("=================================");
+    console.log("✅ CALL STARTED SUCCESSFULLY");
+    console.log("📥 RESPONSE:");
     console.log(response.data);
+    console.log("=================================");
 
     return res.status(200).json({
       success: true,
@@ -69,16 +84,19 @@ router.post("/call-owner", async (req, res) => {
 
   } catch (error) {
 
-    console.log("❌ CALL ERROR");
+    console.log("=================================");
+    console.log("❌ AI CALL ERROR");
+    console.log("=================================");
 
     if (error.response) {
 
+      console.log("❌ STATUS:", error.response.status);
       console.log("❌ RESPONSE DATA:");
       console.log(error.response.data);
 
       return res.status(500).json({
         success: false,
-        message: "Phone91 API Error",
+        message: "MSG91 API Error",
         error: error.response.data,
       });
     }
