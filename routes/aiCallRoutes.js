@@ -25,29 +25,31 @@ router.post("/call-owner", async (req, res) => {
     console.log("=================================");
 
     // =====================================
-    // MSG91 VOICE FLOW API
+    // MSG91 VOICE API
     // =====================================
 
-    const response = await axios.post(
-      "https://control.msg91.com/api/v5/voice/call",
-      {
+    const response = await axios({
+      method: "POST",
+      url: "https://control.msg91.com/api/v5/voice/call",
+      maxRedirects: 5,
+      headers: {
+        authkey: AUTH_KEY,
+        "Content-Type": "application/json",
+      },
+      data: {
         flow_id: "2589",
         mobile: `91${phoneNumber}`,
       },
-      {
-        headers: {
-          authkey: AUTH_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    });
 
-    console.log("✅ RESPONSE:");
+    console.log("=================================");
+    console.log("✅ CALL RESPONSE");
     console.log(response.data);
+    console.log("=================================");
 
     return res.status(200).json({
       success: true,
-      message: "AI Call Started",
+      message: "AI Call Started Successfully",
       data: response.data,
     });
 
@@ -60,11 +62,12 @@ router.post("/call-owner", async (req, res) => {
     if (error.response) {
 
       console.log("❌ STATUS:", error.response.status);
-      console.log("❌ DATA:");
+      console.log("❌ RESPONSE:");
       console.log(error.response.data);
 
       return res.status(500).json({
         success: false,
+        message: "MSG91 API Error",
         error: error.response.data,
       });
     }
@@ -73,6 +76,7 @@ router.post("/call-owner", async (req, res) => {
 
     return res.status(500).json({
       success: false,
+      message: "Call failed",
       error: error.message,
     });
   }
