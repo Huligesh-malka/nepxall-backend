@@ -16,8 +16,10 @@ router.post("/call-owner", async (req, res) => {
       return res.status(400).json({ success: false, message: "Phone number required" });
     }
 
-    // Clean number: ensure digits only and remove leading country code/zero
+    // Clean number: ensure digits only
     phoneNumber = phoneNumber.replace(/\D/g, '');
+    
+    // Normalize to 10 digits (strip leading 91 or 0)
     if (phoneNumber.startsWith('91') && phoneNumber.length > 10) {
       phoneNumber = phoneNumber.substring(2);
     } else if (phoneNumber.startsWith('0') && phoneNumber.length > 10) {
@@ -30,11 +32,16 @@ router.post("/call-owner", async (req, res) => {
     }
 
     // 2. MSG91 V5 Structured Request Body
-    // Note: Template variables in V5 often require a specific 'type' and 'value'
     const requestBody = {
       template: "2589",
-      caller_id: "917483090510", // Must be verified in MSG91 Panel
-      client_number: `91${phoneNumber}`,
+      // FIXED: This must be your verified MSG91 number.
+      // Think of this as the "Office Number" making the call.
+      caller_id: "917483090510", 
+      
+      // DYNAMIC: This is the owner's number you want to reach.
+      // This will work for ANY number you pass from the frontend.
+      client_number: `91${phoneNumber}`, 
+      
       variables: {
         owner_name: {
           type: "text",
@@ -44,9 +51,8 @@ router.post("/call-owner", async (req, res) => {
     };
 
     console.log("=================================");
-    console.log("📞 INITIATING MSG91 V5 VOICE CALL");
-    console.log("📱 Client:", `91${phoneNumber}`);
-    console.log("👤 Variable:", ownerName || "Owner");
+    console.log(`📞 INITIATING CALL TO: 91${phoneNumber}`);
+    console.log(`👤 OWNER NAME: ${ownerName}`);
     console.log("=================================");
 
     // 3. API Execution
@@ -61,8 +67,6 @@ router.post("/call-owner", async (req, res) => {
       data: requestBody,
     });
 
-    console.log("✅ MSG91 API SUCCESS:", response.data);
-
     return res.status(200).json({
       success: true,
       message: "AI Call Processed Successfully",
@@ -70,26 +74,16 @@ router.post("/call-owner", async (req, res) => {
     });
 
   } catch (error) {
-    // 4. Enhanced Error Logging
-    console.log("=================================");
     console.log("❌ MSG91 V5 API ERROR");
     if (error.response) {
-      console.log("STATUS:", error.response.status);
       console.log("DETAIL:", JSON.stringify(error.response.data, null, 2));
-      
       return res.status(error.response.status).json({
         success: false,
         message: "MSG91 V5 API Error",
         error: error.response.data,
       });
     }
-
-    console.log("ERROR MESSAGE:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Internal Server Error during call initiation",
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 
