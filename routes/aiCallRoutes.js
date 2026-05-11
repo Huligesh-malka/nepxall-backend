@@ -9,14 +9,22 @@ const router = express.Router();
 */
 router.post("/call-owner", async (req, res) => {
   try {
-    const { phoneNumber, ownerName } = req.body;
+    let { phoneNumber, ownerName } = req.body;
 
-    // 1. Validation
+    // 1. Validation & Sanitization
     if (!phoneNumber) {
       return res.status(400).json({
         success: false,
         message: "Phone number required",
       });
+    }
+
+    // Remove any non-numeric characters (like +, spaces, or dashes)
+    phoneNumber = phoneNumber.replace(/\D/g, '');
+
+    // Ensure we don't double up on the country code '91'
+    if (phoneNumber.startsWith('91') && phoneNumber.length > 10) {
+        phoneNumber = phoneNumber.substring(2);
     }
 
     // 2. Config & Env Check
@@ -29,7 +37,7 @@ router.post("/call-owner", async (req, res) => {
 
     console.log("=================================");
     console.log("📞 STARTING AI OWNER CALL");
-    console.log("📱 Phone:", phoneNumber);
+    console.log("📱 Final Phone:", `91${phoneNumber}`);
     console.log("👤 Owner:", ownerName || "N/A");
     console.log("=================================");
 
@@ -39,11 +47,13 @@ router.post("/call-owner", async (req, res) => {
     };
 
     // 3. MSG91 / PHONE91 API CALL
+    // FIX: Using 'auth-key' as the primary header for Phone91 Voice
     const response = await axios({
       method: "POST",
       url: "https://voice.phone91.com/call/",
       headers: {
-        "authkey": AUTH_KEY, // Ensure this matches MSG91 documentation (sometimes it's 'authkey', sometimes 'auth-key')
+        "auth-key": AUTH_KEY, 
+        "authkey": AUTH_KEY, // Keeping this as fallback
         "Content-Type": "application/json",
         "accept": "application/json",
       },
@@ -51,17 +61,19 @@ router.post("/call-owner", async (req, res) => {
     });
 
     // 4. Handle MSG91's internal error format
-    // Note: Some APIs return 200 OK but include 'status: fail' in the body
+    // MSG91 often returns 200 OK but with status: "fail" in the body
     if (response.data.status === 'fail' || response.data.hasError) {
         console.log("❌ MSG91 REJECTED REQUEST:", response.data.errors);
-        return res.status(401).json({
+        return res.status(400).json({
             success: false,
             message: "AI Call Provider Error",
-            error: response.data.errors
+            error: response.data.errors || response.data.message
         });
     }
 
     console.log("✅ AI CALL SUCCESS");
+    console.log("DATA:", response.data);
+    
     return res.status(200).json({
       success: true,
       message: "AI Call Started Successfully",
@@ -75,10 +87,11 @@ router.post("/call-owner", async (req, res) => {
       console.log("❌ DATA:", error.response.data);
       return res.status(error.response.status).json({
         success: false,
-        message: "MSG91 API Error",
+        message: "MSG91 API Connection Error",
         error: error.response.data,
       });
     }
+    console.log("❌ MESSAGE:", error.message);
     return res.status(500).json({ success: false, message: error.message });
   }
 });
