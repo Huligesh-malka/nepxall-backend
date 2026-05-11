@@ -3,11 +3,21 @@ const axios = require("axios");
 
 const router = express.Router();
 
+/*
+==================================================
+ AI OWNER CALL ROUTE
+==================================================
+*/
+
 router.post("/call-owner", async (req, res) => {
 
   try {
 
     const { phoneNumber, ownerName } = req.body;
+
+    // =====================================
+    // VALIDATION
+    // =====================================
 
     if (!phoneNumber) {
       return res.status(400).json({
@@ -16,34 +26,57 @@ router.post("/call-owner", async (req, res) => {
       });
     }
 
+    // =====================================
+    // MSG91 CONFIG
+    // =====================================
+
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 
     console.log("=================================");
     console.log("📞 STARTING AI OWNER CALL");
     console.log("📱 Phone:", phoneNumber);
     console.log("👤 Owner:", ownerName || "N/A");
+    console.log("🔑 AUTH KEY:", AUTH_KEY ? "FOUND" : "MISSING");
     console.log("=================================");
 
     // =====================================
-    // MSG91 VOICE API
+    // REQUEST BODY
+    // =====================================
+
+    const requestBody = {
+      flow_id: "2589",
+      recipient: [`91${phoneNumber}`],
+    };
+
+    console.log("📤 REQUEST BODY:");
+    console.log(requestBody);
+
+    // =====================================
+    // MSG91 / PHONE91 API CALL
     // =====================================
 
     const response = await axios({
       method: "POST",
-      url: "https://control.msg91.com/api/v5/voice/call",
+
+      // IMPORTANT
+      url: "https://voice.phone91.com/call/",
+
       maxRedirects: 5,
+
       headers: {
         authkey: AUTH_KEY,
         "Content-Type": "application/json",
       },
-      data: {
-        flow_id: "2589",
-        mobile: `91${phoneNumber}`,
-      },
+
+      data: requestBody,
     });
 
+    // =====================================
+    // SUCCESS
+    // =====================================
+
     console.log("=================================");
-    console.log("✅ CALL RESPONSE");
+    console.log("✅ AI CALL SUCCESS");
     console.log(response.data);
     console.log("=================================");
 
@@ -62,17 +95,20 @@ router.post("/call-owner", async (req, res) => {
     if (error.response) {
 
       console.log("❌ STATUS:", error.response.status);
-      console.log("❌ RESPONSE:");
+
+      console.log("❌ RESPONSE DATA:");
       console.log(error.response.data);
 
       return res.status(500).json({
         success: false,
         message: "MSG91 API Error",
+        status: error.response.status,
         error: error.response.data,
       });
     }
 
-    console.log("❌ ERROR:", error.message);
+    console.log("❌ ERROR MESSAGE:");
+    console.log(error.message);
 
     return res.status(500).json({
       success: false,
