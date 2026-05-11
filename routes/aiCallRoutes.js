@@ -56,20 +56,20 @@ router.post("/call-owner", async (req, res) => {
     // =====================================
 
     const response = await axios({
-      method: "POST",
+  method: "POST",
 
-      // IMPORTANT
-      url: "https://voice.phone91.com/call/",
+  url: "https://voice.phone91.com/call/",
 
-      maxRedirects: 5,
+  maxRedirects: 5,
 
-      headers: {
-        authkey: AUTH_KEY,
-        "Content-Type": "application/json",
-      },
+  headers: {
+    authkey: AUTH_KEY,
+    "Content-Type": "application/json",
+    accept: "application/json",
+  },
 
-      data: requestBody,
-    });
+  data: requestBody,
+});
 
     // =====================================
     // SUCCESS
