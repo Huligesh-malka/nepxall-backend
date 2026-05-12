@@ -1,89 +1,132 @@
 const express = require("express");
 const axios = require("axios");
+
 const router = express.Router();
 
 /*
 ==================================================
- AI OWNER CALL ROUTE (MSG91 V5)
+ WHATSAPP OWNER BOOKING NOTIFICATION
+ MSG91 WHATSAPP API
 ==================================================
 */
-router.post("/call-owner", async (req, res) => {
-  try {
-    let { phoneNumber, ownerName } = req.body;
 
-    // 1. Validation & Sanitization
-    if (!phoneNumber) {
-      return res.status(400).json({ success: false, message: "Phone number required" });
+router.post("/send-booking-whatsapp", async (req, res) => {
+  try {
+    let {
+      ownerPhone,
+      ownerName,
+      userName,
+      userPhone,
+      propertyName,
+      area,
+      rent
+    } = req.body;
+
+    /*
+    ==========================================
+    VALIDATION
+    ==========================================
+    */
+
+    if (!ownerPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Owner phone number required"
+      });
     }
 
-    // Clean number: ensure digits only
-    phoneNumber = phoneNumber.replace(/\D/g, '');
-    
-    // Normalize to 10 digits (strip leading 91 or 0)
-    if (phoneNumber.startsWith('91') && phoneNumber.length > 10) {
-      phoneNumber = phoneNumber.substring(2);
-    } else if (phoneNumber.startsWith('0') && phoneNumber.length > 10) {
-      phoneNumber = phoneNumber.substring(1);
+    // Clean owner number
+    ownerPhone = ownerPhone.replace(/\D/g, "");
+
+    // Convert to 10 digit
+    if (ownerPhone.startsWith("91") && ownerPhone.length > 10) {
+      ownerPhone = ownerPhone.substring(2);
     }
 
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
+
     if (!AUTH_KEY) {
-      return res.status(500).json({ success: false, message: "Server configuration error" });
+      return res.status(500).json({
+        success: false,
+        message: "MSG91 Auth Key missing"
+      });
     }
 
-    // 2. MSG91 V5 Structured Request Body
-    const requestBody = {
-      template: "2589",
-      // FIXED: This must be your verified MSG91 number.
-      // Think of this as the "Office Number" making the call.
-      caller_id: "917483090510", 
-      
-      // DYNAMIC: This is the owner's number you want to reach.
-      // This will work for ANY number you pass from the frontend.
-      client_number: `91${phoneNumber}`, 
-      
-      variables: {
-        owner_name: {
-          type: "text",
-          value: ownerName || "Owner"
-        }
-      }
-    };
+    /*
+    ==========================================
+    WHATSAPP MESSAGE
+    ==========================================
+    */
 
-    console.log("=================================");
-    console.log(`📞 INITIATING CALL TO: 91${phoneNumber}`);
-    console.log(`👤 OWNER NAME: ${ownerName}`);
-    console.log("=================================");
+    const messageText = `
+🏠 New Booking Received - Nepxall
 
-    // 3. API Execution
+Hello ${ownerName || "Owner"},
+
+A user has booked your property.
+
+👤 User Name: ${userName || "Customer"}
+📞 User Phone: ${userPhone || "Not Provided"}
+
+🏢 Property: ${propertyName || "PG"}
+📍 Area: ${area || "Location"}
+💰 Rent: ₹${rent || "0"}
+
+Please contact the customer soon.
+
+- Team Nepxall
+`;
+
+    /*
+    ==========================================
+    MSG91 API REQUEST
+    ==========================================
+    */
+
     const response = await axios({
       method: "POST",
-      url: "https://control.msg91.com/api/v5/voice/call/",
+      url: "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/",
       headers: {
-        "authkey": AUTH_KEY,
-        "accept": "application/json",
-        "content-type": "application/json",
+        accept: "application/json",
+        authkey: AUTH_KEY,
+        "content-type": "application/json"
       },
-      data: requestBody,
+      data: {
+        integrated_number: "917483090510", // Your MSG91 WhatsApp Number
+        recipient_number: `91${ownerPhone}`, // Owner Number
+        content_type: "text",
+        text: messageText
+      }
     });
+
+    console.log("=================================");
+    console.log("✅ WHATSAPP SENT SUCCESSFULLY");
+    console.log(`📞 TO: 91${ownerPhone}`);
+    console.log("=================================");
 
     return res.status(200).json({
       success: true,
-      message: "AI Call Processed Successfully",
-      data: response.data,
+      message: "WhatsApp notification sent successfully",
+      data: response.data
     });
 
   } catch (error) {
-    console.log("❌ MSG91 V5 API ERROR");
+    console.log("❌ WHATSAPP API ERROR");
+
     if (error.response) {
-      console.log("DETAIL:", JSON.stringify(error.response.data, null, 2));
+      console.log(error.response.data);
+
       return res.status(error.response.status).json({
         success: false,
-        message: "MSG91 V5 API Error",
-        error: error.response.data,
+        message: "MSG91 WhatsApp API Error",
+        error: error.response.data
       });
     }
-    return res.status(500).json({ success: false, message: error.message });
+
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 });
 
