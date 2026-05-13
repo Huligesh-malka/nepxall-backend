@@ -3,7 +3,7 @@ const axios = require("axios");
 
 const router = express.Router();
 
-const pool = require("../config/db");
+const db = require("../config/db");
 
 /*
 ==================================================
@@ -14,11 +14,6 @@ const pool = require("../config/db");
 router.post("/send-booking-whatsapp", async (req, res) => {
 
   try {
-
-    console.log("================================");
-    console.log("📩 WHATSAPP REQUEST BODY");
-    console.log(req.body);
-    console.log("================================");
 
     const {
       ownerId,
@@ -31,24 +26,11 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    VALIDATION
+    GET OWNER FROM USERS TABLE
     ==========================================
     */
 
-    if (!ownerId) {
-      return res.status(400).json({
-        success: false,
-        message: "Owner ID missing"
-      });
-    }
-
-    /*
-    ==========================================
-    GET OWNER
-    ==========================================
-    */
-
-    const [owners] = await pool.query(
+    const [owners] = await db.query(
       `
       SELECT id, name, phone
       FROM users
@@ -57,10 +39,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       [ownerId]
     );
 
-    console.log("OWNER RESULT:", owners);
-
     if (owners.length === 0) {
-
       return res.status(404).json({
         success: false,
         message: "Owner not found"
@@ -72,7 +51,6 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     let ownerPhone = owner.phone;
 
     if (!ownerPhone) {
-
       return res.status(400).json({
         success: false,
         message: "Owner phone missing"
@@ -81,28 +59,20 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    CLEAN PHONE
+    CLEAN NUMBER
     ==========================================
     */
 
     ownerPhone = ownerPhone.replace(/\D/g, "");
 
-    if (
-      ownerPhone.startsWith("91") &&
-      ownerPhone.length > 10
-    ) {
+    if (ownerPhone.startsWith("91")) {
       ownerPhone = ownerPhone.substring(2);
     }
 
-    console.log("📞 FINAL OWNER PHONE:", ownerPhone);
-
-    const AUTH_KEY =
-      process.env.MSG91_AUTH_KEY;
+    const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 
     const WHATSAPP_NUMBER =
       process.env.MSG91_WHATSAPP_NUMBER;
-
-    console.log("📞 MSG91 NUMBER:", WHATSAPP_NUMBER);
 
     /*
     ==========================================
@@ -181,7 +151,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       }
     );
 
-    console.log("✅ WhatsApp Sent Successfully");
+    console.log("✅ WhatsApp Sent");
 
     return res.status(200).json({
       success: true,
@@ -191,20 +161,11 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
   } catch (error) {
 
-    console.log("================================");
-    console.log("❌ WHATSAPP ERROR");
-    console.log("================================");
-
-    console.log(
-      error.response?.data ||
-      error.message
-    );
+    console.log(error.response?.data || error.message);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.response?.data ||
-        error.message
+      message: error.message
     });
   }
 });
