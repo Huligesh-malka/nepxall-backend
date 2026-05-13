@@ -121,43 +121,77 @@ router.delete("/:id/photo", auth, controller.deleteSinglePhoto);
 /* =================================================
    VIDEOS
 ================================================= */
-router.post("/:id/videos", auth, checkPlan, uploadVideos.array("videos", 5), async (req, res) => {
-  try {
-    const newVideos = req.files.map((file) => file.path);
+/* =================================================
+   VIDEOS
+================================================= */
 
-    const [rows] = await db.query(
-      "SELECT videos FROM pgs WHERE id = ?",
-      [req.params.id]
-    );
+router.post(
+  "/:id/videos",
+  auth,
+  checkPlan,
+  uploadVideos.array("videos", 5),
 
-    const existingVideos = parseJSON(rows[0]?.videos);
-    const plan = req.plan;
+  async (req, res) => {
+    try {
 
-    if (existingVideos.length + newVideos.length > plan.videos) {
-      return res.status(400).json({
+      console.log("FILES RECEIVED:", req.files);
+
+      // CHECK FILES
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No videos uploaded"
+        });
+      }
+
+      // GET CLOUDINARY URLS
+      const newVideos = req.files.map((file) => file.path);
+
+      // GET EXISTING VIDEOS
+      const [rows] = await db.query(
+        "SELECT videos FROM pgs WHERE id = ?",
+        [req.params.id]
+      );
+
+      const existingVideos = parseJSON(rows[0]?.videos);
+
+      // CHECK PLAN LIMIT
+      const plan = req.plan;
+
+      if (existingVideos.length + newVideos.length > plan.videos) {
+        return res.status(400).json({
+          success: false,
+          message: `❌ Your ${req.planName} plan allows only ${plan.videos} videos`
+        });
+      }
+
+      // MERGE VIDEOS
+      const updatedVideos = [...existingVideos, ...newVideos];
+
+      // SAVE TO DATABASE
+      await db.query(
+        "UPDATE pgs SET videos = ? WHERE id = ?",
+        [JSON.stringify(updatedVideos), req.params.id]
+      );
+
+      // SUCCESS
+      res.json({
+        success: true,
+        message: "Videos uploaded successfully",
+        videos: updatedVideos,
+      });
+
+    } catch (err) {
+
+      console.error("UPLOAD VIDEO ERROR:", err);
+
+      res.status(500).json({
         success: false,
-        message: `❌ Your ${req.planName} plan allows only ${plan.videos} videos`
+        message: err.message
       });
     }
-
-    const updatedVideos = [...existingVideos, ...newVideos];
-
-    await db.query(
-      "UPDATE pgs SET videos = ? WHERE id = ?",
-      [JSON.stringify(updatedVideos), req.params.id]
-    );
-
-    res.json({
-      success: true,
-      message: "Videos uploaded successfully",
-      videos: updatedVideos,
-    });
-
-  } catch (err) {
-    console.error("UPLOAD VIDEO ERROR:", err);
-    res.status(500).json({ success: false, message: err.message });
   }
-});
+);
 
 router.delete("/:id/video", auth, controller.deleteSingleVideo);
 
