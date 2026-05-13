@@ -3,22 +3,11 @@ const axios = require("axios");
 
 const router = express.Router();
 
-/*
-==================================================
- TEST ROUTE
-==================================================
-*/
-
-router.get("/send-booking-whatsapp", (req, res) => {
-  res.json({
-    success: true,
-    message: "✅ WhatsApp API working. Use POST request."
-  });
-});
+const db = require("../config/db");
 
 /*
 ==================================================
- SEND WHATSAPP BOOKING MESSAGE
+ SEND BOOKING WHATSAPP
 ==================================================
 */
 
@@ -26,9 +15,8 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
   try {
 
-    let {
-      ownerPhone,
-      ownerName,
+    const {
+      ownerId,
       userName,
       userPhone,
       propertyName,
@@ -38,49 +26,57 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    VALIDATION
+    GET OWNER FROM USERS TABLE
     ==========================================
     */
+
+    const [owners] = await db.query(
+      `
+      SELECT id, name, phone
+      FROM users
+      WHERE id = ?
+      `,
+      [ownerId]
+    );
+
+    if (owners.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Owner not found"
+      });
+    }
+
+    const owner = owners[0];
+
+    let ownerPhone = owner.phone;
 
     if (!ownerPhone) {
       return res.status(400).json({
         success: false,
-        message: "Owner phone required"
+        message: "Owner phone missing"
       });
     }
 
     /*
     ==========================================
-    CLEAN PHONE NUMBER
+    CLEAN NUMBER
     ==========================================
     */
 
     ownerPhone = ownerPhone.replace(/\D/g, "");
 
-    // Remove country code if already exists
-    if (ownerPhone.startsWith("91") && ownerPhone.length > 10) {
+    if (ownerPhone.startsWith("91")) {
       ownerPhone = ownerPhone.substring(2);
     }
 
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
-    const WHATSAPP_NUMBER = process.env.MSG91_WHATSAPP_NUMBER;
+
+    const WHATSAPP_NUMBER =
+      process.env.MSG91_WHATSAPP_NUMBER;
 
     /*
     ==========================================
-    ENV CHECK
-    ==========================================
-    */
-
-    if (!AUTH_KEY || !WHATSAPP_NUMBER) {
-      return res.status(500).json({
-        success: false,
-        message: "MSG91 ENV variables missing"
-      });
-    }
-
-    /*
-    ==========================================
-    SEND TEMPLATE MESSAGE
+    SEND WHATSAPP
     ==========================================
     */
 
@@ -112,7 +108,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
                   body_1: {
                     type: "text",
-                    value: ownerName || "Owner"
+                    value: owner.name || "Owner"
                   },
 
                   body_2: {
@@ -155,39 +151,17 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       }
     );
 
-    /*
-    ==========================================
-    SUCCESS
-    ==========================================
-    */
-
-    console.log("================================");
-    console.log("✅ WHATSAPP SENT SUCCESSFULLY");
-    console.log(`📞 Sent To: ${ownerPhone}`);
-    console.log("================================");
+    console.log("✅ WhatsApp Sent");
 
     return res.status(200).json({
       success: true,
-      message: "WhatsApp message sent successfully",
+      message: "WhatsApp sent successfully",
       data: response.data
     });
 
   } catch (error) {
 
-    console.log("================================");
-    console.log("❌ WHATSAPP API ERROR");
-    console.log("================================");
-
-    if (error.response) {
-
-      console.log(error.response.data);
-
-      return res.status(error.response.status).json({
-        success: false,
-        message: "MSG91 API Error",
-        error: error.response.data
-      });
-    }
+    console.log(error.response?.data || error.message);
 
     return res.status(500).json({
       success: false,
