@@ -22,7 +22,7 @@ router.get("/send-booking-whatsapp", (req, res) => {
 
 /*
 ==================================================
- SEND WHATSAPP
+ SEND BOOKING WHATSAPP
 ==================================================
 */
 
@@ -100,7 +100,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    CLEAN PHONE
+    CLEAN PHONE NUMBER
     ==========================================
     */
 
@@ -150,40 +150,80 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    SEND WHATSAPP
+    SEND TEMPLATE WHATSAPP
     ==========================================
     */
 
     const response = await axios.post(
 
-      "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/",
+      "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
 
       {
         integrated_number: WHATSAPP_NUMBER,
 
-        content_type: "text",
+        content_type: "template",
 
-        recipient_number: `91${ownerPhone}`,
+        payload: {
 
-        text: `
-🏠 New Booking Received - Nepxall
+          messaging_product: "whatsapp",
 
-Hello ${owner.name || "Owner"},
+          type: "template",
 
-👤 User Name: ${userName || "Customer"}
+          template: {
 
-📞 User Phone: ${userPhone || "No Phone"}
+            name: "booking_notification",
 
-🏢 Property: ${propertyName || "Property"}
+            language: {
+              code: "en",
+              policy: "deterministic"
+            },
 
-📍 Area: ${area || "Area"}
+            to_and_components: [
+              {
 
-💰 Rent: ₹${rent || "0"}
+                to: [`91${ownerPhone}`],
 
-Please contact customer soon.
+                components: {
 
-- Team Nepxall
-        `
+                  body_1: {
+                    type: "text",
+                    value: owner.name || "Owner"
+                  },
+
+                  body_2: {
+                    type: "text",
+                    value: userName || "Customer"
+                  },
+
+                  body_3: {
+                    type: "text",
+                    value: userPhone || "No Phone"
+                  },
+
+                  body_4: {
+                    type: "text",
+                    value: propertyName || "Property"
+                  },
+
+                  body_5: {
+                    type: "text",
+                    value: area || "Area"
+                  },
+
+                  body_6: {
+                    type: "text",
+                    value: String(rent || "0")
+                  }
+
+                }
+
+              }
+            ]
+
+          }
+
+        }
+
       },
 
       {
