@@ -3,7 +3,7 @@ const axios = require("axios");
 
 const router = express.Router();
 
-const db = require("../config/db");
+const db = require("../db");
 
 /*
 ==================================================
@@ -22,7 +22,7 @@ router.get("/send-booking-whatsapp", (req, res) => {
 
 /*
 ==================================================
- SEND BOOKING WHATSAPP
+ SEND WHATSAPP
 ==================================================
 */
 
