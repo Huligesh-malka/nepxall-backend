@@ -7,6 +7,21 @@ const db = require("../config/db");
 
 /*
 ==================================================
+ TEST ROUTE
+==================================================
+*/
+
+router.get("/send-booking-whatsapp", (req, res) => {
+
+  res.json({
+    success: true,
+    message: "WhatsApp route working"
+  });
+
+});
+
+/*
+==================================================
  SEND BOOKING WHATSAPP
 ==================================================
 */
@@ -16,8 +31,8 @@ router.post("/send-booking-whatsapp", async (req, res) => {
   try {
 
     console.log("=================================");
-    console.log("📩 WHATSAPP API HIT");
-    console.log("BODY:", req.body);
+    console.log("📩 WHATSAPP REQUEST");
+    console.log(req.body);
     console.log("=================================");
 
     const {
@@ -46,273 +61,170 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    GET OWNER FROM DATABASE
+    GET OWNER FROM USERS TABLE
     ==========================================
     */
 
-    db.query(
+    const [owners] = await db.query(
       `
       SELECT id, name, phone
       FROM users
       WHERE id = ?
       `,
-      [ownerId],
+      [ownerId]
+    );
 
-      async (err, owners) => {
+    console.log("OWNER:", owners);
 
-        /*
-        ==========================================
-        DB ERROR
-        ==========================================
-        */
+    if (!owners || owners.length === 0) {
 
-        if (err) {
+      return res.status(404).json({
+        success: false,
+        message: "Owner not found"
+      });
 
-          console.log("❌ DATABASE ERROR");
-          console.log(err);
+    }
 
-          return res.status(500).json({
-            success: false,
-            message: "Database error"
-          });
+    const owner = owners[0];
 
+    let ownerPhone = owner.phone;
+
+    if (!ownerPhone) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Owner phone missing"
+      });
+
+    }
+
+    /*
+    ==========================================
+    CLEAN PHONE
+    ==========================================
+    */
+
+    ownerPhone = ownerPhone.replace(/\D/g, "");
+
+    if (
+      ownerPhone.startsWith("91") &&
+      ownerPhone.length > 10
+    ) {
+      ownerPhone = ownerPhone.substring(2);
+    }
+
+    console.log("📞 FINAL PHONE:", ownerPhone);
+
+    /*
+    ==========================================
+    ENV VARIABLES
+    ==========================================
+    */
+
+    const AUTH_KEY =
+      process.env.MSG91_AUTH_KEY;
+
+    const WHATSAPP_NUMBER =
+      process.env.MSG91_WHATSAPP_NUMBER;
+
+    console.log("AUTH EXISTS:", !!AUTH_KEY);
+    console.log("WHATSAPP NUMBER:", WHATSAPP_NUMBER);
+
+    if (!AUTH_KEY) {
+
+      return res.status(500).json({
+        success: false,
+        message: "MSG91_AUTH_KEY missing"
+      });
+
+    }
+
+    if (!WHATSAPP_NUMBER) {
+
+      return res.status(500).json({
+        success: false,
+        message: "MSG91_WHATSAPP_NUMBER missing"
+      });
+
+    }
+
+    /*
+    ==========================================
+    SEND WHATSAPP
+    ==========================================
+    */
+
+    const response = await axios.post(
+
+      "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/",
+
+      {
+        integrated_number: WHATSAPP_NUMBER,
+
+        content_type: "text",
+
+        recipient_number: `91${ownerPhone}`,
+
+        text: `
+🏠 New Booking Received - Nepxall
+
+Hello ${owner.name || "Owner"},
+
+👤 User Name: ${userName || "Customer"}
+
+📞 User Phone: ${userPhone || "No Phone"}
+
+🏢 Property: ${propertyName || "Property"}
+
+📍 Area: ${area || "Area"}
+
+💰 Rent: ₹${rent || "0"}
+
+Please contact customer soon.
+
+- Team Nepxall
+        `
+      },
+
+      {
+        headers: {
+          accept: "application/json",
+          authkey: AUTH_KEY,
+          "content-type": "application/json"
         }
-
-        /*
-        ==========================================
-        OWNER NOT FOUND
-        ==========================================
-        */
-
-        if (!owners || owners.length === 0) {
-
-          console.log("❌ OWNER NOT FOUND");
-
-          return res.status(404).json({
-            success: false,
-            message: "Owner not found"
-          });
-
-        }
-
-        const owner = owners[0];
-
-        console.log("✅ OWNER FOUND:", owner);
-
-        let ownerPhone = owner.phone;
-
-        /*
-        ==========================================
-        PHONE CHECK
-        ==========================================
-        */
-
-        if (!ownerPhone) {
-
-          console.log("❌ OWNER PHONE EMPTY");
-
-          return res.status(400).json({
-            success: false,
-            message: "Owner phone missing"
-          });
-
-        }
-
-        /*
-        ==========================================
-        CLEAN PHONE
-        ==========================================
-        */
-
-        ownerPhone = ownerPhone.replace(/\D/g, "");
-
-        if (
-          ownerPhone.startsWith("91") &&
-          ownerPhone.length > 10
-        ) {
-          ownerPhone = ownerPhone.substring(2);
-        }
-
-        console.log("📞 CLEAN PHONE:", ownerPhone);
-
-        /*
-        ==========================================
-        ENV VARIABLES
-        ==========================================
-        */
-
-        const AUTH_KEY =
-          process.env.MSG91_AUTH_KEY;
-
-        const WHATSAPP_NUMBER =
-          process.env.MSG91_WHATSAPP_NUMBER;
-
-        console.log("AUTH EXISTS:", !!AUTH_KEY);
-        console.log("WHATSAPP NUMBER:", WHATSAPP_NUMBER);
-
-        /*
-        ==========================================
-        ENV CHECK
-        ==========================================
-        */
-
-        if (!AUTH_KEY) {
-
-          return res.status(500).json({
-            success: false,
-            message: "MSG91_AUTH_KEY missing"
-          });
-
-        }
-
-        if (!WHATSAPP_NUMBER) {
-
-          return res.status(500).json({
-            success: false,
-            message: "MSG91_WHATSAPP_NUMBER missing"
-          });
-
-        }
-
-        /*
-        ==========================================
-        SEND TEMPLATE MESSAGE
-        ==========================================
-        */
-
-        try {
-
-          console.log("=================================");
-          console.log("📤 SENDING TO MSG91");
-          console.log("=================================");
-
-          const response = await axios.post(
-
-            "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
-
-            {
-              integrated_number: WHATSAPP_NUMBER,
-
-              content_type: "template",
-
-              payload: {
-
-                messaging_product: "whatsapp",
-
-                type: "template",
-
-                template: {
-
-                  name: "booking_notification",
-
-                  language: {
-                    code: "en",
-                    policy: "deterministic"
-                  },
-
-                  to_and_components: [
-                    {
-                      to: [`91${ownerPhone}`],
-
-                      components: {
-
-                        body_1: {
-                          type: "text",
-                          value: owner.name || "Owner"
-                        },
-
-                        body_2: {
-                          type: "text",
-                          value: userName || "Customer"
-                        },
-
-                        body_3: {
-                          type: "text",
-                          value: userPhone || "No Phone"
-                        },
-
-                        body_4: {
-                          type: "text",
-                          value: propertyName || "Property"
-                        },
-
-                        body_5: {
-                          type: "text",
-                          value: area || "Area"
-                        },
-
-                        body_6: {
-                          type: "text",
-                          value: String(rent || "0")
-                        }
-
-                      }
-
-                    }
-                  ]
-
-                }
-
-              }
-
-            },
-
-            {
-              headers: {
-                accept: "application/json",
-                authkey: AUTH_KEY,
-                "content-type": "application/json"
-              }
-            }
-
-          );
-
-          console.log("=================================");
-          console.log("✅ WHATSAPP SUCCESS");
-          console.log(response.data);
-          console.log("=================================");
-
-          return res.status(200).json({
-            success: true,
-            message: "WhatsApp sent successfully",
-            data: response.data
-          });
-
-        } catch (whatsappError) {
-
-          console.log("=================================");
-          console.log("❌ MSG91 API ERROR");
-          console.log("=================================");
-
-          console.log(
-            whatsappError.response?.data ||
-            whatsappError.message
-          );
-
-          return res.status(500).json({
-            success: false,
-            error:
-              whatsappError.response?.data ||
-              whatsappError.message
-          });
-
-        }
-
       }
 
     );
 
+    console.log("=================================");
+    console.log("✅ WHATSAPP SENT SUCCESSFULLY");
+    console.log(response.data);
+    console.log("=================================");
+
+    return res.status(200).json({
+      success: true,
+      message: "WhatsApp sent successfully",
+      data: response.data
+    });
+
   } catch (error) {
 
     console.log("=================================");
-    console.log("❌ SERVER ERROR");
+    console.log("❌ WHATSAPP ERROR");
     console.log("=================================");
 
-    console.log(error);
+    console.log(
+      error.response?.data ||
+      error.message ||
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: error.message
+      message:
+        error.response?.data ||
+        error.message ||
+        "Unknown error"
     });
 
   }
