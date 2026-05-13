@@ -5,12 +5,27 @@ const router = express.Router();
 
 /*
 ==================================================
- NEPXALL WHATSAPP BOOKING NOTIFICATION
+ TEST ROUTE
+==================================================
+*/
+
+router.get("/send-booking-whatsapp", (req, res) => {
+  res.json({
+    success: true,
+    message: "✅ WhatsApp API working. Use POST request."
+  });
+});
+
+/*
+==================================================
+ SEND WHATSAPP BOOKING MESSAGE
 ==================================================
 */
 
 router.post("/send-booking-whatsapp", async (req, res) => {
+
   try {
+
     let {
       ownerPhone,
       ownerName,
@@ -42,7 +57,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     ownerPhone = ownerPhone.replace(/\D/g, "");
 
-    // Remove 91 if exists
+    // Remove country code if already exists
     if (ownerPhone.startsWith("91") && ownerPhone.length > 10) {
       ownerPhone = ownerPhone.substring(2);
     }
@@ -50,16 +65,22 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     const AUTH_KEY = process.env.MSG91_AUTH_KEY;
     const WHATSAPP_NUMBER = process.env.MSG91_WHATSAPP_NUMBER;
 
-    if (!AUTH_KEY) {
+    /*
+    ==========================================
+    ENV CHECK
+    ==========================================
+    */
+
+    if (!AUTH_KEY || !WHATSAPP_NUMBER) {
       return res.status(500).json({
         success: false,
-        message: "MSG91 Auth key missing"
+        message: "MSG91 ENV variables missing"
       });
     }
 
     /*
     ==========================================
-    WHATSAPP TEMPLATE API
+    SEND TEMPLATE MESSAGE
     ==========================================
     */
 
@@ -76,7 +97,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
           type: "template",
 
           template: {
-            name: "booking_notification", // YOUR TEMPLATE NAME
+            name: "booking_notification",
 
             language: {
               code: "en",
@@ -88,6 +109,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
                 to: [`91${ownerPhone}`],
 
                 components: {
+
                   body_1: {
                     type: "text",
                     value: ownerName || "Owner"
@@ -115,8 +137,9 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
                   body_6: {
                     type: "text",
-                    value: rent || "0"
+                    value: String(rent || "0")
                   }
+
                 }
               }
             ]
@@ -132,28 +155,36 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       }
     );
 
+    /*
+    ==========================================
+    SUCCESS
+    ==========================================
+    */
+
     console.log("================================");
     console.log("✅ WHATSAPP SENT SUCCESSFULLY");
-    console.log(`📞 Owner: ${ownerPhone}`);
+    console.log(`📞 Sent To: ${ownerPhone}`);
     console.log("================================");
 
     return res.status(200).json({
       success: true,
-      message: "WhatsApp message sent",
+      message: "WhatsApp message sent successfully",
       data: response.data
     });
 
   } catch (error) {
 
     console.log("================================");
-    console.log("❌ WHATSAPP ERROR");
+    console.log("❌ WHATSAPP API ERROR");
     console.log("================================");
 
     if (error.response) {
+
       console.log(error.response.data);
 
       return res.status(error.response.status).json({
         success: false,
+        message: "MSG91 API Error",
         error: error.response.data
       });
     }
