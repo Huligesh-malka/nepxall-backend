@@ -51,6 +51,9 @@ const videoStorage = new CloudinaryStorage({
   cloudinary,
 
   params: async (req, file) => {
+
+    console.log("VIDEO FILE:", file);
+
     return {
       folder: "pg-videos",
 
@@ -59,13 +62,11 @@ const videoStorage = new CloudinaryStorage({
       public_id: `pg-video-${Date.now()}-${Math.round(
         Math.random() * 1e9
       )}`,
-
-      format: "mp4",
     };
   },
 });
 
-/* ================= MULTER ================= */
+/* ================= PHOTO UPLOAD ================= */
 
 const uploadPhotos = multer({
   storage: photoStorage,
@@ -75,6 +76,9 @@ const uploadPhotos = multer({
   },
 
   fileFilter: (req, file, cb) => {
+
+    console.log("PHOTO FILE:", file.mimetype);
+
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Only image files are allowed"), false);
     }
@@ -83,14 +87,19 @@ const uploadPhotos = multer({
   },
 });
 
+/* ================= VIDEO UPLOAD ================= */
+
 const uploadVideos = multer({
   storage: videoStorage,
 
   limits: {
-    fileSize: 50 * 1024 * 1024,
+    fileSize: 20 * 1024 * 1024,
   },
 
   fileFilter: (req, file, cb) => {
+
+    console.log("MULTER VIDEO:", file.mimetype);
+
     if (!file.mimetype.startsWith("video/")) {
       return cb(new Error("Only video files are allowed"), false);
     }
