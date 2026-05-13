@@ -3,7 +3,22 @@ const axios = require("axios");
 
 const router = express.Router();
 
-const pool = require("../config/db");
+const db = require("../config/db").promise();
+
+/*
+==================================================
+ TEST ROUTE
+==================================================
+*/
+
+router.get("/send-booking-whatsapp", (req, res) => {
+
+  res.json({
+    success: true,
+    message: "WhatsApp route working"
+  });
+
+});
 
 /*
 ==================================================
@@ -36,10 +51,12 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     */
 
     if (!ownerId) {
+
       return res.status(400).json({
         success: false,
         message: "Owner ID missing"
       });
+
     }
 
     /*
@@ -48,7 +65,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     ==========================================
     */
 
-    const [owners] = await pool.query(
+    const [owners] = await db.query(
       `
       SELECT id, name, phone
       FROM users
@@ -65,6 +82,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
         success: false,
         message: "Owner not found"
       });
+
     }
 
     const owner = owners[0];
@@ -77,6 +95,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
         success: false,
         message: "Owner phone missing"
       });
+
     }
 
     /*
@@ -203,7 +222,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     return res.status(500).json({
       success: false,
       message:
-        error.response?.data ||
+        JSON.stringify(error.response?.data) ||
         error.message
     });
   }
