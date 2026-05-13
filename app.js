@@ -124,6 +124,8 @@ app.use("/api/notifications", safeLoad("./routes/notificationRoutes"));
 app.use("/api/ai", safeLoad("./routes/ai"));
 app.use("/api/ai-call", safeLoad("./routes/aiCallRoutes"));
 
+app.use("/api/social", safeLoad("./routes/socialRoutes"));
+
 
 app.use("/api/settings", safeLoad("./routes/settingsRoutes"));
 
