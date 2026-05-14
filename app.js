@@ -92,8 +92,9 @@
 
   /* ================= CORE ROUTES ================= */
   app.use("/api/auth", safeLoad("./routes/authRoutes"));
+  app.use("/api/nearby-pg", safeLoad("./routes/nearbyPGRoutes"));
   app.use("/api/pg", safeLoad("./routes/pgRoutes"));
-  app.use("/api/pg", safeLoad("./routes/nearbyPGRoutes"));
+  
   app.use("/api/rooms", safeLoad("./routes/roomRoutes"));
   app.use("/api/upload", safeLoad("./routes/uploadRoutes"));
   app.use("/api/bookings", safeLoad("./routes/bookingRoutes"));
