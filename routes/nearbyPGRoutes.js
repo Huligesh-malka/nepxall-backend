@@ -33,7 +33,6 @@ router.get("/nearby", async (req, res) => {
       return res.status(400).json({
 
         success: false,
-
         message:
           "Latitude and longitude required"
 
@@ -64,6 +63,8 @@ router.get("/nearby", async (req, res) => {
 
       WHERE latitude IS NOT NULL
       AND longitude IS NOT NULL
+      AND latitude != ''
+      AND longitude != ''
 
       HAVING distance < ?
 
@@ -132,7 +133,8 @@ router.get("/nearby", async (req, res) => {
             pg.id,
 
           name:
-            pg.pg_name || "Unnamed PG",
+            pg.pg_name ||
+            "Unnamed PG",
 
           address:
             pg.address ||
@@ -146,7 +148,7 @@ router.get("/nearby", async (req, res) => {
             Number(pg.longitude),
 
           distance:
-            pg.distance,
+            Number(pg.distance),
 
           rating:
             pg.rating || null,
@@ -183,46 +185,50 @@ router.get("/nearby", async (req, res) => {
 
     try {
 
-      const googleURL =
-        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=3000&keyword=pg&type=lodging&key=${GOOGLE_API_KEY}`;
+      if (GOOGLE_API_KEY) {
 
-      const googleRes =
-        await axios.get(googleURL);
+        const googleURL =
+          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=3000&keyword=pg&type=lodging&key=${GOOGLE_API_KEY}`;
 
-      googlePGs =
-        (googleRes.data.results || [])
-          .map((place) => ({
+        const googleRes =
+          await axios.get(googleURL);
 
-            id:
-              `google_${place.place_id}`,
+        googlePGs =
+          (googleRes.data.results || [])
+            .map((place) => ({
 
-            name:
-              place.name,
+              id:
+                `google_${place.place_id}`,
 
-            address:
-              place.vicinity,
+              name:
+                place.name,
 
-            rating:
-              place.rating || null,
+              address:
+                place.vicinity,
 
-            latitude:
-              place.geometry.location.lat,
+              rating:
+                place.rating || null,
 
-            longitude:
-              place.geometry.location.lng,
+              latitude:
+                place.geometry.location.lat,
 
-            source:
-              "google",
+              longitude:
+                place.geometry.location.lng,
 
-            image:
-              place.photos?.[0]
-                ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${GOOGLE_API_KEY}`
-                : null,
+              source:
+                "google",
 
-            maps_url:
-              `https://www.google.com/maps/place/?q=place_id:${place.place_id}`
+              image:
+                place.photos?.[0]
+                  ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${GOOGLE_API_KEY}`
+                  : null,
 
-          }));
+              maps_url:
+                `https://www.google.com/maps/place/?q=place_id:${place.place_id}`
+
+            }));
+
+      }
 
     } catch (googleError) {
 
