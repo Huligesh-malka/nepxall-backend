@@ -156,7 +156,7 @@ router.get("/nearby", async (req, res) => {
         */
 
         const googleURL =
-          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&keyword=pg+hostel+coliving&type=lodging&key=${apiKey}`;
+  `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&keyword=pg+hostel+coliving&key=${apiKey}`;
 
         const googleResponse =
           await axios.get(googleURL);
