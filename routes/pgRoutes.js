@@ -1,224 +1,206 @@
 const express = require("express");
-const multer = require("multer");
+const axios = require("axios");
+
 const router = express.Router();
-
-const controller = require("../controllers/pgController");
-const auth = require("../middlewares/authMiddleware");
 const db = require("../db");
-const { checkPlan } = require("../middlewares/planMiddleware");
-const plans = require("../config/plans");
 
-const { uploadPhotos, uploadVideos } = require("../middlewares/upload");
+/*
+=========================================
+GET NEARBY PGS
+=========================================
+*/
 
-/* =================================================
-   HELPER → SAFE JSON PARSE
-================================================= */
-const parseJSON = (data) => {
+router.get("/nearby", async (req, res) => {
+
   try {
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
 
-/* =================================================
-   🔥 PLAN ROUTE (VERY IMPORTANT → KEEP TOP)
-================================================= */
-router.get("/plan", auth, async (req, res) => {
-  try {
-    const userId = req.user.id;
+    const { lat, lng, radius = 5 } = req.query;
 
-    const [[user]] = await db.query(
-      "SELECT plan, plan_expiry FROM users WHERE id=?",
-      [userId]
-    );
-
-    let planName = user.plan || "free";
-
-    if (user.plan_expiry && new Date(user.plan_expiry) < new Date()) {
-      planName = "free";
-    }
-
-    const plan = plans[planName];
-
-    res.json({
-      success: true,
-      name: planName,
-      max_photos_per_pg: plan.photos,
-      max_videos_per_pg: plan.videos,
-      max_listings: plan.listings,
-      expiry_date: user.plan_expiry
-    });
-
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-/* =================================================
-   OWNER ROUTES
-================================================= */
-router.get("/owner/dashboard", auth, controller.getOwnerDashboardPGs);
-
-/* =================================================
-   ADD / UPDATE
-================================================= */
-router.post("/add", auth, uploadPhotos.array("photos", 10), controller.addPG);
-
-router.put("/:id", auth, uploadPhotos.array("photos", 10), controller.updatePG);
-
-/* =================================================
-   UPLOAD PHOTOS
-================================================= */
-router.post("/:id/upload-photos", auth, checkPlan, uploadPhotos.array("photos", 10), async (req, res) => {
-  try {
-    const newPhotos = req.files.map((file) => file.path);
-
-    const [rows] = await db.query(
-      "SELECT photos FROM pgs WHERE id = ?",
-      [req.params.id]
-    );
-
-    const existingPhotos = parseJSON(rows[0]?.photos);
-    const plan = req.plan;
-
-    if (existingPhotos.length + newPhotos.length > plan.photos) {
+    if (!lat || !lng) {
       return res.status(400).json({
         success: false,
-        message: `❌ Your ${req.planName} plan allows only ${plan.photos} photos`
+        message: "Latitude and longitude required"
       });
     }
 
-    const updatedPhotos = [...existingPhotos, ...newPhotos];
+    /*
+    =========================================
+    GET WEBSITE PGS
+    =========================================
+    */
 
-    await db.query(
-      "UPDATE pgs SET photos = ? WHERE id = ?",
-      [JSON.stringify(updatedPhotos), req.params.id]
+    const query = `
+      SELECT *,
+      (
+        6371 * acos(
+          cos(radians(?))
+          * cos(radians(latitude))
+          * cos(radians(longitude) - radians(?))
+          + sin(radians(?))
+          * sin(radians(latitude))
+        )
+      ) AS distance
+      FROM pgs
+      WHERE latitude IS NOT NULL
+      AND longitude IS NOT NULL
+      HAVING distance < ?
+      ORDER BY distance ASC
+      LIMIT 50
+    `;
+
+    const [websitePGs] = await db.query(
+      query,
+      [
+        parseFloat(lat),
+        parseFloat(lng),
+        parseFloat(lat),
+        parseFloat(radius)
+      ]
     );
 
+    /*
+    =========================================
+    GOOGLE MAPS PGS
+    =========================================
+    */
+
+    let googlePGs = [];
+
+    try {
+
+      const apiKey =
+        process.env.GOOGLE_MAPS_API_KEY;
+
+      if (apiKey) {
+
+        const googleURL =
+          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=3000&keyword=pg&type=lodging&key=${apiKey}`;
+
+        const googleResponse =
+          await axios.get(googleURL);
+
+        googlePGs =
+          (googleResponse.data.results || []).map((place) => ({
+
+            id:
+              `google_${place.place_id}`,
+
+            name:
+              place.name,
+
+            address:
+              place.vicinity,
+
+            latitude:
+              place.geometry?.location?.lat,
+
+            longitude:
+              place.geometry?.location?.lng,
+
+            rating:
+              place.rating || null,
+
+            source:
+              "google",
+
+            image:
+              place.photos?.[0]
+                ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+                : null,
+
+            maps_url:
+              `https://www.google.com/maps/place/?q=place_id:${place.place_id}`
+
+          }));
+
+      }
+
+    } catch (googleError) {
+
+      console.log(
+        "Google Maps Error:",
+        googleError.message
+      );
+
+    }
+
+    /*
+    =========================================
+    FORMAT WEBSITE PGS
+    =========================================
+    */
+
+    const formattedWebsitePGs =
+      websitePGs.map((pg) => ({
+
+        ...pg,
+
+        source:
+          "website",
+
+        image:
+          pg.image ||
+          pg.main_image ||
+          null,
+
+        maps_url:
+          `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
+
+      }));
+
+    /*
+    =========================================
+    MERGE BOTH
+    =========================================
+    */
+
+    const allPGs = [
+      ...formattedWebsitePGs,
+      ...googlePGs
+    ];
+
+    /*
+    =========================================
+    RESPONSE
+    =========================================
+    */
+
     res.json({
+
       success: true,
-      message: "Photos uploaded successfully",
-      photos: updatedPhotos,
+
+      website_count:
+        formattedWebsitePGs.length,
+
+      google_count:
+        googlePGs.length,
+
+      total:
+        allPGs.length,
+
+      pgs:
+        allPGs
+
     });
 
   } catch (err) {
-    console.error("UPLOAD PHOTO ERROR:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
-/* =================================================
-   UPDATE PHOTO ORDER
-================================================= */
-router.put("/:id/photos/order", auth, controller.updatePhotoOrder);
-
-/* =================================================
-   DELETE PHOTO
-================================================= */
-router.delete("/:id/photo", auth, controller.deleteSinglePhoto);
-
-/* =================================================
-   VIDEOS
-================================================= */
-router.post("/:id/videos", auth, checkPlan, uploadVideos.array("videos", 5), async (req, res) => {
-  try {
-    const newVideos = req.files.map((file) => file.path);
-
-    const [rows] = await db.query(
-      "SELECT videos FROM pgs WHERE id = ?",
-      [req.params.id]
+    console.log(
+      "Nearby PG Error:",
+      err
     );
 
-    const existingVideos = parseJSON(rows[0]?.videos);
-    const plan = req.plan;
+    res.status(500).json({
 
-    if (existingVideos.length + newVideos.length > plan.videos) {
-      return res.status(400).json({
-        success: false,
-        message: `❌ Your ${req.planName} plan allows only ${plan.videos} videos`
-      });
-    }
-
-    const updatedVideos = [...existingVideos, ...newVideos];
-
-    await db.query(
-      "UPDATE pgs SET videos = ? WHERE id = ?",
-      [JSON.stringify(updatedVideos), req.params.id]
-    );
-
-    res.json({
-      success: true,
-      message: "Videos uploaded successfully",
-      videos: updatedVideos,
-    });
-
-  } catch (err) {
-    console.error("UPLOAD VIDEO ERROR:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.delete("/:id/video", auth, controller.deleteSingleVideo);
-
-/* =================================================
-   STATUS & DELETE
-================================================= */
-router.patch("/:id/status", auth, controller.updatePGStatus);
-
-router.delete("/:id", auth, controller.deletePG);
-
-/* =================================================
-   PUBLIC ROUTES
-================================================= */
-router.get("/nearby/:lat/:lng", controller.getNearbyPGs);
-
-router.get("/search/advanced", controller.advancedSearchPG);
-
-
-router.post("/add-public", controller.addPGPublic);
-
-/* =================================================
-   USER HELPERS
-================================================= */
-router.get("/user/:firebase_uid", auth, controller.getUserByfirebase_uid);
-
-router.get("/user-by-id/:id", auth, async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      "SELECT id, name FROM users WHERE id = ?",
-      [req.params.id]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    res.json(rows[0]);
-  } catch {
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
-/* =================================================
-   🔥 KEEP LAST (VERY IMPORTANT)
-================================================= */
-router.get("/:id", controller.getPGById);
-
-/* =================================================
-   MULTER ERROR HANDLER
-================================================= */
-router.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    return res.status(400).json({
       success: false,
+
       message:
-        err.code === "LIMIT_FILE_SIZE"
-          ? "File too large (max 5MB)"
-          : "File upload error",
+        "Server Error"
+
     });
+
   }
-  next(err);
+
 });
 
 module.exports = router;
