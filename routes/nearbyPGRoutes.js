@@ -16,11 +16,19 @@ router.get("/nearby", async (req, res) => {
 
     const { lat, lng, radius = 5 } = req.query;
 
+    /*
+    =========================================
+    VALIDATION
+    =========================================
+    */
+
     if (!lat || !lng) {
+
       return res.status(400).json({
         success: false,
         message: "Latitude and longitude required"
       });
+
     }
 
     /*
@@ -60,6 +68,74 @@ router.get("/nearby", async (req, res) => {
 
     /*
     =========================================
+    FORMAT WEBSITE PGS
+    =========================================
+    */
+
+    const formattedWebsitePGs =
+      websitePGs.map((pg) => ({
+
+        id:
+          pg.id,
+
+        pg_name:
+          pg.pg_name || pg.name,
+
+        name:
+          pg.pg_name || pg.name,
+
+        address:
+          pg.address || pg.location || "",
+
+        latitude:
+          Number(pg.latitude),
+
+        longitude:
+          Number(pg.longitude),
+
+        price:
+          pg.price || pg.rent_amount || 0,
+
+        rating:
+          pg.rating || 0,
+
+        distance:
+          pg.distance,
+
+        phone:
+          pg.phone || "",
+
+        source:
+          "website",
+
+        image:
+          pg.image ||
+          pg.main_image ||
+          (
+            pg.photos
+              ? (
+                  (() => {
+                    try {
+                      const parsed =
+                        JSON.parse(pg.photos);
+
+                      return parsed?.[0] || null;
+
+                    } catch {
+                      return null;
+                    }
+                  })()
+                )
+              : null
+          ),
+
+        maps_url:
+          `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
+
+      }));
+
+    /*
+    =========================================
     GOOGLE MAPS PGS
     =========================================
     */
@@ -73,17 +149,32 @@ router.get("/nearby", async (req, res) => {
 
       if (apiKey) {
 
+        /*
+        =========================================
+        BETTER GOOGLE SEARCH
+        =========================================
+        */
+
         const googleURL =
-          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=3000&keyword=pg&type=lodging&key=${apiKey}`;
+          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&keyword=pg+hostel+coliving&type=lodging&key=${apiKey}`;
 
         const googleResponse =
           await axios.get(googleURL);
 
+        console.log(
+          "Google Results:",
+          googleResponse.data.results?.length
+        );
+
         googlePGs =
-          (googleResponse.data.results || []).map((place) => ({
+          (googleResponse.data.results || [])
+          .map((place) => ({
 
             id:
               `google_${place.place_id}`,
+
+            pg_name:
+              place.name,
 
             name:
               place.name,
@@ -98,7 +189,13 @@ router.get("/nearby", async (req, res) => {
               place.geometry?.location?.lng,
 
             rating:
-              place.rating || null,
+              place.rating || 0,
+
+            distance:
+              null,
+
+            phone:
+              "",
 
             source:
               "google",
@@ -106,12 +203,17 @@ router.get("/nearby", async (req, res) => {
             image:
               place.photos?.[0]
                 ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-                : null,
+                : "https://via.placeholder.com/400x250?text=Nearby+PG",
 
             maps_url:
               `https://www.google.com/maps/place/?q=place_id:${place.place_id}`
 
-          }));
+          }))
+          .filter(
+            (pg) =>
+              pg.latitude &&
+              pg.longitude
+          );
 
       }
 
@@ -126,38 +228,31 @@ router.get("/nearby", async (req, res) => {
 
     /*
     =========================================
-    FORMAT WEBSITE PGS
+    REMOVE DUPLICATES
     =========================================
     */
 
-    const formattedWebsitePGs =
-      websitePGs.map((pg) => ({
+    const uniquePGs = [];
 
-        ...pg,
+    const seenNames = new Set();
 
-        source:
-          "website",
+    [...formattedWebsitePGs, ...googlePGs]
+      .forEach((pg) => {
 
-        image:
-          pg.image ||
-          pg.main_image ||
-          null,
+        const name =
+          (pg.name || "")
+          .toLowerCase()
+          .trim();
 
-        maps_url:
-          `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
+        if (!seenNames.has(name)) {
 
-      }));
+          seenNames.add(name);
 
-    /*
-    =========================================
-    MERGE BOTH
-    =========================================
-    */
+          uniquePGs.push(pg);
 
-    const allPGs = [
-      ...formattedWebsitePGs,
-      ...googlePGs
-    ];
+        }
+
+      });
 
     /*
     =========================================
@@ -176,10 +271,10 @@ router.get("/nearby", async (req, res) => {
         googlePGs.length,
 
       total:
-        allPGs.length,
+        uniquePGs.length,
 
       pgs:
-        allPGs
+        uniquePGs
 
     });
 
