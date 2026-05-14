@@ -76,15 +76,20 @@ router.get("/nearby", async (req, res) => {
 
     if (apiKey) {
       try {
-        // Updated URL with better keywords for PG searches
-        const googleURL = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius * 1000}&keyword=pg+hostel+paying+guest&type=lodging&key=${apiKey}`;
+        // FIX: Google radius is in METERS. radius 5 -> 5000 meters.
+        const radiusMeters = parseFloat(radius) * 1000;
+        
+        const googleURL = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=pg+hostel+paying+guest&type=lodging&key=${apiKey}`;
 
         const googleResponse = await axios.get(googleURL);
         
-        // Log status to help debugging
-        console.log("Google API Status:", googleResponse.data.status);
+        // CRITICAL LOGGING: This helps you see why it's denied
+        console.log("Google API Response Status:", googleResponse.data.status);
+        if (googleResponse.data.error_message) {
+            console.error("Google API Error Message:", googleResponse.data.error_message);
+        }
 
-        if (googleResponse.data.results) {
+        if (googleResponse.data.status === "OK" && googleResponse.data.results) {
           googlePGs = googleResponse.data.results.map((place) => ({
             id: `google_${place.place_id}`,
             pg_name: place.name,
@@ -93,20 +98,20 @@ router.get("/nearby", async (req, res) => {
             latitude: place.geometry?.location?.lat,
             longitude: place.geometry?.location?.lng,
             rating: place.rating || 0,
-            distance: null, // Google Nearby Search doesn't return distance directly
+            distance: null, 
             phone: "",
             source: "google",
             image: place.photos?.[0]
               ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
               : "https://via.placeholder.com/400x250?text=Nearby+PG",
-            maps_url: `https://www.google.com/maps/search/?api=1&query=query_place_id:${place.place_id}`
+            maps_url: `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
           }));
         }
       } catch (googleError) {
-        console.error("Google Maps API Error:", googleError.message);
+        console.error("Axios Google Request Failed:", googleError.message);
       }
     } else {
-      console.warn("GOOGLE_MAPS_API_KEY not found in environment variables.");
+      console.warn("⚠️ GOOGLE_MAPS_API_KEY is missing in Render/Env variables!");
     }
 
     /*
@@ -120,7 +125,6 @@ router.get("/nearby", async (req, res) => {
 
     allResults.forEach((pg) => {
       const cleanName = (pg.name || "").toLowerCase().trim();
-      // Only add if we haven't seen this name yet
       if (!seenNames.has(cleanName)) {
         seenNames.add(cleanName);
         uniquePGs.push(pg);
