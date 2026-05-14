@@ -6,6 +6,39 @@ const db = require("../db");
 
 /*
 =========================================
+GET PLACE PHONE NUMBER
+=========================================
+*/
+
+const getGooglePlacePhone = async (placeId, apiKey) => {
+
+  try {
+
+    const detailsURL =
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_phone_number&key=${apiKey}`;
+
+    const response =
+      await axios.get(detailsURL);
+
+    return (
+      response.data?.result?.formatted_phone_number || ""
+    );
+
+  } catch (error) {
+
+    console.log(
+      "Phone Fetch Error:",
+      error.message
+    );
+
+    return "";
+
+  }
+
+};
+
+/*
+=========================================
 GET NEARBY PROPERTIES
 =========================================
 */
@@ -163,29 +196,17 @@ router.get("/nearby", async (req, res) => {
         const keywords = [
 
           "pg",
-
           "coliving",
-
           "hostel",
-
           "boys pg",
-
           "girls pg",
-
           "paying guest",
-
           "rental house",
-
           "to let",
-
           "1 bhk",
-
           "2 bhk",
-
           "apartment",
-
           "flat rent",
-
           "room rent"
 
         ];
@@ -215,57 +236,86 @@ router.get("/nearby", async (req, res) => {
 
             ) {
 
+              /*
+              =========================================
+              GET PHONE NUMBERS
+              =========================================
+              */
+
               const results =
-                googleResponse.data.results.map((place) => ({
+                await Promise.all(
 
-                  id:
-                    `google_${place.place_id}`,
+                  googleResponse.data.results.map(async (place) => {
 
-                  pg_name:
-                    place.name,
+                    /*
+                    =========================================
+                    FETCH PHONE NUMBER
+                    =========================================
+                    */
 
-                  name:
-                    place.name,
+                    const phone =
+                      await getGooglePlacePhone(
+                        place.place_id,
+                        apiKey
+                      );
 
-                  address:
-                    place.vicinity,
+                    return {
 
-                  latitude:
-                    place.geometry?.location?.lat,
+                      id:
+                        `google_${place.place_id}`,
 
-                  longitude:
-                    place.geometry?.location?.lng,
+                      place_id:
+                        place.place_id,
 
-                  rating:
-                    place.rating || 0,
+                      pg_name:
+                        place.name,
 
-                  distance:
-                    null,
+                      name:
+                        place.name,
 
-                  phone:
-                    "",
+                      address:
+                        place.vicinity,
 
-                  source:
-                    "google",
+                      latitude:
+                        place.geometry?.location?.lat,
 
-                  property_type:
-                    keyword,
+                      longitude:
+                        place.geometry?.location?.lng,
 
-                  image:
-                    place.photos?.[0]
+                      rating:
+                        place.rating || 0,
 
-                      ?
+                      distance:
+                        null,
 
-                      `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+                      phone:
+                        phone,
 
-                      :
+                      source:
+                        "google",
 
-                      "https://via.placeholder.com/400x250?text=Nearby+Property",
+                      property_type:
+                        keyword,
 
-                  maps_url:
-                    `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
+                      image:
+                        place.photos?.[0]
 
-                }));
+                          ?
+
+                          `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+
+                          :
+
+                          "https://via.placeholder.com/400x250?text=Nearby+Property",
+
+                      maps_url:
+                        `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
+
+                    };
+
+                  })
+
+                );
 
               googleProperties.push(...results);
 
@@ -309,7 +359,6 @@ router.get("/nearby", async (req, res) => {
     const allResults = [
 
       ...formattedWebsitePGs,
-
       ...googleProperties
 
     ];
