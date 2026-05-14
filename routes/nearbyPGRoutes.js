@@ -1,29 +1,48 @@
 const express = require("express");
 const axios = require("axios");
+
 const router = express.Router();
 const db = require("../db");
 
 /*
 =========================================
-GET NEARBY PGS
+GET NEARBY PROPERTIES
 =========================================
 */
+
 router.get("/nearby", async (req, res) => {
+
   try {
-    const { lat, lng, radius = 5 } = req.query;
+
+    const {
+      lat,
+      lng,
+      radius = 5
+    } = req.query;
+
+    /*
+    =========================================
+    VALIDATION
+    =========================================
+    */
 
     if (!lat || !lng) {
+
       return res.status(400).json({
+
         success: false,
         message: "Latitude and longitude required"
+
       });
+
     }
 
     /*
     =========================================
-    1. GET WEBSITE PGS (SQL)
+    SQL WEBSITE PGS
     =========================================
     */
+
     const query = `
       SELECT *,
       (
@@ -40,117 +59,331 @@ router.get("/nearby", async (req, res) => {
       AND longitude IS NOT NULL
       HAVING distance < ?
       ORDER BY distance ASC
-      LIMIT 50
+      LIMIT 100
     `;
 
-    const [websitePGs] = await db.query(query, [
-      parseFloat(lat),
-      parseFloat(lng),
-      parseFloat(lat),
-      parseFloat(radius)
-    ]);
+    const [websitePGs] =
+      await db.query(query, [
 
-    const formattedWebsitePGs = websitePGs.map((pg) => ({
-      id: pg.id,
-      pg_name: pg.pg_name || pg.name,
-      name: pg.pg_name || pg.name,
-      address: pg.address || pg.location || "",
-      latitude: Number(pg.latitude),
-      longitude: Number(pg.longitude),
-      price: pg.price || pg.rent_amount || 0,
-      rating: pg.rating || 0,
-      distance: pg.distance,
-      phone: pg.phone || "",
-      source: "website",
-      image: pg.image || pg.main_image || (pg.photos ? JSON.parse(pg.photos)[0] : null),
-      maps_url: `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
-    }));
+        parseFloat(lat),
+        parseFloat(lng),
+        parseFloat(lat),
+        parseFloat(radius)
+
+      ]);
 
     /*
     =========================================
-    2. GOOGLE MAPS PGS (API)
+    FORMAT WEBSITE PGS
     =========================================
     */
-    let googlePGs = [];
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
+    const formattedWebsitePGs =
+      websitePGs.map((pg) => ({
+
+        id:
+          pg.id,
+
+        pg_name:
+          pg.pg_name || pg.name,
+
+        name:
+          pg.pg_name || pg.name,
+
+        address:
+          pg.address ||
+          pg.location ||
+          "",
+
+        latitude:
+          Number(pg.latitude),
+
+        longitude:
+          Number(pg.longitude),
+
+        price:
+          pg.price ||
+          pg.rent_amount ||
+          0,
+
+        rating:
+          pg.rating || 0,
+
+        distance:
+          Number(pg.distance).toFixed(1),
+
+        phone:
+          pg.phone || "",
+
+        source:
+          "website",
+
+        property_type:
+          pg.property_type ||
+          "PG",
+
+        image:
+          pg.image ||
+          pg.main_image ||
+          (
+            pg.photos
+              ? JSON.parse(pg.photos)[0]
+              : "https://via.placeholder.com/400x250?text=Nepxall+Property"
+          ),
+
+        maps_url:
+          `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
+
+      }));
+
+    /*
+    =========================================
+    GOOGLE MAPS API
+    =========================================
+    */
+
+    let googleProperties = [];
+
+    const apiKey =
+      process.env.GOOGLE_MAPS_API_KEY;
 
     if (apiKey) {
+
       try {
-        // FIX: Google radius is in METERS. radius 5 -> 5000 meters.
-        const radiusMeters = parseFloat(radius) * 1000;
-        
-        const googleURL = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=pg+hostel+paying+guest&type=lodging&key=${apiKey}`;
 
-        const googleResponse = await axios.get(googleURL);
-        
-        // CRITICAL LOGGING: This helps you see why it's denied
-        console.log("Google API Response Status:", googleResponse.data.status);
-        if (googleResponse.data.error_message) {
-            console.error("Google API Error Message:", googleResponse.data.error_message);
+        const radiusMeters =
+          parseFloat(radius) * 1000;
+
+        /*
+        =========================================
+        SEARCH KEYWORDS
+        =========================================
+        */
+
+        const keywords = [
+
+          "pg",
+
+          "coliving",
+
+          "hostel",
+
+          "boys pg",
+
+          "girls pg",
+
+          "paying guest",
+
+          "rental house",
+
+          "to let",
+
+          "1 bhk",
+
+          "2 bhk",
+
+          "apartment",
+
+          "flat rent",
+
+          "room rent"
+
+        ];
+
+        for (const keyword of keywords) {
+
+          try {
+
+            const googleURL =
+              `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=${encodeURIComponent(keyword)}&key=${apiKey}`;
+
+            const googleResponse =
+              await axios.get(googleURL);
+
+            console.log(
+              `Google Search: ${keyword}`,
+              googleResponse.data.status
+            );
+
+            if (
+
+              googleResponse.data.status === "OK"
+
+              &&
+
+              googleResponse.data.results
+
+            ) {
+
+              const results =
+                googleResponse.data.results.map((place) => ({
+
+                  id:
+                    `google_${place.place_id}`,
+
+                  pg_name:
+                    place.name,
+
+                  name:
+                    place.name,
+
+                  address:
+                    place.vicinity,
+
+                  latitude:
+                    place.geometry?.location?.lat,
+
+                  longitude:
+                    place.geometry?.location?.lng,
+
+                  rating:
+                    place.rating || 0,
+
+                  distance:
+                    null,
+
+                  phone:
+                    "",
+
+                  source:
+                    "google",
+
+                  property_type:
+                    keyword,
+
+                  image:
+                    place.photos?.[0]
+
+                      ?
+
+                      `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+
+                      :
+
+                      "https://via.placeholder.com/400x250?text=Nearby+Property",
+
+                  maps_url:
+                    `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
+
+                }));
+
+              googleProperties.push(...results);
+
+            }
+
+          } catch (keywordError) {
+
+            console.log(
+              "Keyword Search Error:",
+              keyword,
+              keywordError.message
+            );
+
+          }
+
         }
 
-        if (googleResponse.data.status === "OK" && googleResponse.data.results) {
-          googlePGs = googleResponse.data.results.map((place) => ({
-            id: `google_${place.place_id}`,
-            pg_name: place.name,
-            name: place.name,
-            address: place.vicinity,
-            latitude: place.geometry?.location?.lat,
-            longitude: place.geometry?.location?.lng,
-            rating: place.rating || 0,
-            distance: null, 
-            phone: "",
-            source: "google",
-            image: place.photos?.[0]
-              ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-              : "https://via.placeholder.com/400x250?text=Nearby+PG",
-            maps_url: `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
-          }));
-        }
       } catch (googleError) {
-        console.error("Axios Google Request Failed:", googleError.message);
+
+        console.log(
+          "Google Maps Error:",
+          googleError.message
+        );
+
       }
+
     } else {
-      console.warn("⚠️ GOOGLE_MAPS_API_KEY is missing in Render/Env variables!");
+
+      console.log(
+        "GOOGLE_MAPS_API_KEY missing"
+      );
+
     }
 
     /*
     =========================================
-    3. MERGE & REMOVE DUPLICATES
+    MERGE ALL RESULTS
     =========================================
     */
-    const allResults = [...formattedWebsitePGs, ...googlePGs];
-    const uniquePGs = [];
-    const seenNames = new Set();
 
-    allResults.forEach((pg) => {
-      const cleanName = (pg.name || "").toLowerCase().trim();
-      if (!seenNames.has(cleanName)) {
-        seenNames.add(cleanName);
-        uniquePGs.push(pg);
+    const allResults = [
+
+      ...formattedWebsitePGs,
+
+      ...googleProperties
+
+    ];
+
+    /*
+    =========================================
+    REMOVE DUPLICATES
+    =========================================
+    */
+
+    const uniqueProperties = [];
+
+    const seen = new Set();
+
+    allResults.forEach((property) => {
+
+      const uniqueKey =
+
+        `${property.name}_${property.address}`
+          .toLowerCase()
+          .trim();
+
+      if (!seen.has(uniqueKey)) {
+
+        seen.add(uniqueKey);
+
+        uniqueProperties.push(property);
+
       }
+
     });
 
     /*
     =========================================
-    4. RESPONSE
+    RESPONSE
     =========================================
     */
+
     res.json({
+
       success: true,
-      website_count: formattedWebsitePGs.length,
-      google_count: googlePGs.length,
-      total: uniquePGs.length,
-      pgs: uniquePGs
+
+      website_count:
+        formattedWebsitePGs.length,
+
+      google_count:
+        googleProperties.length,
+
+      total:
+        uniqueProperties.length,
+
+      pgs:
+        uniqueProperties
+
     });
 
   } catch (err) {
-    console.error("Nearby PG Global Error:", err);
+
+    console.log(
+      "Nearby Property Error:",
+      err
+    );
+
     res.status(500).json({
+
       success: false,
-      message: "Internal Server Error"
+
+      message:
+        "Internal Server Error"
+
     });
+
   }
+
 });
 
 module.exports = router;
