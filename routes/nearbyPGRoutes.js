@@ -381,16 +381,24 @@ router.post("/google-link-search", async (req, res) => {
 
     try {
 
-      const response =
-        await axios.get(url);
+      const response = await axios.get(url, {
+
+        maxRedirects: 5
+
+      });
 
       finalURL =
         response.request?.res?.responseUrl || url;
 
+      console.log(
+        "Expanded URL:",
+        finalURL
+      );
+
     } catch (error) {
 
       console.log(
-        "URL Expand Error:",
+        "Expand Error:",
         error.message
       );
 
@@ -398,39 +406,106 @@ router.post("/google-link-search", async (req, res) => {
 
     /*
     =========================================
-    EXTRACT PLACE ID
+    GET PLACE DETAILS FROM URL
     =========================================
     */
 
-    const match =
-      finalURL.match(/place_id=([^&]+)/);
-
     let placeId = "";
 
-    if (match && match[1]) {
+    /*
+    =========================================
+    TRY PLACE_ID FROM URL
+    =========================================
+    */
 
-      placeId = match[1];
+    const placeIdMatch =
+      finalURL.match(/place_id=([^&]+)/);
+
+    if (
+      placeIdMatch &&
+      placeIdMatch[1]
+    ) {
+
+      placeId =
+        placeIdMatch[1];
 
     }
 
     /*
     =========================================
-    FIND PLACE ID USING FINDPLACE
+    TRY TEXT SEARCH
     =========================================
     */
 
     if (!placeId) {
 
-      const findURL =
-        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(finalURL)}&inputtype=textquery&fields=place_id&key=${apiKey}`;
+      try {
 
-      const findResponse =
-        await axios.get(findURL);
+        const textSearchURL =
+          `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(finalURL)}&key=${apiKey}`;
 
-      placeId =
-        findResponse.data?.candidates?.[0]?.place_id || "";
+        const textSearchResponse =
+          await axios.get(textSearchURL);
+
+        placeId =
+          textSearchResponse.data?.results?.[0]?.place_id || "";
+
+        console.log(
+          "Text Search Place ID:",
+          placeId
+        );
+
+      } catch (error) {
+
+        console.log(
+          "Text Search Error:",
+          error.message
+        );
+
+      }
 
     }
+
+    /*
+    =========================================
+    FALLBACK FINDPLACE
+    =========================================
+    */
+
+    if (!placeId) {
+
+      try {
+
+        const findURL =
+          `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(finalURL)}&inputtype=textquery&fields=place_id&key=${apiKey}`;
+
+        const findResponse =
+          await axios.get(findURL);
+
+        placeId =
+          findResponse.data?.candidates?.[0]?.place_id || "";
+
+        console.log(
+          "FindPlace ID:",
+          placeId
+        );
+
+      } catch (error) {
+
+        console.log(
+          "FindPlace Error:",
+          error.message
+        );
+
+      }
+
+    }
+
+    /*
+    =========================================
+    NOT FOUND
+    =========================================
+    */
 
     if (!placeId) {
 
@@ -554,7 +629,11 @@ router.post("/google-link-search", async (req, res) => {
 
     console.log(
       "Google Link Search Error:",
-      error
+      error.message
+    );
+
+    console.log(
+      error.response?.data
     );
 
     res.status(500).json({
@@ -567,6 +646,7 @@ router.post("/google-link-search", async (req, res) => {
   }
 
 });
+
 router.post("/accept-google-property", async (req, res) => {
 
   try {
