@@ -450,6 +450,11 @@ ACCEPT GOOGLE PROPERTY
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
@@ -470,7 +475,7 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    CHECK EXISTING PROPERTY
+    CHECK PROPERTY EXISTS
     =========================================
     */
 
@@ -504,7 +509,7 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    PHOTOS ARRAY
+    PHOTOS
     =========================================
     */
 
@@ -518,16 +523,173 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
+    AUTO CREATE / FIND OWNER
+    =========================================
+    */
+
+    let ownerId = null;
+
+    if (property.phone) {
+
+      /*
+      =========================================
+      CHECK EXISTING USER
+      =========================================
+      */
+
+      const [existingUser] = await db.query(
+
+        `
+        SELECT id
+        FROM users
+        WHERE phone = ?
+        LIMIT 1
+        `,
+
+        [property.phone]
+
+      );
+
+      /*
+      =========================================
+      USER EXISTS
+      =========================================
+      */
+
+      if (existingUser.length > 0) {
+
+        ownerId = existingUser[0].id;
+
+      }
+
+      else {
+
+        /*
+        =========================================
+        CREATE OWNER USER
+        =========================================
+        */
+
+        const [newUser] = await db.query(
+
+          `
+          INSERT INTO users
+          (
+
+            name,
+            phone,
+            role,
+            mobile_verified,
+            owner_verification_status,
+            pg_address,
+            area,
+            latitude,
+            longitude
+
+          )
+
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+
+          [
+
+            property.pg_name || property.name,
+
+            property.phone || "",
+
+            "owner",
+
+            1,
+
+            "verified",
+
+            property.address || "",
+
+            property.address || "",
+
+            property.latitude || null,
+
+            property.longitude || null
+
+          ]
+
+        );
+
+        ownerId = newUser.insertId;
+
+      }
+
+    }
+
+    /*
+    =========================================
+    DETECT CATEGORY
+    =========================================
+    */
+
+    let pgCategory = "pg";
+
+    if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("coliving")
+
+    ) {
+
+      pgCategory = "coliving";
+
+    }
+
+    if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("to let")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("1 bhk")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("2 bhk")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("flat")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("apartment")
+
+    ) {
+
+      pgCategory = "to_let";
+
+    }
+
+    /*
+    =========================================
     INSERT PROPERTY
     =========================================
     */
 
-    await db.query(
+    const [savedProperty] = await db.query(
 
       `
       INSERT INTO pgs
       (
 
+        owner_id,
         pg_name,
         location,
         address,
@@ -546,10 +708,12 @@ router.post("/accept-google-property", async (req, res) => {
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
 
       [
+
+        ownerId,
 
         property.pg_name || property.name,
 
@@ -565,7 +729,7 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.phone || "",
 
-        "pg",
+        pgCategory,
 
         property.address || "",
 
@@ -592,7 +756,15 @@ router.post("/accept-google-property", async (req, res) => {
     res.json({
 
       success: true,
-      message: "Property Stored Successfully"
+
+      property_id:
+        savedProperty.insertId,
+
+      owner_id:
+        ownerId,
+
+      message:
+        "Property Stored Successfully"
 
     });
 
@@ -607,6 +779,7 @@ router.post("/accept-google-property", async (req, res) => {
 
       success: false,
       message: "Internal Server Error"
+
     });
 
   }
