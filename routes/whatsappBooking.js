@@ -171,7 +171,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
           template: {
 
-            name: "booking_notification",
+            name: "booking_notification_v2",
 
             language: {
               code: "en",
