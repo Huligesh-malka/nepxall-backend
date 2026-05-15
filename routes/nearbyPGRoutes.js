@@ -335,6 +335,238 @@ router.get("/google-search", async (req, res) => {
   }
 
 });  
+
+
+
+
+/*
+=========================================
+SEARCH GOOGLE MAPS LINK
+=========================================
+*/
+
+router.post("/google-link-search", async (req, res) => {
+
+  try {
+
+    const { url } = req.body;
+
+    if (!url) {
+
+      return res.status(400).json({
+
+        success: false,
+        message: "Google Maps URL required"
+
+      });
+
+    }
+
+    /*
+    =========================================
+    API KEY
+    =========================================
+    */
+
+    const apiKey =
+      process.env.GOOGLE_MAPS_API_KEY;
+
+    /*
+    =========================================
+    EXPAND SHORT URL
+    =========================================
+    */
+
+    let finalURL = url;
+
+    try {
+
+      const response =
+        await axios.get(url);
+
+      finalURL =
+        response.request?.res?.responseUrl || url;
+
+    } catch (error) {
+
+      console.log(
+        "URL Expand Error:",
+        error.message
+      );
+
+    }
+
+    /*
+    =========================================
+    EXTRACT PLACE ID
+    =========================================
+    */
+
+    const match =
+      finalURL.match(/place_id=([^&]+)/);
+
+    let placeId = "";
+
+    if (match && match[1]) {
+
+      placeId = match[1];
+
+    }
+
+    /*
+    =========================================
+    FIND PLACE ID USING FINDPLACE
+    =========================================
+    */
+
+    if (!placeId) {
+
+      const findURL =
+        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(finalURL)}&inputtype=textquery&fields=place_id&key=${apiKey}`;
+
+      const findResponse =
+        await axios.get(findURL);
+
+      placeId =
+        findResponse.data?.candidates?.[0]?.place_id || "";
+
+    }
+
+    if (!placeId) {
+
+      return res.status(404).json({
+
+        success: false,
+        message: "Place ID Not Found"
+
+      });
+
+    }
+
+    /*
+    =========================================
+    GET DETAILS
+    =========================================
+    */
+
+    const details =
+      await getGooglePlaceDetails(
+        placeId,
+        apiKey
+      );
+
+    /*
+    =========================================
+    GET PLACE DETAILS API
+    =========================================
+    */
+
+    const detailsURL =
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,photos,formatted_phone_number,rating,website&key=${apiKey}`;
+
+    const detailsResponse =
+      await axios.get(detailsURL);
+
+    const place =
+      detailsResponse.data.result;
+
+    /*
+    =========================================
+    PHOTOS
+    =========================================
+    */
+
+    let allPhotos = [];
+
+    if (
+      place.photos &&
+      Array.isArray(place.photos)
+    ) {
+
+      allPhotos =
+        place.photos.map((photo) => (
+
+          `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${photo.photo_reference}&key=${apiKey}`
+
+        ));
+
+    }
+
+    /*
+    =========================================
+    RESPONSE
+    =========================================
+    */
+
+    res.json({
+
+      success: true,
+
+      property: {
+
+        id:
+          `google_${placeId}`,
+
+        place_id:
+          placeId,
+
+        pg_name:
+          place.name,
+
+        name:
+          place.name,
+
+        address:
+          place.formatted_address,
+
+        latitude:
+          place.geometry?.location?.lat,
+
+        longitude:
+          place.geometry?.location?.lng,
+
+        rating:
+          place.rating || 0,
+
+        phone:
+          place.formatted_phone_number || "",
+
+        website:
+          place.website || "",
+
+        source:
+          "google",
+
+        image:
+          allPhotos[0] || "",
+
+        photos:
+          allPhotos,
+
+        maps_url:
+          finalURL
+
+      }
+
+    });
+
+  } catch (error) {
+
+    console.log(
+      "Google Link Search Error:",
+      error
+    );
+
+    res.status(500).json({
+
+      success: false,
+      message: "Internal Server Error"
+
+    });
+
+  }
+
+});
 router.post("/accept-google-property", async (req, res) => {
 
   try {
