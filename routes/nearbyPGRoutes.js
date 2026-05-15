@@ -238,7 +238,7 @@ router.get("/nearby", async (req, res) => {
 
               /*
               =========================================
-              GET PHONE NUMBERS
+              GET PHONE NUMBERS & ALL PHOTOS
               =========================================
               */
 
@@ -258,6 +258,29 @@ router.get("/nearby", async (req, res) => {
                         place.place_id,
                         apiKey
                       );
+
+                    /*
+                    =========================================
+                    ALL GOOGLE PHOTOS
+                    =========================================
+                    */
+
+                    let allPhotos = [];
+
+                    if (
+                      place.photos &&
+                      Array.isArray(place.photos)
+                    ) {
+
+                      allPhotos = place.photos.map(
+                        (photo) => {
+
+                          return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${photo.photo_reference}&key=${apiKey}`;
+
+                        }
+                      );
+
+                    }
 
                     return {
 
@@ -297,16 +320,25 @@ router.get("/nearby", async (req, res) => {
                       property_type:
                         keyword,
 
+                      /*
+                      =========================================
+                      MAIN IMAGE
+                      =========================================
+                      */
+
                       image:
-                        place.photos?.[0]
+                        allPhotos.length > 0
+                          ? allPhotos[0]
+                          : "https://via.placeholder.com/400x250?text=Nearby+Property",
 
-                          ?
+                      /*
+                      =========================================
+                      ALL PHOTOS
+                      =========================================
+                      */
 
-                          `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-
-                          :
-
-                          "https://via.placeholder.com/400x250?text=Nearby+Property",
+                      photos:
+                        allPhotos,
 
                       maps_url:
                         `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
@@ -494,13 +526,22 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    PHOTOS
+    SAVE ALL PHOTOS
     =========================================
     */
 
     let photos = [];
 
-    if (property.image) {
+    if (
+      property.photos &&
+      Array.isArray(property.photos)
+    ) {
+
+      photos = property.photos;
+
+    }
+
+    else if (property.image) {
 
       photos.push(property.image);
 
