@@ -146,7 +146,7 @@ router.get("/nearby", async (req, res) => {
           Number(pg.distance).toFixed(1),
 
         phone:
-          pg.phone || "",
+          pg.contact_phone || "",
 
         source:
           "website",
@@ -435,36 +435,6 @@ router.get("/nearby", async (req, res) => {
 
 });
 
-
-
-
-
-
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
 /*
 =========================================
 ACCEPT GOOGLE PROPERTY
@@ -756,6 +726,15 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
+    GENERATE PG CODE
+    =========================================
+    */
+
+    const pgCode =
+      `PG${Date.now()}`;
+
+    /*
+    =========================================
     INSERT PROPERTY
     =========================================
     */
@@ -767,6 +746,7 @@ router.post("/accept-google-property", async (req, res) => {
       (
 
         owner_id,
+        pg_code,
         pg_name,
         location,
         address,
@@ -785,12 +765,20 @@ router.post("/accept-google-property", async (req, res) => {
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
 
       [
 
         ownerId,
+
+        /*
+        =========================================
+        AUTO GENERATED PG CODE
+        =========================================
+        */
+
+        pgCode,
 
         property.pg_name || property.name,
 
@@ -865,6 +853,9 @@ router.post("/accept-google-property", async (req, res) => {
 
       owner_id:
         ownerId,
+
+      pg_code:
+        pgCode,
 
       status:
         "pending",
