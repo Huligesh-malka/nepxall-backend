@@ -71,21 +71,19 @@ const getGooglePlaceDetails = async (
 
 };
 
+
+
 /*
 =========================================
-GET NEARBY PROPERTIES
+GOOGLE SEARCH PROPERTIES
 =========================================
 */
 
-router.get("/nearby", async (req, res) => {
+router.get("/google-search", async (req, res) => {
 
   try {
 
-    const {
-      lat,
-      lng,
-      radius = 5
-    } = req.query;
+    const { query } = req.query;
 
     /*
     =========================================
@@ -93,12 +91,12 @@ router.get("/nearby", async (req, res) => {
     =========================================
     */
 
-    if (!lat || !lng) {
+    if (!query) {
 
       return res.status(400).json({
 
         success: false,
-        message: "Latitude and longitude required"
+        message: "Search query required"
 
       });
 
@@ -106,347 +104,173 @@ router.get("/nearby", async (req, res) => {
 
     /*
     =========================================
-    SQL WEBSITE PGS
-    =========================================
-    */
-
-    const query = `
-      SELECT *,
-      (
-        6371 * acos(
-          cos(radians(?))
-          * cos(radians(latitude))
-          * cos(radians(longitude) - radians(?))
-          + sin(radians(?))
-          * sin(radians(latitude))
-        )
-      ) AS distance
-      FROM pgs
-      WHERE latitude IS NOT NULL
-      AND longitude IS NOT NULL
-      HAVING distance < ?
-      ORDER BY distance ASC
-      LIMIT 100
-    `;
-
-    const [websitePGs] =
-      await db.query(query, [
-
-        parseFloat(lat),
-        parseFloat(lng),
-        parseFloat(lat),
-        parseFloat(radius)
-
-      ]);
-
-    /*
-    =========================================
-    FORMAT WEBSITE PGS
-    =========================================
-    */
-
-    const formattedWebsitePGs =
-      websitePGs.map((pg) => ({
-
-        id:
-          pg.id,
-
-        pg_name:
-          pg.pg_name || pg.name,
-
-        name:
-          pg.pg_name || pg.name,
-
-        address:
-          pg.address ||
-          pg.location ||
-          "",
-
-        latitude:
-          Number(pg.latitude),
-
-        longitude:
-          Number(pg.longitude),
-
-        price:
-          pg.price ||
-          pg.rent_amount ||
-          0,
-
-        rating:
-          pg.rating || 0,
-
-        distance:
-          Number(pg.distance).toFixed(1),
-
-        phone:
-          pg.contact_phone || "",
-
-        source:
-          "website",
-
-        property_type:
-          pg.property_type ||
-          "PG",
-
-        image:
-          pg.image ||
-          pg.main_image ||
-          (
-            pg.photos
-              ? JSON.parse(pg.photos)[0]
-              : "https://via.placeholder.com/400x250?text=Nepxall+Property"
-          ),
-
-        maps_url:
-          `https://www.google.com/maps/search/?api=1&query=${pg.latitude},${pg.longitude}`
-
-      }));
-
-    /*
-    =========================================
     GOOGLE MAPS API
     =========================================
     */
 
-    let googleProperties = [];
-
     const apiKey =
       process.env.GOOGLE_MAPS_API_KEY;
 
-    if (apiKey) {
+    if (!apiKey) {
 
-      try {
+      return res.status(500).json({
 
-        const radiusMeters =
-          parseFloat(radius) * 1000;
+        success: false,
+        message: "Google API Key Missing"
 
-        /*
-        =========================================
-        SEARCH KEYWORDS
-        =========================================
-        */
-
-        const keywords = [
-
-          "pg",
-          "coliving",
-          "hostel",
-          "boys pg",
-          "girls pg",
-          "paying guest",
-          "rental house",
-          "to let",
-          "1 bhk",
-          "2 bhk",
-          "apartment",
-          "flat rent",
-          "room rent"
-
-        ];
-
-        for (const keyword of keywords) {
-
-          try {
-
-            const googleURL =
-              `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=${encodeURIComponent(keyword)}&key=${apiKey}`;
-
-            const googleResponse =
-              await axios.get(googleURL);
-
-            console.log(
-              `Google Search: ${keyword}`,
-              googleResponse.data.status
-            );
-
-            if (
-
-              googleResponse.data.status === "OK"
-
-              &&
-
-              googleResponse.data.results
-
-            ) {
-
-              /*
-              =========================================
-              GET FULL DETAILS & ALL PHOTOS
-              =========================================
-              */
-
-              const results =
-                await Promise.all(
-
-                  googleResponse.data.results.map(async (place) => {
-
-                    /*
-                    =========================================
-                    GET FULL DETAILS
-                    =========================================
-                    */
-
-                    const details =
-                      await getGooglePlaceDetails(
-                        place.place_id,
-                        apiKey
-                      );
-
-                    /*
-                    =========================================
-                    PHONE
-                    =========================================
-                    */
-
-                    const phone =
-                      details.formatted_phone_number || "";
-
-                    /*
-                    =========================================
-                    ALL GOOGLE PHOTOS
-                    =========================================
-                    */
-
-                    let allPhotos = [];
-
-                    if (
-                      details.photos &&
-                      Array.isArray(details.photos)
-                    ) {
-
-                      allPhotos = details.photos.map(
-                        (photo) => {
-
-                          return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${photo.photo_reference}&key=${apiKey}`;
-
-                        }
-                      );
-
-                    }
-
-                    /*
-                    =========================================
-                    DEBUG LOG
-                    =========================================
-                    */
-
-                    console.log(
-                      `${place.name} - Photos: ${allPhotos.length}`
-                    );
-
-                    return {
-
-                      id:
-                        `google_${place.place_id}`,
-
-                      place_id:
-                        place.place_id,
-
-                      pg_name:
-                        place.name,
-
-                      name:
-                        place.name,
-
-                      address:
-                        place.vicinity,
-
-                      latitude:
-                        place.geometry?.location?.lat,
-
-                      longitude:
-                        place.geometry?.location?.lng,
-
-                      rating:
-                        place.rating || 0,
-
-                      distance:
-                        null,
-
-                      phone:
-                        phone,
-
-                      source:
-                        "google",
-
-                      property_type:
-                        keyword,
-
-                      /*
-                      =========================================
-                      MAIN IMAGE
-                      =========================================
-                      */
-
-                      image:
-                        allPhotos.length > 0
-                          ? allPhotos[0]
-                          : "https://via.placeholder.com/400x250?text=Nearby+Property",
-
-                      /*
-                      =========================================
-                      ALL PHOTOS
-                      =========================================
-                      */
-
-                      photos:
-                        allPhotos,
-
-                      maps_url:
-                        `https://www.google.com/maps/search/?api=1&query=google&query_place_id=${place.place_id}`
-
-                    };
-
-                  })
-
-                );
-
-              googleProperties.push(...results);
-
-            }
-
-          } catch (keywordError) {
-
-            console.log(
-              "Keyword Search Error:",
-              keyword,
-              keywordError.message
-            );
-
-          }
-
-        }
-
-      } catch (googleError) {
-
-        console.log(
-          "Google Maps Error:",
-          googleError.message
-        );
-
-      }
-
-    } else {
-
-      console.log(
-        "GOOGLE_MAPS_API_KEY missing"
-      );
+      });
 
     }
 
     /*
     =========================================
-    MERGE ALL RESULTS
+    GOOGLE TEXT SEARCH
     =========================================
     */
 
-    const allResults = [
+    const googleURL =
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${apiKey}`;
 
-      ...formattedWebsitePGs,
-      ...googleProperties
+    const googleResponse =
+      await axios.get(googleURL);
 
-    ];
+    console.log(
+      "Google Search Status:",
+      googleResponse.data.status
+    );
+
+    /*
+    =========================================
+    RESULTS
+    =========================================
+    */
+
+    const places =
+      googleResponse.data.results || [];
+
+    /*
+    =========================================
+    FORMAT RESULTS
+    =========================================
+    */
+
+    const properties =
+      await Promise.all(
+
+        places.map(async (place) => {
+
+          /*
+          =========================================
+          PLACE DETAILS
+          =========================================
+          */
+
+          const details =
+            await getGooglePlaceDetails(
+              place.place_id,
+              apiKey
+            );
+
+          /*
+          =========================================
+          PHONE
+          =========================================
+          */
+
+          const phone =
+            details.formatted_phone_number || "";
+
+          /*
+          =========================================
+          ALL PHOTOS
+          =========================================
+          */
+
+          let allPhotos = [];
+
+          if (
+            details.photos &&
+            Array.isArray(details.photos)
+          ) {
+
+            allPhotos =
+              details.photos.map((photo) => {
+
+                return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${photo.photo_reference}&key=${apiKey}`;
+
+              });
+
+          }
+
+          /*
+          =========================================
+          RETURN PROPERTY
+          =========================================
+          */
+
+          return {
+
+            id:
+              `google_${place.place_id}`,
+
+            place_id:
+              place.place_id,
+
+            pg_name:
+              place.name,
+
+            name:
+              place.name,
+
+            address:
+              place.formatted_address,
+
+            latitude:
+              place.geometry?.location?.lat,
+
+            longitude:
+              place.geometry?.location?.lng,
+
+            rating:
+              place.rating || 0,
+
+            phone:
+              phone,
+
+            source:
+              "google",
+
+            property_type:
+              query,
+
+            /*
+            =========================================
+            MAIN IMAGE
+            =========================================
+            */
+
+            image:
+              allPhotos.length > 0
+                ? allPhotos[0]
+                : "https://via.placeholder.com/400x250?text=Property",
+
+            /*
+            =========================================
+            ALL PHOTOS
+            =========================================
+            */
+
+            photos:
+              allPhotos,
+
+            maps_url:
+              `https://www.google.com/maps/search/?api=1&query_place_id=${place.place_id}`
+
+          };
+
+        })
+
+      );
 
     /*
     =========================================
@@ -458,7 +282,7 @@ router.get("/nearby", async (req, res) => {
 
     const seen = new Set();
 
-    allResults.forEach((property) => {
+    properties.forEach((property) => {
 
       const uniqueKey =
 
@@ -486,12 +310,6 @@ router.get("/nearby", async (req, res) => {
 
       success: true,
 
-      website_count:
-        formattedWebsitePGs.length,
-
-      google_count:
-        googleProperties.length,
-
       total:
         uniqueProperties.length,
 
@@ -500,32 +318,23 @@ router.get("/nearby", async (req, res) => {
 
     });
 
-  } catch (err) {
+  } catch (error) {
 
     console.log(
-      "Nearby Property Error:",
-      err
+      "Google Search Error:",
+      error
     );
 
     res.status(500).json({
 
       success: false,
-
-      message:
-        "Internal Server Error"
+      message: "Internal Server Error"
 
     });
 
   }
 
-});
-
-/*
-=========================================
-ACCEPT GOOGLE PROPERTY
-=========================================
-*/
-
+});  
 router.post("/accept-google-property", async (req, res) => {
 
   try {
