@@ -455,6 +455,11 @@ ACCEPT GOOGLE PROPERTY
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
@@ -703,12 +708,11 @@ router.post("/accept-google-property", async (req, res) => {
         area,
         status,
         description,
-        photos,
-        approved_at
+        photos
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
 
       [
@@ -737,7 +741,13 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.address || "",
 
-        "active",
+        /*
+        =========================================
+        IMPORTANT
+        =========================================
+        */
+
+        "pending",
 
         "Imported from Google Maps",
 
@@ -763,8 +773,11 @@ router.post("/accept-google-property", async (req, res) => {
       owner_id:
         ownerId,
 
+      status:
+        "pending",
+
       message:
-        "Property Stored Successfully"
+        "Property Added To Pending Approval"
 
     });
 
@@ -785,5 +798,7 @@ router.post("/accept-google-property", async (req, res) => {
   }
 
 });
+
+module.exports = router;
 
 module.exports = router;
