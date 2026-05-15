@@ -435,4 +435,164 @@ router.get("/nearby", async (req, res) => {
 
 });
 
+
+
+
+
+
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
+
+router.post("/accept-google-property", async (req, res) => {
+
+  try {
+
+    const {
+      property
+    } = req.body;
+
+    if (!property) {
+
+      return res.status(400).json({
+
+        success: false,
+        message: "Property data required"
+
+      });
+
+    }
+
+    /*
+    =========================================
+    CHECK ALREADY EXISTS
+    =========================================
+    */
+
+    const [existing] = await db.query(
+
+      `
+      SELECT id FROM pgs
+      WHERE pg_name = ?
+      AND address = ?
+      LIMIT 1
+      `,
+
+      [
+        property.pg_name,
+        property.address
+      ]
+
+    );
+
+    if (existing.length > 0) {
+
+      return res.json({
+
+        success: true,
+        message: "Already Stored"
+
+      });
+
+    }
+
+    /*
+    =========================================
+    STORE PROPERTY
+    =========================================
+    */
+
+    await db.query(
+
+      `
+      INSERT INTO pgs
+      (
+
+        pg_name,
+        address,
+        location,
+        latitude,
+        longitude,
+        rating,
+        contact_phone,
+        property_type,
+        pg_category,
+        photos,
+        image,
+        nearby_place,
+        status,
+        city,
+        area,
+        description
+
+      )
+
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+
+      [
+
+        property.pg_name || property.name,
+
+        property.address || "",
+
+        property.address || "",
+
+        property.latitude || null,
+
+        property.longitude || null,
+
+        property.rating || 0,
+
+        property.phone || "",
+
+        property.property_type || "pg",
+
+        "pg",
+
+        JSON.stringify(property.photos || []),
+
+        property.image || "",
+
+        property.address || "",
+
+        "active",
+
+        "Bengaluru",
+
+        property.address || "",
+
+        `Imported from Google Maps`
+
+      ]
+
+    );
+
+    res.json({
+
+      success: true,
+      message: "Property Stored Successfully"
+
+    });
+
+  } catch (error) {
+
+    console.log(
+      "Accept Property Error:",
+      error
+    );
+
+    res.status(500).json({
+
+      success: false,
+      message: "Internal Server Error"
+
+    });
+
+  }
+
+});
+
 module.exports = router;
