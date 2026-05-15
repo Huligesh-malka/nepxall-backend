@@ -460,6 +460,11 @@ ACCEPT GOOGLE PROPERTY
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
@@ -536,12 +541,6 @@ router.post("/accept-google-property", async (req, res) => {
 
     if (property.phone) {
 
-      /*
-      =========================================
-      CHECK EXISTING USER
-      =========================================
-      */
-
       const [existingUser] = await db.query(
 
         `
@@ -557,7 +556,7 @@ router.post("/accept-google-property", async (req, res) => {
 
       /*
       =========================================
-      USER EXISTS
+      EXISTING OWNER
       =========================================
       */
 
@@ -567,13 +566,13 @@ router.post("/accept-google-property", async (req, res) => {
 
       }
 
-      else {
+      /*
+      =========================================
+      CREATE OWNER
+      =========================================
+      */
 
-        /*
-        =========================================
-        CREATE OWNER USER
-        =========================================
-        */
+      else {
 
         const [newUser] = await db.query(
 
@@ -628,7 +627,39 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    DETECT CATEGORY
+    DETECT PG TYPE ENUM
+    =========================================
+    */
+
+    let pgType = "boys";
+
+    if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("girls")
+
+    ) {
+
+      pgType = "girls";
+
+    }
+
+    else if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("coliving")
+
+    ) {
+
+      pgType = "coliving";
+
+    }
+
+    /*
+    =========================================
+    DETECT CATEGORY ENUM
     =========================================
     */
 
@@ -702,6 +733,7 @@ router.post("/accept-google-property", async (req, res) => {
         longitude,
         rating,
         contact_phone,
+        pg_type,
         pg_category,
         nearby_place,
         city,
@@ -712,7 +744,7 @@ router.post("/accept-google-property", async (req, res) => {
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
 
       [
@@ -733,6 +765,20 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.phone || "",
 
+        /*
+        =========================================
+        ENUM PG TYPE
+        =========================================
+        */
+
+        pgType,
+
+        /*
+        =========================================
+        ENUM CATEGORY
+        =========================================
+        */
+
         pgCategory,
 
         property.address || "",
@@ -743,7 +789,7 @@ router.post("/accept-google-property", async (req, res) => {
 
         /*
         =========================================
-        IMPORTANT
+        ENUM STATUS
         =========================================
         */
 
@@ -799,6 +845,6 @@ router.post("/accept-google-property", async (req, res) => {
 
 });
 
-module.exports = router;
+
 
 module.exports = router;
