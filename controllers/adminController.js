@@ -296,71 +296,291 @@ exports.updatePGField = async (req, res) => {
 
     console.log("Updating field:", field, "Value:", value);
 
-    // 🔒 ALLOW ALL FIELDS - COMPLETE LIST
+    // 🔒 COMPLETE ALLOWED FIELDS LIST - FULL SUPPORT FOR PG, COLIVING, TO LET
     const allowedFields = [
-      // Basic Info
-      "pg_name", "pg_category", "pg_type",
-      "city", "area", "address", "landmark", "pincode", "state", "country",
-      "latitude", "longitude", "road",
-      
-      // Contact Info
-      "contact_person", "contact_phone", "contact_email",
-      
-      // Pricing Fields
-      "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
-      "single_room", "double_room",
-      "co_living_single_room", "co_living_double_room",
-      "coliving_three_sharing", "coliving_four_sharing",
-      "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
-      
-      // Financial
-      "deposit_amount", "maintenance_amount", "rent_amount",
-      
-      // BHK Details
-      "bhk_type", "furnishing_type",
-      "bedrooms_1bhk", "bathrooms_1bhk",
-      "bedrooms_2bhk", "bathrooms_2bhk",
-      "bedrooms_3bhk", "bathrooms_3bhk",
-      "bedrooms_4bhk", "bathrooms_4bhk",
-      
-      // Minimum Stay
-      "min_stay_available", "min_stay_days", "min_stay_months",
-      "lock_in_period", "notice_period",
-      
-      // Facilities & Amenities
-      "food_available", "food_type", "meals_per_day",
-      "ac_available", "wifi_available", "tv",
-      "parking_available", "bike_parking", 
-      "laundry_available", "washing_machine", "refrigerator", 
-      "microwave", "geyser", "power_backup", "lift_elevator",
-      "cctv", "security_guard", "gym", "housekeeping", 
-      "water_purifier", "fire_safety", "study_room", 
-      "common_tv_lounge", "balcony_open_space", "water_24x7", "water_type",
-      
-      // Room Furnishings
-      "cupboard_available", "table_chair_available", "dining_table_available",
-      "attached_bathroom", "balcony_available", "wall_mounted_clothes_hook",
-      "bed_with_mattress", "fan_light", "kitchen_room",
-      
-      // Co-living Inclusions
-      "co_living_fully_furnished", "co_living_food_included",
-      "co_living_wifi_included", "co_living_housekeeping",
-      "co_living_power_backup", "co_living_maintenance",
-      
-      // Rules & Restrictions
-      "visitor_allowed", "visitor_time_restricted", "visitors_allowed_till",
-      "couple_allowed", "family_allowed", "smoking_allowed",
-      "drinking_allowed", "pets_allowed", "late_night_entry_allowed",
-      "entry_curfew_time", "outside_food_allowed", "parties_allowed",
-      "loud_music_restricted", "agreement_mandatory", "id_proof_mandatory",
-      "office_going_only", "students_only", "boys_only", "girls_only",
-      "co_living_allowed", "subletting_allowed",
-      
-      // Room Counts
-      "total_rooms", "available_rooms",
-      
-      // Description & Status
-      "description", "status"
+
+      /*
+      =========================================
+      BASIC INFO
+      =========================================
+      */
+
+      "pg_name",
+      "pg_code",
+      "pg_category",
+      "pg_type",
+      "status",
+      "description",
+
+      /*
+      =========================================
+      LOCATION
+      =========================================
+      */
+
+      "location",
+      "address",
+      "city",
+      "area",
+      "road",
+      "landmark",
+      "pincode",
+      "state",
+      "country",
+      "latitude",
+      "longitude",
+
+      /*
+      =========================================
+      CONTACT
+      =========================================
+      */
+
+      "contact_person",
+      "contact_phone",
+      "contact_email",
+
+      /*
+      =========================================
+      RENT & PRICE
+      =========================================
+      */
+
+      "rent_amount",
+      "deposit_amount",
+      "maintenance_amount",
+      "brokerage_amount",
+
+      /*
+      =========================================
+      NORMAL PG PRICES
+      =========================================
+      */
+
+      "single_sharing",
+      "double_sharing",
+      "triple_sharing",
+      "four_sharing",
+
+      "single_room",
+      "double_room",
+      "triple_room",
+
+      /*
+      =========================================
+      COLIVING PRICES
+      =========================================
+      */
+
+      "co_living_single_room",
+      "co_living_double_room",
+      "coliving_three_sharing",
+      "coliving_four_sharing",
+
+      /*
+      =========================================
+      TOLET / BHK
+      =========================================
+      */
+
+      "bhk_type",
+      "furnishing_type",
+
+      "price_1bhk",
+      "price_2bhk",
+      "price_3bhk",
+      "price_4bhk",
+
+      "bedrooms_1bhk",
+      "bathrooms_1bhk",
+
+      "bedrooms_2bhk",
+      "bathrooms_2bhk",
+
+      "bedrooms_3bhk",
+      "bathrooms_3bhk",
+
+      "bedrooms_4bhk",
+      "bathrooms_4bhk",
+
+      /*
+      =========================================
+      MINIMUM STAY
+      =========================================
+      */
+
+      "min_stay_available",
+      "min_stay_days",
+      "min_stay_months",
+      "lock_in_period",
+      "notice_period",
+
+      /*
+      =========================================
+      FOOD & FACILITIES
+      =========================================
+      */
+
+      "food_available",
+      "food_type",
+      "meals_per_day",
+
+      "ac_available",
+      "wifi_available",
+      "tv",
+
+      "parking_available",
+      "bike_parking",
+
+      "laundry_available",
+      "washing_machine",
+
+      "refrigerator",
+      "microwave",
+      "geyser",
+
+      "power_backup",
+      "lift_elevator",
+
+      "cctv",
+      "security_guard",
+
+      "gym",
+      "housekeeping",
+
+      "water_purifier",
+      "fire_safety",
+
+      "study_room",
+      "common_tv_lounge",
+
+      "balcony_open_space",
+
+      "water_24x7",
+      "water_type",
+
+      /*
+      =========================================
+      ROOM FEATURES
+      =========================================
+      */
+
+      "cupboard_available",
+      "table_chair_available",
+      "dining_table_available",
+
+      "attached_bathroom",
+      "balcony_available",
+
+      "wall_mounted_clothes_hook",
+
+      "bed_with_mattress",
+      "fan_light",
+
+      "kitchen_room",
+
+      /*
+      =========================================
+      COLIVING FEATURES
+      =========================================
+      */
+
+      "co_living_fully_furnished",
+      "co_living_food_included",
+      "co_living_wifi_included",
+      "co_living_housekeeping",
+      "co_living_power_backup",
+      "co_living_maintenance",
+
+      /*
+      =========================================
+      RULES
+      =========================================
+      */
+
+      "visitor_allowed",
+      "visitor_time_restricted",
+      "visitors_allowed_till",
+
+      "couple_allowed",
+      "family_allowed",
+
+      "smoking_allowed",
+      "drinking_allowed",
+
+      "pets_allowed",
+
+      "late_night_entry_allowed",
+      "entry_curfew_time",
+
+      "outside_food_allowed",
+      "parties_allowed",
+
+      "loud_music_restricted",
+
+      "agreement_mandatory",
+      "id_proof_mandatory",
+
+      "office_going_only",
+      "students_only",
+
+      "boys_only",
+      "girls_only",
+
+      "co_living_allowed",
+
+      "subletting_allowed",
+
+      /*
+      =========================================
+      ROOM COUNTS
+      =========================================
+      */
+
+      "total_rooms",
+      "available_rooms",
+
+      /*
+      =========================================
+      NEARBY PLACES
+      =========================================
+      */
+
+      "nearby_college",
+      "nearby_school",
+      "nearby_it_park",
+      "nearby_office_hub",
+
+      "nearby_metro",
+      "nearby_bus_stop",
+      "nearby_railway_station",
+
+      "distance_main_road",
+
+      "nearby_hospital",
+      "nearby_clinic",
+      "nearby_pharmacy",
+
+      "nearby_supermarket",
+      "nearby_grocery_store",
+
+      "nearby_restaurant",
+      "nearby_mall",
+
+      "nearby_bank",
+      "nearby_atm",
+
+      "nearby_post_office",
+
+      "nearby_gym",
+      "nearby_park",
+
+      "nearby_temple",
+      "nearby_mosque",
+      "nearby_church",
+
+      "nearby_police_station"
+
     ];
 
     if (!allowedFields.includes(field)) {
@@ -411,14 +631,16 @@ exports.updatePGField = async (req, res) => {
     // Convert numeric fields
     const numberFields = [
       "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
-      "single_room", "double_room", "coliving_three_sharing", "coliving_four_sharing",
+      "single_room", "double_room", "triple_room",
+      "coliving_three_sharing", "coliving_four_sharing",
       "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
       "co_living_single_room", "co_living_double_room",
-      "deposit_amount", "maintenance_amount", "rent_amount",
+      "deposit_amount", "maintenance_amount", "rent_amount", "brokerage_amount",
       "bedrooms_1bhk", "bathrooms_1bhk", "bedrooms_2bhk", "bathrooms_2bhk",
       "bedrooms_3bhk", "bathrooms_3bhk", "bedrooms_4bhk", "bathrooms_4bhk",
       "min_stay_days", "min_stay_months", "lock_in_period", "notice_period",
-      "total_rooms", "available_rooms", "meals_per_day"
+      "total_rooms", "available_rooms", "meals_per_day",
+      "latitude", "longitude"
     ];
 
     if (numberFields.includes(field)) {
@@ -439,7 +661,8 @@ exports.updatePGField = async (req, res) => {
     // 🔥 AUTO UPDATE RENT_AMOUNT if pricing fields changed
     const pricingFields = [
       "single_sharing", "double_sharing", "triple_sharing", "four_sharing",
-      "single_room", "double_room", "coliving_three_sharing", "coliving_four_sharing",
+      "single_room", "double_room", "triple_room",
+      "coliving_three_sharing", "coliving_four_sharing",
       "price_1bhk", "price_2bhk", "price_3bhk", "price_4bhk",
       "co_living_single_room", "co_living_double_room"
     ];
@@ -456,7 +679,8 @@ exports.updatePGField = async (req, res) => {
         const prices = [];
         const allPriceFields = [
           pg.single_sharing, pg.double_sharing, pg.triple_sharing, pg.four_sharing,
-          pg.single_room, pg.double_room, pg.coliving_three_sharing, pg.coliving_four_sharing,
+          pg.single_room, pg.double_room, pg.triple_room,
+          pg.coliving_three_sharing, pg.coliving_four_sharing,
           pg.price_1bhk, pg.price_2bhk, pg.price_3bhk, pg.price_4bhk,
           pg.co_living_single_room, pg.co_living_double_room
         ];
@@ -490,8 +714,6 @@ exports.updatePGField = async (req, res) => {
     });
   }
 };
-
-
 
 
 
