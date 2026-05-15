@@ -465,6 +465,11 @@ ACCEPT GOOGLE PROPERTY
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
@@ -533,13 +538,49 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
+    FORMAT PHONE NUMBER
+    =========================================
+    */
+
+    let formattedPhone = "";
+
+    if (property.phone) {
+
+      /*
+      REMOVE SPACES
+      */
+
+      formattedPhone =
+        property.phone.replace(/\s+/g, "");
+
+      /*
+      REMOVE FIRST ZERO
+      */
+
+      if (formattedPhone.startsWith("0")) {
+
+        formattedPhone =
+          formattedPhone.substring(1);
+
+      }
+
+    }
+
+    /*
+    =========================================
     AUTO CREATE / FIND OWNER
     =========================================
     */
 
     let ownerId = null;
 
-    if (property.phone) {
+    if (formattedPhone) {
+
+      /*
+      =========================================
+      CHECK EXISTING USER
+      =========================================
+      */
 
       const [existingUser] = await db.query(
 
@@ -550,7 +591,7 @@ router.post("/accept-google-property", async (req, res) => {
         LIMIT 1
         `,
 
-        [property.phone]
+        [formattedPhone]
 
       );
 
@@ -599,7 +640,7 @@ router.post("/accept-google-property", async (req, res) => {
 
             property.pg_name || property.name,
 
-            property.phone || "",
+            formattedPhone,
 
             "owner",
 
@@ -763,7 +804,13 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.rating || 0,
 
-        property.phone || "",
+        /*
+        =========================================
+        CLEAN PHONE
+        =========================================
+        */
+
+        formattedPhone,
 
         /*
         =========================================
@@ -844,7 +891,5 @@ router.post("/accept-google-property", async (req, res) => {
   }
 
 });
-
-
 
 module.exports = router;
