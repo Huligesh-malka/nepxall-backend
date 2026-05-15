@@ -7,7 +7,7 @@ const db = require("../db");
 
 /*
 ==================================================
- TEST ROUTE
+TEST ROUTE
 ==================================================
 */
 
@@ -22,7 +22,7 @@ router.get("/send-booking-whatsapp", (req, res) => {
 
 /*
 ==================================================
- SEND BOOKING WHATSAPP
+SEND BOOKING WHATSAPP
 ==================================================
 */
 
@@ -37,8 +37,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     const {
       ownerId,
-      userName,
-      userPhone,
+      propertyId,
       propertyName,
       area,
       rent
@@ -61,7 +60,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    GET OWNER FROM USERS TABLE
+    GET OWNER
     ==========================================
     */
 
@@ -100,7 +99,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    CLEAN PHONE NUMBER
+    CLEAN PHONE
     ==========================================
     */
 
@@ -110,7 +109,9 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       ownerPhone.startsWith("91") &&
       ownerPhone.length > 10
     ) {
+
       ownerPhone = ownerPhone.substring(2);
+
     }
 
     console.log("📞 FINAL PHONE:", ownerPhone);
@@ -126,9 +127,6 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     const WHATSAPP_NUMBER =
       process.env.MSG91_WHATSAPP_NUMBER;
-
-    console.log("AUTH EXISTS:", !!AUTH_KEY);
-    console.log("WHATSAPP NUMBER:", WHATSAPP_NUMBER);
 
     if (!AUTH_KEY) {
 
@@ -150,7 +148,16 @@ router.post("/send-booking-whatsapp", async (req, res) => {
 
     /*
     ==========================================
-    SEND TEMPLATE WHATSAPP
+    OWNER DASHBOARD LINK
+    ==========================================
+    */
+
+    const bookingLink =
+      `https://nepxall.com/owner/bookings/${propertyId}`;
+
+    /*
+    ==========================================
+    SEND WHATSAPP TEMPLATE
     ==========================================
     */
 
@@ -159,6 +166,7 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
 
       {
+
         integrated_number: WHATSAPP_NUMBER,
 
         content_type: "template",
@@ -179,45 +187,43 @@ router.post("/send-booking-whatsapp", async (req, res) => {
             },
 
             to_and_components: [
+
               {
 
                 to: [`91${ownerPhone}`],
 
                 components: {
 
+                  /*
+                  ===================================
+                  TEMPLATE VARIABLES
+                  ===================================
+                  */
+
                   body_1: {
-                    type: "text",
-                    value: owner.name || "Owner"
-                  },
-
-                  body_2: {
-                    type: "text",
-                    value: userName || "Customer"
-                  },
-
-                  body_3: {
-                    type: "text",
-                    value: userPhone || "No Phone"
-                  },
-
-                  body_4: {
                     type: "text",
                     value: propertyName || "Property"
                   },
 
-                  body_5: {
+                  body_2: {
                     type: "text",
                     value: area || "Area"
                   },
 
-                  body_6: {
+                  body_3: {
                     type: "text",
                     value: String(rent || "0")
+                  },
+
+                  body_4: {
+                    type: "text",
+                    value: bookingLink
                   }
 
                 }
 
               }
+
             ]
 
           }
@@ -227,11 +233,13 @@ router.post("/send-booking-whatsapp", async (req, res) => {
       },
 
       {
+
         headers: {
           accept: "application/json",
           authkey: AUTH_KEY,
           "content-type": "application/json"
         }
+
       }
 
     );
@@ -242,9 +250,11 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     console.log("=================================");
 
     return res.status(200).json({
+
       success: true,
       message: "WhatsApp sent successfully",
       data: response.data
+
     });
 
   } catch (error) {
@@ -260,11 +270,14 @@ router.post("/send-booking-whatsapp", async (req, res) => {
     );
 
     return res.status(500).json({
+
       success: false,
+
       message:
         error.response?.data ||
         error.message ||
         "Unknown error"
+
     });
 
   }
