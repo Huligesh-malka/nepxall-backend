@@ -445,14 +445,17 @@ router.get("/nearby", async (req, res) => {
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
   try {
 
-    const {
-      property
-    } = req.body;
+    const { property } = req.body;
 
     if (!property) {
 
@@ -467,22 +470,23 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    CHECK ALREADY EXISTS
+    CHECK EXISTING PROPERTY
     =========================================
     */
 
     const [existing] = await db.query(
 
       `
-      SELECT id FROM pgs
+      SELECT id
+      FROM pgs
       WHERE pg_name = ?
       AND address = ?
       LIMIT 1
       `,
 
       [
-        property.pg_name,
-        property.address
+        property.pg_name || property.name,
+        property.address || ""
       ]
 
     );
@@ -492,7 +496,7 @@ router.post("/accept-google-property", async (req, res) => {
       return res.json({
 
         success: true,
-        message: "Already Stored"
+        message: "Property Already Stored"
 
       });
 
@@ -500,7 +504,21 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    STORE PROPERTY
+    PHOTOS ARRAY
+    =========================================
+    */
+
+    let photos = [];
+
+    if (property.image) {
+
+      photos.push(property.image);
+
+    }
+
+    /*
+    =========================================
+    INSERT PROPERTY
     =========================================
     */
 
@@ -511,25 +529,24 @@ router.post("/accept-google-property", async (req, res) => {
       (
 
         pg_name,
-        address,
         location,
+        address,
         latitude,
         longitude,
         rating,
         contact_phone,
-        property_type,
         pg_category,
-        photos,
-        image,
         nearby_place,
-        status,
         city,
         area,
-        description
+        status,
+        description,
+        photos,
+        approved_at
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
 
       [
@@ -548,27 +565,29 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.phone || "",
 
-        property.property_type || "pg",
-
         "pg",
 
-        JSON.stringify(property.photos || []),
-
-        property.image || "",
-
         property.address || "",
-
-        "active",
 
         "Bengaluru",
 
         property.address || "",
 
-        `Imported from Google Maps`
+        "active",
+
+        "Imported from Google Maps",
+
+        JSON.stringify(photos)
 
       ]
 
     );
+
+    /*
+    =========================================
+    SUCCESS
+    =========================================
+    */
 
     res.json({
 
@@ -588,7 +607,6 @@ router.post("/accept-google-property", async (req, res) => {
 
       success: false,
       message: "Internal Server Error"
-
     });
 
   }
