@@ -39,6 +39,40 @@ const getGooglePlacePhone = async (placeId, apiKey) => {
 
 /*
 =========================================
+GET FULL PLACE DETAILS
+=========================================
+*/
+
+const getGooglePlaceDetails = async (
+  placeId,
+  apiKey
+) => {
+
+  try {
+
+    const detailsURL =
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,photos,formatted_phone_number,website,rating,reviews&key=${apiKey}`;
+
+    const response =
+      await axios.get(detailsURL);
+
+    return response.data?.result || {};
+
+  } catch (error) {
+
+    console.log(
+      "Place Details Error:",
+      error.message
+    );
+
+    return {};
+
+  }
+
+};
+
+/*
+=========================================
 GET NEARBY PROPERTIES
 =========================================
 */
@@ -238,7 +272,7 @@ router.get("/nearby", async (req, res) => {
 
               /*
               =========================================
-              GET PHONE NUMBERS & ALL PHOTOS
+              GET FULL DETAILS & ALL PHOTOS
               =========================================
               */
 
@@ -249,15 +283,24 @@ router.get("/nearby", async (req, res) => {
 
                     /*
                     =========================================
-                    FETCH PHONE NUMBER
+                    GET FULL DETAILS
+                    =========================================
+                    */
+
+                    const details =
+                      await getGooglePlaceDetails(
+                        place.place_id,
+                        apiKey
+                      );
+
+                    /*
+                    =========================================
+                    PHONE
                     =========================================
                     */
 
                     const phone =
-                      await getGooglePlacePhone(
-                        place.place_id,
-                        apiKey
-                      );
+                      details.formatted_phone_number || "";
 
                     /*
                     =========================================
@@ -268,19 +311,29 @@ router.get("/nearby", async (req, res) => {
                     let allPhotos = [];
 
                     if (
-                      place.photos &&
-                      Array.isArray(place.photos)
+                      details.photos &&
+                      Array.isArray(details.photos)
                     ) {
 
-                      allPhotos = place.photos.map(
+                      allPhotos = details.photos.map(
                         (photo) => {
 
-                          return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${photo.photo_reference}&key=${apiKey}`;
+                          return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${photo.photo_reference}&key=${apiKey}`;
 
                         }
                       );
 
                     }
+
+                    /*
+                    =========================================
+                    DEBUG LOG
+                    =========================================
+                    */
+
+                    console.log(
+                      `${place.name} - Photos: ${allPhotos.length}`
+                    );
 
                     return {
 
