@@ -450,6 +450,11 @@ ACCEPT GOOGLE PROPERTY
 ACCEPT GOOGLE PROPERTY
 =========================================
 */
+/*
+=========================================
+ACCEPT GOOGLE PROPERTY
+=========================================
+*/
 
 router.post("/accept-google-property", async (req, res) => {
 
@@ -504,7 +509,7 @@ router.post("/accept-google-property", async (req, res) => {
 
     /*
     =========================================
-    PHOTOS ARRAY
+    PHOTOS
     =========================================
     */
 
@@ -513,6 +518,90 @@ router.post("/accept-google-property", async (req, res) => {
     if (property.image) {
 
       photos.push(property.image);
+
+    }
+
+    /*
+    =========================================
+    AUTO DETECT PG TYPE
+    =========================================
+    */
+
+    let pgType = "boys";
+
+    if (
+      property.property_type
+        ?.toLowerCase()
+        .includes("girls")
+    ) {
+
+      pgType = "girls";
+
+    }
+
+    else if (
+      property.property_type
+        ?.toLowerCase()
+        .includes("coliving")
+    ) {
+
+      pgType = "coliving";
+
+    }
+
+    /*
+    =========================================
+    AUTO DETECT CATEGORY
+    =========================================
+    */
+
+    let pgCategory = "pg";
+
+    if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("to let")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("1 bhk")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("2 bhk")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("flat")
+
+      ||
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("apartment")
+
+    ) {
+
+      pgCategory = "to_let";
+
+    }
+
+    else if (
+
+      property.property_type
+        ?.toLowerCase()
+        .includes("coliving")
+
+    ) {
+
+      pgCategory = "coliving";
 
     }
 
@@ -535,6 +624,7 @@ router.post("/accept-google-property", async (req, res) => {
         longitude,
         rating,
         contact_phone,
+        pg_type,
         pg_category,
         nearby_place,
         city,
@@ -546,7 +636,7 @@ router.post("/accept-google-property", async (req, res) => {
 
       )
 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
 
       [
@@ -565,7 +655,9 @@ router.post("/accept-google-property", async (req, res) => {
 
         property.phone || "",
 
-        "pg",
+        pgType,
+
+        pgCategory,
 
         property.address || "",
 
@@ -607,10 +699,13 @@ router.post("/accept-google-property", async (req, res) => {
 
       success: false,
       message: "Internal Server Error"
+
     });
 
   }
 
 });
+
+module.exports = router;
 
 module.exports = router;
