@@ -3,16 +3,17 @@ const { encrypt } = require("../utils/encryption");
 const sendNotification = require("../utils/sendNotification");
 
 //////////////////////////////////////////////////////
-// 🧑 CREATE BOOKING → PRODUCTION SAFE (FINAL FIX)
+// 🧑 CREATE BOOKING → CONTACT OWNER FLOW
 //////////////////////////////////////////////////////
 exports.createBooking = async (req, res) => {
   try {
     const { pgId } = req.params;
-    const { check_in_date, room_type } = req.body;
+    const { room_type } = req.body; // ✅ REMOVED check_in_date
     const userId = req.user.id;
 
-    if (!check_in_date || !room_type) {
-      return res.status(400).json({ message: "Missing required fields" });
+    // ✅ ONLY check room_type
+    if (!room_type) {
+      return res.status(400).json({ message: "Missing room type" });
     }
 
     //////////////////////////////////////////////////////
@@ -102,7 +103,7 @@ exports.createBooking = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////
-    // 🔥 COLIVING CATEGORY (YOUR FIX)
+    // 🔥 COLIVING CATEGORY
     //////////////////////////////////////////////////////
     if (pg.pg_category === "coliving") {
       if (
@@ -165,7 +166,7 @@ exports.createBooking = async (req, res) => {
     const maintenance = pg.maintenance_amount || 0;
 
     //////////////////////////////////////////////////////
-    // 📝 INSERT BOOKING
+    // 📝 INSERT BOOKING WITH AUTO DATE (new Date())
     //////////////////////////////////////////////////////
     const [result] = await db.query(
       `
@@ -181,7 +182,7 @@ exports.createBooking = async (req, res) => {
         user.name,
         user.email,
         user.phone,
-        check_in_date,
+        new Date(), // ✅ AUTO ADD CURRENT DATE
         room_type,
         rent,
         deposit,
@@ -201,8 +202,8 @@ exports.createBooking = async (req, res) => {
       try {
         await sendNotification(
           owner.fcm_token,
-          "New Booking Created",
-          `New booking from ${user.name} for ${room_type}`
+          "New Lead Created 📞",
+          `${user.name} is interested in ${room_type} at ${pg.pg_name}`
         );
       } catch (notifError) {
         console.error("❌ Notification error:", notifError);
@@ -218,7 +219,7 @@ exports.createBooking = async (req, res) => {
       rent,
       deposit,
       maintenance,
-      message: "Booking created successfully"
+      message: "Owner will contact you shortly"
     });
 
   } catch (err) {
@@ -484,15 +485,15 @@ exports.updateBookingStatus = async (req, res) => {
       if (status === "approved") {
         await sendNotification(
           bookingUser.fcm_token,
-          "Booking Approved ✅",
-          "Your booking has been approved by the owner"
+          "Lead Approved ✅",
+          "Owner has accepted your interest. They will contact you soon!"
         );
       }
       if (status === "rejected") {
         await sendNotification(
           bookingUser.fcm_token,
-          "Booking Update 🔄",
-          "Please retry payment or contact owner"
+          "Lead Update 🔄",
+          "Please try another property or contact support"
         );
       }
     }
@@ -500,8 +501,8 @@ exports.updateBookingStatus = async (req, res) => {
     res.json({
       success: true,
       message: status === "rejected"
-        ? "Booking kept approved (user can retry payment)"
-        : "Booking approved"
+        ? "Lead kept for follow up"
+        : "Lead approved"
     });
 
   } catch (err) {
@@ -774,7 +775,7 @@ exports.requestRefund = async (req, res) => {
         user_approval
       )
       VALUES
-      (?,?,?,?,?,'FULL','pending','accepted')`,
+      (?,?,?,?,?,?,'pending','accepted')`,
       [
         bookingId,
         userId,
