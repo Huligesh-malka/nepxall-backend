@@ -428,7 +428,7 @@ router.post("/accept-google-property", async (req, res) => {
       */
 
       formattedPhone =
-        property.phone.replace(/\s+/g, "");
+        property.phone.replace(/\D/g, "");
 
       /*
       REMOVE FIRST ZERO
