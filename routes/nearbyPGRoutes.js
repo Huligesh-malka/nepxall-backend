@@ -384,6 +384,7 @@ router.post("/accept-google-property", async (req, res) => {
       return res.json({
 
         success: true,
+        property_id: existing[0].id,
         message: "Property Already Stored"
 
       });
@@ -839,11 +840,13 @@ router.post(
 
       );
 
+      // ========== FIXED: Return property_id even when already exists ==========
       if (existing.length > 0) {
 
         return res.json({
 
           success: true,
+          property_id: existing[0].id,
           message: "Already Imported"
 
         });
