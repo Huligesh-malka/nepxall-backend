@@ -894,7 +894,6 @@ router.post(
           facebook_url,
           pg_category,
           pg_type,
-          owner_name,
           contact_phone
 
         )
