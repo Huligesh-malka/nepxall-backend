@@ -627,7 +627,7 @@ exports.updatePGField = async (req, res) => {
         finalValue = finalValue ? 1 : 0;
       }
     }
-
+    
     // Convert numeric fields
     const numberFields = [
       "single_sharing", "double_sharing", "triple_sharing", "four_sharing",

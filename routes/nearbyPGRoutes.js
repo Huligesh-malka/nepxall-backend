@@ -790,4 +790,168 @@ router.post("/accept-google-property", async (req, res) => {
 
 });
 
+
+
+
+
+
+/*
+=========================================
+ACCEPT FACEBOOK PROPERTY
+=========================================
+*/
+
+router.post(
+  "/accept-facebook-property",
+  async (req, res) => {
+
+    try {
+
+      const { property } = req.body;
+
+      if (!property) {
+
+        return res.status(400).json({
+
+          success: false,
+          message: "Property required"
+
+        });
+
+      }
+
+      /*
+      =========================================
+      CHECK EXISTS
+      =========================================
+      */
+
+      const [existing] = await db.query(
+
+        `
+        SELECT id
+        FROM pgs
+        WHERE facebook_url = ?
+        LIMIT 1
+        `,
+
+        [property.facebook_url]
+
+      );
+
+      if (existing.length > 0) {
+
+        return res.json({
+
+          success: true,
+          message: "Already Imported"
+
+        });
+
+      }
+
+      /*
+      =========================================
+      PHOTOS
+      =========================================
+      */
+
+      let photos = [];
+
+      if (
+        property.photos &&
+        Array.isArray(property.photos)
+      ) {
+
+        photos = property.photos;
+
+      }
+
+      /*
+      =========================================
+      SAVE PROPERTY
+      =========================================
+      */
+
+      const [saved] = await db.query(
+
+        `
+        INSERT INTO pgs
+        (
+
+          pg_code,
+          pg_name,
+          address,
+          city,
+          area,
+          description,
+          photos,
+          status,
+          facebook_url,
+          pg_category
+
+        )
+
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+
+        [
+
+          `FB${Date.now()}`,
+
+          property.pg_name,
+
+          property.address || "",
+
+          "Bengaluru",
+
+          property.area || "",
+
+          property.description || "",
+
+          JSON.stringify(photos),
+
+          "pending",
+
+          property.facebook_url,
+
+          property.pg_category || "to_let"
+
+        ]
+
+      );
+
+      /*
+      =========================================
+      RESPONSE
+      =========================================
+      */
+
+      res.json({
+
+        success: true,
+        property_id: saved.insertId,
+        message: "Facebook Property Imported"
+
+      });
+
+    } catch (error) {
+
+      console.log(
+        "Facebook Import Error:",
+        error
+      );
+
+      res.status(500).json({
+
+        success: false,
+        message: "Internal Server Error"
+
+      });
+
+    }
+
+  }
+);
+
 module.exports = router;
