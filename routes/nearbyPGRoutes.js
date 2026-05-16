@@ -798,7 +798,7 @@ router.post("/accept-google-property", async (req, res) => {
 
 /*
 =========================================
-ACCEPT FACEBOOK PROPERTY
+ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
 =========================================
 */
 
@@ -872,7 +872,7 @@ router.post(
 
       /*
       =========================================
-      SAVE PROPERTY
+      SAVE PROPERTY - UPDATED WITH ALL REQUIRED FIELDS
       =========================================
       */
 
@@ -884,6 +884,7 @@ router.post(
 
           pg_code,
           pg_name,
+          location,
           address,
           city,
           area,
@@ -891,26 +892,36 @@ router.post(
           photos,
           status,
           facebook_url,
-          pg_category
+          pg_category,
+          pg_type,
+          owner_name,
+          contact_phone
 
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
 
           `FB${Date.now()}`,
 
-          property.pg_name,
+          property.pg_name ||
+            "Facebook Imported Property",
 
-          property.address || "",
+          property.address ||
+            "Bengaluru",
+
+          property.address ||
+            "Bengaluru",
 
           "Bengaluru",
 
-          property.area || "",
+          property.area ||
+            "Whitefield",
 
-          property.description || "",
+          property.description ||
+            "Imported From Facebook",
 
           JSON.stringify(photos),
 
@@ -918,7 +929,14 @@ router.post(
 
           property.facebook_url,
 
-          property.pg_category || "to_let"
+          property.pg_category ||
+            "to_let",
+
+          "boys",
+
+          "Facebook Owner",
+
+          ""
 
         ]
 
