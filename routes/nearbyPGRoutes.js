@@ -811,6 +811,11 @@ ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
 ACCEPT FACEBOOK PROPERTY - FIXED WITH FULL STRUCTURE
 =========================================
 */
+/*
+=========================================
+ACCEPT FACEBOOK PROPERTY - COMPLETE FIXED VERSION
+=========================================
+*/
 
 router.post(
   "/accept-facebook-property",
@@ -850,7 +855,6 @@ router.post(
 
       );
 
-      // Return property_id even when already exists
       if (existing.length > 0) {
 
         return res.json({
@@ -865,7 +869,7 @@ router.post(
 
       /*
       =========================================
-      PHOTOS - Use defaults if empty
+      PHOTOS
       =========================================
       */
 
@@ -881,7 +885,7 @@ router.post(
 
       } else {
 
-        // Default photos if none provided
+        // Default property photos
         photos = [
           "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800",
           "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800",
@@ -892,7 +896,7 @@ router.post(
 
       /*
       =========================================
-      SAVE PROPERTY - MATCHING GOOGLE STRUCTURE
+      INSERT WITHOUT owner_id
       =========================================
       */
 
@@ -902,7 +906,6 @@ router.post(
         INSERT INTO pgs
         (
 
-          owner_id,
           pg_code,
           pg_name,
           location,
@@ -923,26 +926,24 @@ router.post(
 
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
 
-          1, // Default owner_id (admin)
-
           `FB${Date.now()}`,
 
-          property.pg_name || "Facebook Imported Property",
+          property.pg_name || "Facebook Property",
+
+          property.location || "Bengaluru, Karnataka",
 
           property.address || "Bengaluru, Karnataka",
 
-          property.address || "Bengaluru, Karnataka",
+          null,
 
-          null, // latitude (will be updated later)
+          null,
 
-          null, // longitude (will be updated later)
-
-          0, // default rating
+          0,
 
           property.contact_phone || "",
 
@@ -950,7 +951,7 @@ router.post(
 
           property.pg_category || "to_let",
 
-          property.nearby_place || "Facebook",
+          property.nearby_place || "Facebook Import",
 
           property.city || "Bengaluru",
 
@@ -958,7 +959,7 @@ router.post(
 
           "pending",
 
-          property.description || "Imported From Facebook",
+          property.description || "Imported from Facebook Marketplace",
 
           JSON.stringify(photos),
 
@@ -970,7 +971,7 @@ router.post(
 
       /*
       =========================================
-      RESPONSE
+      SUCCESS RESPONSE
       =========================================
       */
 
@@ -978,21 +979,20 @@ router.post(
 
         success: true,
         property_id: saved.insertId,
-        message: "Facebook Property Imported"
+        message: "Facebook Property Imported Successfully",
+        status: "pending"
 
       });
 
     } catch (error) {
 
-      console.log(
-        "Facebook Import Error:",
-        error
-      );
+      console.error("Facebook Import Error:", error);
 
       res.status(500).json({
 
         success: false,
-        message: "Internal Server Error"
+        message: "Internal Server Error",
+        error: error.message
 
       });
 
@@ -1000,5 +1000,7 @@ router.post(
 
   }
 );
+
+
 
 module.exports = router;
