@@ -806,6 +806,11 @@ ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
 ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
 =========================================
 */
+/*
+=========================================
+ACCEPT FACEBOOK PROPERTY - FIXED WITH FULL STRUCTURE
+=========================================
+*/
 
 router.post(
   "/accept-facebook-property",
@@ -845,7 +850,7 @@ router.post(
 
       );
 
-      // ========== FIXED: Return property_id even when already exists ==========
+      // Return property_id even when already exists
       if (existing.length > 0) {
 
         return res.json({
@@ -860,7 +865,7 @@ router.post(
 
       /*
       =========================================
-      PHOTOS
+      PHOTOS - Use defaults if empty
       =========================================
       */
 
@@ -868,16 +873,26 @@ router.post(
 
       if (
         property.photos &&
-        Array.isArray(property.photos)
+        Array.isArray(property.photos) &&
+        property.photos.length > 0
       ) {
 
         photos = property.photos;
+
+      } else {
+
+        // Default photos if none provided
+        photos = [
+          "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800",
+          "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800",
+          "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800"
+        ];
 
       }
 
       /*
       =========================================
-      SAVE PROPERTY - UPDATED WITH ALL REQUIRED FIELDS
+      SAVE PROPERTY - MATCHING GOOGLE STRUCTURE
       =========================================
       */
 
@@ -887,58 +902,67 @@ router.post(
         INSERT INTO pgs
         (
 
+          owner_id,
           pg_code,
           pg_name,
           location,
           address,
+          latitude,
+          longitude,
+          rating,
+          contact_phone,
+          pg_type,
+          pg_category,
+          nearby_place,
           city,
           area,
+          status,
           description,
           photos,
-          status,
-          facebook_url,
-          pg_category,
-          pg_type,
-          contact_phone
+          facebook_url
 
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
 
+          1, // Default owner_id (admin)
+
           `FB${Date.now()}`,
 
-          property.pg_name ||
-            "Facebook Imported Property",
+          property.pg_name || "Facebook Imported Property",
 
-          property.address ||
-            "Bengaluru",
+          property.address || "Bengaluru, Karnataka",
 
-          property.address ||
-            "Bengaluru",
+          property.address || "Bengaluru, Karnataka",
 
-          "Bengaluru",
+          null, // latitude (will be updated later)
 
-          property.area ||
-            "Whitefield",
+          null, // longitude (will be updated later)
 
-          property.description ||
-            "Imported From Facebook",
+          0, // default rating
 
-          JSON.stringify(photos),
+          property.contact_phone || "",
+
+          property.pg_type || "boys",
+
+          property.pg_category || "to_let",
+
+          property.nearby_place || "Facebook",
+
+          property.city || "Bengaluru",
+
+          property.area || "Whitefield",
 
           "pending",
 
-          property.facebook_url,
+          property.description || "Imported From Facebook",
 
-          property.pg_category ||
-            "to_let",
+          JSON.stringify(photos),
 
-          "boys",
-
-          ""
+          property.facebook_url
 
         ]
 
