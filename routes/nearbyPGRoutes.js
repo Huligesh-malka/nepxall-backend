@@ -801,6 +801,11 @@ router.post("/accept-google-property", async (req, res) => {
 ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
 =========================================
 */
+/*
+=========================================
+ACCEPT FACEBOOK PROPERTY - UPDATED WITH FULL FIELDS
+=========================================
+*/
 
 router.post(
   "/accept-facebook-property",
@@ -898,7 +903,7 @@ router.post(
 
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
@@ -932,8 +937,6 @@ router.post(
             "to_let",
 
           "boys",
-
-          "Facebook Owner",
 
           ""
 
